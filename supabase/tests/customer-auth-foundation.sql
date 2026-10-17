@@ -739,9 +739,21 @@ BEGIN
     v_order_challenge_count, v_rate_key_challenge_count,
     v_order_challenge_count < 3, v_rate_key_challenge_count < 10;
 END $$;
-SELECT CASE WHEN public.create_guest_order_access_challenge(
-  :'guest_reference', 'guest@example.invalid', repeat('3', 64), repeat('4', 64)
-) THEN 1 ELSE 1/0 END AS challenge_created;
+DO $$
+DECLARE
+  v_challenge_created boolean;
+BEGIN
+  SELECT public.create_guest_order_access_challenge(
+    current_setting('rfz_test.guest_reference'),
+    current_setting('rfz_test.guest_email'),
+    repeat('3', 64),
+    current_setting('rfz_test.guest_rate_limit_key')
+  ) INTO v_challenge_created;
+
+  IF v_challenge_created IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_CHALLENGE_NOT_CREATED expected=true actual=%', v_challenge_created;
+  END IF;
+END $$;
 SELECT public.consume_guest_order_access_challenge(
   :'guest_reference', 'guest@example.invalid', repeat('3', 64), repeat('5', 64)
 ) AS recovered_order_id \gset
