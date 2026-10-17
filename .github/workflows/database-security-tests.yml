@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - security/authorization-hardening
+      - feature/customer-auth-phase1
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,6 +26,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Run application tests
+        run: npm test
+
+      - name: Run TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run production build
+        run: npm run build
+
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v3
         with:
@@ -33,6 +56,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Check reconciliation Edge Functions
+        run: |
+          deno check supabase/functions/auto-reconciliation/index.ts
+          deno check supabase/functions/create-qrph-payment/index.ts
+          deno check supabase/functions/payment-webhook/index.ts
+          deno check supabase/functions/send-transactional-email/index.ts
 
       - name: Run isolated database security tests
         run: bash scripts/test-github-actions-database-security.sh

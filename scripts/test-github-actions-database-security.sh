@@ -88,6 +88,16 @@ cp "$project_root/supabase/tests/database/privileged-rpc-security.sql" \
   "$test_root/supabase/tests/database/privileged-rpc-security.sql"
 cp "$project_root/supabase/tests/privileged-rpc-security.sql" \
   "$test_root/supabase/tests/privileged-rpc-security.sql"
+cp "$project_root/supabase/tests/customer-auth-foundation.sql" \
+  "$test_root/supabase/tests/customer-auth-foundation.sql"
+cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
+  "$test_root/supabase/tests/reconciliation-atomicity.sql"
+cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
+  "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
+cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
+  "$test_root/supabase/tests/reconciliation-concurrency-assertion.sql"
+cp "$project_root/supabase/tests/reconciliation-concurrency-cleanup.sql" \
+  "$test_root/supabase/tests/reconciliation-concurrency-cleanup.sql"
 
 cd "$test_root"
 echo "Starting isolated Supabase services..."
@@ -111,6 +121,48 @@ echo "Executing database security integration assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/database/privileged-rpc-security.sql
+
+echo "Executing customer authentication foundation assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/customer-auth-foundation.sql
+
+echo "Executing reconciliation atomicity assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/reconciliation-atomicity.sql
+
+echo "Preparing concurrent reconciliation assertion..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/reconciliation-concurrency-setup.sql
+
+concurrency_a="$test_root/reconciliation-concurrency-a.out"
+concurrency_b="$test_root/reconciliation-concurrency-b.out"
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "SELECT * FROM public.finalize_supplier_reconciliation('00000000-0000-0000-0000-000000000205', 'completed', 'auto-reconciliation', NULL);" \
+  >"$concurrency_a" 2>&1 &
+pid_a=$!
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "SELECT * FROM public.finalize_supplier_reconciliation('00000000-0000-0000-0000-000000000205', 'completed', 'auto-reconciliation', NULL);" \
+  >"$concurrency_b" 2>&1 &
+pid_b=$!
+
+wait "$pid_a"
+wait "$pid_b"
+
+if ! grep -Eq 'applied|already-finalized' "$concurrency_a" "$concurrency_b"; then
+  cat "$concurrency_a" "$concurrency_b" >&2
+  echo "ERROR: concurrent calls did not return a finalization outcome." >&2
+  exit 5
+fi
+
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/reconciliation-concurrency-assertion.sql
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/reconciliation-concurrency-cleanup.sql
 
 echo "Reapplying the isolated baseline to verify reset/retry behavior..."
 supabase db reset >/dev/null
