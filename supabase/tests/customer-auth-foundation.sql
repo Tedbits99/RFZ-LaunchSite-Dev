@@ -450,17 +450,64 @@ FROM public.create_order(
   jsonb_build_object('__rfz_order_access_hash', repeat('e', 64)), 'manual'
 ) \gset
 RESET ROLE;
-SELECT CASE WHEN EXISTS (
-  SELECT 1 FROM public.orders o
-  WHERE o.id = :'guest_order_id'::uuid
-    AND o.customer_user_id IS NULL
-    AND NOT (o.player_inputs ? '__rfz_order_access_hash')
-) AND EXISTS (
-  SELECT 1 FROM public.guest_order_access g
-  WHERE g.order_id = :'guest_order_id'::uuid
-    AND g.token_hash = repeat('e', 64)
-    AND g.revoked_at IS NULL
-) THEN 1 ELSE 1/0 END AS guest_order_fixture_ok;
+DO $$
+DECLARE
+  v_order_count integer;
+  v_unowned_order_count integer;
+  v_hash_stripped_count integer;
+  v_capability_count integer;
+  v_matching_capability_count integer;
+  v_active_capability_count integer;
+BEGIN
+  SELECT count(*) INTO v_order_count
+  FROM public.orders
+  WHERE id = :'guest_order_id'::uuid;
+  IF v_order_count = 0 THEN
+    RAISE EXCEPTION 'GUEST_ORDER_NOT_FOUND';
+  END IF;
+
+  SELECT count(*) INTO v_unowned_order_count
+  FROM public.orders
+  WHERE id = :'guest_order_id'::uuid
+    AND customer_user_id IS NULL;
+  IF v_unowned_order_count = 0 THEN
+    RAISE EXCEPTION 'GUEST_ORDER_OWNERSHIP_INVALID';
+  END IF;
+
+  SELECT count(*) INTO v_hash_stripped_count
+  FROM public.orders
+  WHERE id = :'guest_order_id'::uuid
+    AND NOT (player_inputs ? '__rfz_order_access_hash');
+  IF v_hash_stripped_count = 0 THEN
+    RAISE EXCEPTION 'GUEST_ORDER_HASH_NOT_STRIPPED';
+  END IF;
+
+  SELECT count(*) INTO v_capability_count
+  FROM public.guest_order_access
+  WHERE order_id = :'guest_order_id'::uuid;
+  IF v_capability_count = 0 THEN
+    RAISE EXCEPTION 'GUEST_CAPABILITY_NOT_FOUND';
+  ELSIF v_capability_count <> 1 THEN
+    RAISE EXCEPTION 'GUEST_CAPABILITY_DUPLICATE';
+  END IF;
+
+  SELECT count(*) INTO v_matching_capability_count
+  FROM public.guest_order_access
+  WHERE order_id = :'guest_order_id'::uuid
+    AND token_hash = repeat('e', 64);
+  IF v_matching_capability_count = 0 THEN
+    RAISE EXCEPTION 'GUEST_CAPABILITY_HASH_MISMATCH';
+  END IF;
+
+  SELECT count(*) INTO v_active_capability_count
+  FROM public.guest_order_access
+  WHERE order_id = :'guest_order_id'::uuid
+    AND token_hash = repeat('e', 64)
+    AND revoked_at IS NULL;
+  IF v_active_capability_count = 0 THEN
+    RAISE EXCEPTION 'GUEST_CAPABILITY_REVOKED';
+  END IF;
+END $$;
 
 -- Challenge RPCs are service-only. Verify public roles cannot invoke them,
 -- then exercise the synthetic email-code recovery state transition as the
