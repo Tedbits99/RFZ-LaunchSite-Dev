@@ -657,6 +657,11 @@ BEGIN
   END;
 END $$;
 
+SELECT set_config('rfz_test.guest_order_id', :'guest_order_id', true) IS NOT NULL;
+SELECT set_config('rfz_test.guest_reference', :'guest_reference', true) IS NOT NULL;
+SELECT set_config('rfz_test.guest_email', 'guest@example.invalid', true) IS NOT NULL;
+SELECT set_config('rfz_test.guest_rate_limit_key', repeat('4', 64), true) IS NOT NULL;
+
 SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
 DO $$
@@ -705,10 +710,10 @@ BEGIN
   BEGIN
     SELECT o.id INTO v_order_id
     FROM public.orders o
-    JOIN pg_temp.guest_recovery_fixture f ON f.order_id = o.id
-    WHERE upper(o.reference) = upper(btrim(f.reference))
-      AND lower(btrim(o.email)) = lower(btrim(f.email))
+    WHERE upper(o.reference) = upper(btrim(current_setting('rfz_test.guest_reference')))
+      AND lower(btrim(o.email)) = lower(current_setting('rfz_test.guest_email'))
       AND o.customer_user_id IS NULL
+      AND o.id = current_setting('rfz_test.guest_order_id')::uuid
     FOR UPDATE OF o;
 
     IF NOT FOUND THEN
@@ -722,13 +727,13 @@ BEGIN
 
   SELECT count(*) INTO v_order_challenge_count
   FROM public.guest_order_access_challenges c
-  JOIN pg_temp.guest_recovery_fixture f ON f.order_id = c.order_id
-  WHERE c.created_at > now() - interval '1 hour';
+  WHERE c.order_id = current_setting('rfz_test.guest_order_id')::uuid
+    AND c.created_at > now() - interval '1 hour';
 
   SELECT count(*) INTO v_rate_key_challenge_count
   FROM public.guest_order_access_challenges c
-  JOIN pg_temp.guest_recovery_fixture f ON f.rate_limit_key = c.rate_limit_key
-  WHERE c.created_at > now() - interval '1 hour';
+  WHERE c.rate_limit_key = current_setting('rfz_test.guest_rate_limit_key')
+    AND c.created_at > now() - interval '1 hour';
 
   RAISE NOTICE 'RECOVERY_SERVICE_RATE_LIMITS order_count=% rate_key_count=% order_limit_ok=% rate_key_limit_ok=%',
     v_order_challenge_count, v_rate_key_challenge_count,
