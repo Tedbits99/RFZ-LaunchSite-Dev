@@ -552,6 +552,88 @@ BEGIN
 END $$;
 RESET ROLE;
 
+CREATE TEMP TABLE guest_recovery_fixture (
+  order_id uuid PRIMARY KEY,
+  reference text NOT NULL,
+  email text NOT NULL,
+  code_hash text NOT NULL,
+  rate_limit_key text NOT NULL
+);
+INSERT INTO guest_recovery_fixture (order_id, reference, email, code_hash, rate_limit_key)
+VALUES (
+  :'guest_order_id'::uuid,
+  :'guest_reference',
+  'guest@example.invalid',
+  repeat('3', 64),
+  repeat('4', 64)
+);
+
+DO $$
+DECLARE
+  v_fixture_count integer;
+  v_input_shape_valid boolean;
+  v_reference_matches boolean;
+  v_email_matches boolean;
+  v_unowned boolean;
+  v_matching_order_count integer;
+  v_order_challenge_count integer;
+  v_rate_key_challenge_count integer;
+BEGIN
+  SELECT count(*) INTO v_fixture_count
+  FROM pg_temp.guest_recovery_fixture;
+  IF v_fixture_count <> 1 THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_FIXTURE_COUNT_INVALID expected=1 actual=%', v_fixture_count;
+  END IF;
+
+  SELECT
+    f.code_hash ~ '^[0-9a-f]{64}$' AND length(f.rate_limit_key) >= 32,
+    o.id IS NOT NULL AND upper(o.reference) = upper(btrim(f.reference)),
+    o.id IS NOT NULL AND lower(btrim(o.email)) = lower(btrim(f.email)),
+    o.id IS NOT NULL AND o.customer_user_id IS NULL
+  INTO v_input_shape_valid, v_reference_matches, v_email_matches, v_unowned
+  FROM pg_temp.guest_recovery_fixture f
+  LEFT JOIN public.orders o ON o.id = f.order_id;
+
+  IF NOT v_input_shape_valid THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_INPUT_SHAPE_INVALID expected=true actual=false';
+  END IF;
+  IF NOT v_reference_matches THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_REFERENCE_MISMATCH expected=true actual=false';
+  END IF;
+  IF NOT v_email_matches THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_EMAIL_MISMATCH expected=true actual=false';
+  END IF;
+  IF NOT v_unowned THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_ORDER_OWNERSHIP_INVALID expected=true actual=false';
+  END IF;
+
+  SELECT count(*) INTO v_matching_order_count
+  FROM public.orders o
+  JOIN pg_temp.guest_recovery_fixture f ON f.order_id = o.id
+  WHERE upper(o.reference) = upper(btrim(f.reference))
+    AND lower(btrim(o.email)) = lower(btrim(f.email))
+    AND o.customer_user_id IS NULL;
+  IF v_matching_order_count <> 1 THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_MATCH_COUNT_INVALID expected=1 actual=%', v_matching_order_count;
+  END IF;
+
+  SELECT count(*) INTO v_order_challenge_count
+  FROM public.guest_order_access_challenges c
+  JOIN pg_temp.guest_recovery_fixture f ON f.order_id = c.order_id
+  WHERE c.created_at > now() - interval '1 hour';
+  IF v_order_challenge_count >= 3 THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_ORDER_RATE_LIMIT_REACHED expected<3 actual=%', v_order_challenge_count;
+  END IF;
+
+  SELECT count(*) INTO v_rate_key_challenge_count
+  FROM public.guest_order_access_challenges c
+  JOIN pg_temp.guest_recovery_fixture f ON f.rate_limit_key = c.rate_limit_key
+  WHERE c.created_at > now() - interval '1 hour';
+  IF v_rate_key_challenge_count >= 10 THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_RATE_KEY_LIMIT_REACHED expected<10 actual=%', v_rate_key_challenge_count;
+  END IF;
+END $$;
+
 SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
 SELECT CASE WHEN public.create_guest_order_access_challenge(
