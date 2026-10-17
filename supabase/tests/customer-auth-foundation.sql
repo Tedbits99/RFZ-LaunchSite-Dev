@@ -758,13 +758,45 @@ SELECT public.consume_guest_order_access_challenge(
   :'guest_reference', 'guest@example.invalid', repeat('3', 64), repeat('5', 64)
 ) AS recovered_order_id \gset
 RESET ROLE;
-SELECT CASE WHEN :'recovered_order_id'::uuid = :'guest_order_id'::uuid
-  AND EXISTS (
+SELECT set_config(
+  'rfz_test.recovered_order_id',
+  coalesce(NULLIF(:'recovered_order_id', ''), '00000000-0000-0000-0000-000000000000'),
+  true
+) IS NOT NULL;
+DO $$
+DECLARE
+  v_recovered_order_id uuid;
+BEGIN
+  v_recovered_order_id := current_setting('rfz_test.recovered_order_id')::uuid;
+
+  IF v_recovered_order_id IS DISTINCT FROM current_setting('rfz_test.guest_order_id')::uuid THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_ORDER_ID_MISMATCH expected=synthetic_guest_order actual=unexpected_order';
+  END IF;
+
+  IF NOT EXISTS (
     SELECT 1 FROM public.guest_order_access
-    WHERE order_id = :'guest_order_id'::uuid
+    WHERE order_id = current_setting('rfz_test.guest_order_id')::uuid
+  ) THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_CAPABILITY_NOT_FOUND expected=true actual=false';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.guest_order_access
+    WHERE order_id = current_setting('rfz_test.guest_order_id')::uuid
+      AND token_hash = repeat('5', 64)
+  ) THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_CAPABILITY_HASH_MISMATCH expected=true actual=false';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.guest_order_access
+    WHERE order_id = current_setting('rfz_test.guest_order_id')::uuid
       AND token_hash = repeat('5', 64)
       AND revoked_at IS NULL
-  ) THEN 1 ELSE 1/0 END AS guest_recovery_consumed;
+  ) THEN
+    RAISE EXCEPTION 'GUEST_RECOVERY_CAPABILITY_REVOKED expected=active actual=revoked';
+  END IF;
+END $$;
 
 -- Admin status changes are explicit and do not allow a non-admin caller.
 SET LOCAL ROLE authenticated;
@@ -995,12 +1027,17 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000013"}', true);
 SELECT public.admin_set_allow_guest_checkout(true);
 RESET ROLE;
-SELECT CASE WHEN EXISTS (
-  SELECT 1 FROM public.orders
-  WHERE id = :'guest_order_id'::uuid
-    AND customer_user_id IS NULL
-    AND status = 'WAITING_PAYMENT'
-) THEN 1 ELSE 1/0 END AS preexisting_guest_order_unchanged;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.orders
+    WHERE id = current_setting('rfz_test.guest_order_id')::uuid
+      AND customer_user_id IS NULL
+      AND status = 'WAITING_PAYMENT'
+  ) THEN
+    RAISE EXCEPTION 'PREEXISTING_GUEST_ORDER_CHANGED expected=unowned_waiting_payment actual=changed';
+  END IF;
+END $$;
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000013"}', true);
