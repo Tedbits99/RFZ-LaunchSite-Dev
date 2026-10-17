@@ -50,24 +50,29 @@ enabled = false
 EOF
 
 excluded_scheduler="20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql"
+excluded_incomplete_fulfillment="20260928071820_20260928_order_fulfillment_schema.sql"
 excluded_count=0
 
 while IFS= read -r migration; do
   basename="$(basename "$migration")"
+  case "$basename" in
+    "$excluded_scheduler"|"$excluded_incomplete_fulfillment")
+      echo "Excluding reviewed historical migration from disposable baseline: $basename"
+      excluded_count=$((excluded_count + 1))
+      continue
+      ;;
+  esac
+
   if grep -Eiq '(cron\.schedule|net\.http|http_post|http_get|https://[^[:space:]]+/functions/)' "$migration"; then
-    if [ "$basename" != "$excluded_scheduler" ]; then
-      echo "ERROR: Found an unapproved outbound/scheduled migration: $basename" >&2
-      exit 3
-    fi
-    echo "Excluding unsafe scheduler/outbound migration: $basename"
-    excluded_count=$((excluded_count + 1))
+    echo "ERROR: Found an unapproved outbound/scheduled migration: $basename" >&2
+    exit 3
   else
     cp "$migration" "$test_root/supabase/migrations/$basename"
   fi
 done < <(find "$project_root/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort)
 
-if [ "$excluded_count" -ne 1 ]; then
-  echo "ERROR: Expected exactly one excluded scheduler migration; found $excluded_count." >&2
+if [ "$excluded_count" -ne 2 ]; then
+  echo "ERROR: Expected exactly two reviewed baseline exclusions; found $excluded_count." >&2
   exit 3
 fi
 

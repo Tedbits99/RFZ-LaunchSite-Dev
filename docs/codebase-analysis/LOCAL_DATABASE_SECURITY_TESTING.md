@@ -81,9 +81,10 @@ The script:
 2. Starts the local stack if it is not running.
 3. Reads the local-only database URL from `supabase status`.
 4. Refuses non-local hosts.
-5. Runs `supabase db reset`, which recreates the disposable database and applies the complete chronological migration set, including the new migration.
-6. Executes [privileged-rpc-security.sql](../../supabase/tests/privileged-rpc-security.sql) using `psql`.
-7. Runs a second `supabase db reset` to check clean retry/idempotency of the migration chain.
+5. Builds the same reviewed disposable baseline used by GitHub Actions, excluding the known reconciliation scheduler and the incomplete historical fulfillment copy while retaining the corrected duplicate migration.
+6. Runs `supabase db reset`, which recreates the disposable database and applies that baseline, including the new migration.
+7. Executes [privileged-rpc-security.sql](../../supabase/tests/privileged-rpc-security.sql) using `psql`.
+8. Runs a second `supabase db reset` to check clean retry/idempotency of the migration chain.
 
 The SQL test uses `SET ROLE` and synthetic `request.jwt.claims` values to model PostgREST's `anon`, `authenticated`, and `service_role` execution contexts. It creates an isolated admin, game, package, and order fixture and rolls back test assertions at the end.
 

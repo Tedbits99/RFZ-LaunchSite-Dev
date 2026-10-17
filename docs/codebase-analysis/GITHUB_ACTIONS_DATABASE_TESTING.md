@@ -21,7 +21,7 @@ The workflow:
 5. Installs only the PostgreSQL client needed for assertions.
 6. Copies the repository migrations into a temporary test project.
 7. Scans every migration for cron or outbound HTTP SQL before copying it.
-8. Excludes the single known scheduler migration, then fails closed if any other migration contains a matching outbound/scheduled pattern.
+8. Excludes the known scheduler migration and the confirmed incomplete historical fulfillment migration, then fails closed if any other migration contains a matching outbound/scheduled pattern.
 9. Starts a local Supabase stack using Docker on the runner.
 10. Applies the complete remaining migration baseline with `supabase db reset`.
 11. Executes real PostgreSQL role, privilege, RPC, SECURITY DEFINER, search-path, RLS, and public-catalog assertions.
@@ -32,7 +32,11 @@ The workflow:
 
 The migration [20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql](../../supabase/migrations/20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql) creates a `pg_cron` job, reads `_cron_secrets`, and calls `net.http_post` against a hosted Edge Function URL. It is intentionally excluded from this test baseline.
 
-The wrapper scans all other migrations for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added without being explicitly reviewed and added to the exclusion policy, the workflow exits before starting the database.
+The migration [20260928071820_20260928_order_fulfillment_schema.sql](../../supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql) is also excluded because it contains a clean-install ordering defect: it issues policies on `public.order_timeline`, `public.refunds`, and `public.order_notes` before creating those tables. The later corrected migration [20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql](../../supabase/migrations/20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql) creates the tables before applying the policies and remains in the test baseline.
+
+This is a test-only baseline reconstruction. It does not rewrite or delete either historical migration. The excluded fulfillment copy is not needed by later migrations because the corrected duplicate contains its schema, policies, seed data, and RPC replacement.
+
+The wrapper scans all other migrations for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added without being explicitly reviewed and added to the exclusion policy, or if either expected baseline exclusion disappears, the workflow exits before starting the database.
 
 This prevents the known reconciliation scheduler from being created and prevents an accidental new outbound SQL integration from silently entering the test baseline. The historical production migration is not edited.
 
@@ -78,7 +82,7 @@ Guaranteed by the workflow:
 - No Supabase project reference or remote database URL is configured.
 - No `supabase db push`, remote link, Edge Function deployment, or Bolt publishing command exists.
 - The database URL is checked to be loopback before `psql` runs.
-- The known reconciliation scheduler migration is excluded.
+- The known reconciliation scheduler and incomplete fulfillment migrations are explicitly excluded.
 - Temporary Docker services and files are cleaned up on exit.
 
 Limitations:
@@ -94,6 +98,10 @@ Limitations:
 GitHub-hosted runners consume Actions minutes according to the repository plan. Docker startup and the full migration reset can take several minutes per push. The concurrency setting cancels obsolete in-progress runs for this branch.
 
 To stop future runs, disable or remove the workflow from the branch after review. To remove it permanently, delete [database-security-tests.yml](../../.github/workflows/database-security-tests.yml) and the associated test script/documentation in a reviewed commit. No production resources need cleanup because the workflow uses only ephemeral runner-local containers.
+
+## Historical migration limitation
+
+The repository contains duplicate `.sql.sql` migrations and at least one superseded migration whose execution order is not valid on a clean database. The reported `order_timeline` error occurs at line 132 of the earlier fulfillment copy; its table is created only later in the corrected duplicate. This can also affect a clean installation that applies the raw history without the existing production schema. The workflow deliberately tests the corrected forward schema while preserving the historical files for production-state investigation.
 
 ## Current status
 
