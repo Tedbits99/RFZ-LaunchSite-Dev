@@ -34,31 +34,46 @@ describe('privileged route authorization contracts', () => {
 });
 
 describe('customer order ownership contracts', () => {
-  it('requires exact email ownership for status checks and guest tracking', () => {
+  it('uses verified request auth and profile status before checkout', () => {
+    const code = source('app/api/orders/route.ts');
+
+    expect(code).toContain('createSupabaseServerClient');
+    expect(code).toContain('auth.getUser()');
+    expect(code).toContain("from('customer_profiles')");
+    expect(code).toContain("profile.status !== 'active'");
+    expect(code).toContain('if (error && hasAuthCookie)');
+    expect(code).toContain('const rpcClient = requestClient || supabase;');
+    expect(code).toContain('__rfz_order_access_hash');
+  });
+
+  it('requires a private capability or verified account ownership for order tracking', () => {
     const statusCode = source('app/api/orders/[id]/status-check/route.ts');
     const lookupCode = source('app/api/orders/lookup/route.ts');
     const timelineCode = source('app/api/orders/[id]/timeline/route.ts');
 
-    expect(statusCode).toContain("status: 401");
+    expect(statusCode).toContain('authorizeOrderRequest(req, order)');
     expect(statusCode).toContain('isOrderOwner(email, order.email)');
     expect(lookupCode).toContain('isOrderOwner(email, order.email)');
     expect(timelineCode).toContain('isOrderOwner(email, order.email)');
+    expect(lookupCode).toContain("req.json()");
+    expect(statusCode).not.toContain("select('id, status, actor_email");
     expect(statusCode).not.toContain(".ilike('email'");
     expect(lookupCode).not.toContain(".ilike('email'");
     expect(timelineCode).not.toContain(".ilike('email'");
   });
 
-  it('binds account detail access to the authenticated email or guest proof', () => {
+  it('binds account order access only to the verified Auth UUID', () => {
     const pageCode = source('app/account/orders/[id]/page.tsx');
     const listCode = source('app/account/orders/page.tsx');
     const accountCode = source('app/account/page.tsx');
 
     expect(pageCode).toContain('createSupabaseServerClient');
-    expect(pageCode).toContain('isOrderOwner(accessEmail, order.email)');
+    expect(pageCode).toContain(".eq('customer_user_id', authenticatedUserId)");
+    expect(pageCode).not.toContain('isOrderOwner');
     expect(listCode).toContain('createSupabaseServerClient');
-    expect(listCode).toContain(".eq('email', authenticatedEmail)");
+    expect(listCode).toContain(".eq('customer_user_id', authenticatedUserId)");
     expect(listCode).not.toContain(".ilike('email'");
     expect(accountCode).toContain('createSupabaseServerClient');
-    expect(accountCode).toContain(".eq('email', email)");
+    expect(accountCode).toContain(".eq('customer_user_id', userId)");
   });
 });

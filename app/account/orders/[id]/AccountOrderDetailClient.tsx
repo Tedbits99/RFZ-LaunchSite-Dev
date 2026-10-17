@@ -81,11 +81,9 @@ const LOG_PREFIX = '[OrderStatus]';
 export default function AccountOrderDetailClient({
   order: initialOrder,
   timeline: initialTimeline,
-  accessEmail,
 }: {
   order: Order;
   timeline: TimelineEntry[];
-  accessEmail: string;
 }) {
   const [order, setOrder] = useState(initialOrder);
   const [timeline, setTimeline] = useState(initialTimeline);
@@ -96,7 +94,7 @@ export default function AccountOrderDetailClient({
 
   const poll = useCallback(async () => {
     try {
-      const res = await fetch(`/api/orders/${order.id}/status-check?email=${encodeURIComponent(accessEmail)}`, { cache: 'no-store' });
+      const res = await fetch(`/api/orders/${order.id}/status-check`, { cache: 'no-store' });
       if (!res.ok) {
         console.log(LOG_PREFIX, 'poll: status-check returned', res.status);
         return;
@@ -117,7 +115,7 @@ export default function AccountOrderDetailClient({
     } catch (err) {
       console.log(LOG_PREFIX, 'poll error:', err instanceof Error ? err.message : 'unknown');
     }
-  }, [order.id, accessEmail]);
+  }, [order.id]);
 
   const manualRefresh = useCallback(async () => {
     console.log(LOG_PREFIX, 'manualRefresh clicked');

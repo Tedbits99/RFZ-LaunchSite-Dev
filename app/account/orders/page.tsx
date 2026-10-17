@@ -1,10 +1,8 @@
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { supabase } from '@/lib/supabase';
 import SiteFooter from '@/components/SiteFooter';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { normalizeOrderEmail } from '@/lib/orderAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,25 +29,25 @@ const statusColor: Record<string, string> = {
 
 export default async function AccountOrders() {
   let orders: Order[] = [];
-  let authenticatedEmail: string | null = null;
+  let authenticatedUserId: string | null = null;
 
   try {
     const authClient = createSupabaseServerClient();
     const { data: { user } } = await authClient.auth.getUser();
-    authenticatedEmail = normalizeOrderEmail(user?.email);
+    authenticatedUserId = user?.id || null;
   } catch {
-    authenticatedEmail = null;
+    authenticatedUserId = null;
   }
 
-  // Never use a caller-provided email as ownership proof. Guest users must use
-  // the reference + email tracking flow instead.
-  if (authenticatedEmail) {
-    const client = adminSupabase || supabase;
+  // Account history is based only on immutable Auth UUID ownership. Existing
+  // guest orders remain unlinked and use the separate verified recovery flow.
+  if (authenticatedUserId) {
+    const client = adminSupabase || createSupabaseServerClient();
     if (client) {
       const { data } = await client
         .from('orders')
         .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
-        .eq('email', authenticatedEmail)
+        .eq('customer_user_id', authenticatedUserId)
         .order('created_at', { ascending: false })
         .limit(20);
       orders = (data || []) as unknown as Order[];
@@ -74,7 +72,7 @@ export default async function AccountOrders() {
         <h1 className="font-display mt-4 text-2xl font-bold">My Orders</h1>
         <p className="mt-2 text-sm text-slate-400">View your order history and track status.</p>
 
-        {!authenticatedEmail ? (
+        {!authenticatedUserId ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-sm text-slate-500">
             <p>Sign in to view private order history, or <Link href="/track-order" className="text-cyan-300">track a specific guest order</Link> using its reference and email.</p>
           </div>

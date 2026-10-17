@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { authorizeOrderRequest, orderCapabilityCookieName } from '@/lib/orderCapability';
+import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 
 /*
   Thin proxy to the create-qrph-payment Edge Function, which holds the
@@ -28,6 +31,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Order reference and email are required.' }, { status: 400 });
     }
 
+    if (!adminSupabase) {
+      return NextResponse.json({ error: 'Service unavailable.' }, { status: 503 });
+    }
+    const normalizedReference = String(orderReference).toUpperCase().trim();
+    const { data: order } = await adminSupabase
+      .from('orders')
+      .select('id, reference, email, customer_user_id')
+      .eq('reference', normalizedReference)
+      .maybeSingle();
+    if (!order
+      || !isOrderOwner(normalizeOrderEmail(email), order.email)
+      || !await authorizeOrderRequest(req, order)) {
+      return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
+    }
+    const orderAccessToken = req.cookies.get(orderCapabilityCookieName(order.reference))?.value;
+
     const functionUrl = `${url}/functions/v1/create-qrph-payment`;
     const res = await fetch(functionUrl, {
       method: 'POST',
@@ -36,8 +55,8 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${anonKey}`,
         apikey: anonKey,
       },
-      body: JSON.stringify({ orderReference, email }),
-      // Edge function enforces order ownership via reference + email match.
+      body: JSON.stringify({ orderReference: normalizedReference, email, orderAccessToken }),
+      // The Edge Function independently checks the order-specific capability.
       signal: AbortSignal.timeout(20000),
     });
 

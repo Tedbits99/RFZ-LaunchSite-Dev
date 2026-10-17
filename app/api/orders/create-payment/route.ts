@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { getPaymentAdapter, buildProviderConfig } from '@/lib/paymentProviderAdapters';
 import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
+import { authorizeOrderRequest } from '@/lib/orderCapability';
 
 /*
   Create an automated payment for an existing order.
@@ -32,11 +33,11 @@ export async function POST(req: NextRequest) {
     // Find the order
     const { data: order } = await adminSupabase
       .from('orders')
-      .select('id, reference, email, status, total_cents, payment_method')
+      .select('id, reference, email, customer_user_id, status, total_cents, payment_method')
       .eq('reference', String(orderReference).toUpperCase().trim())
       .maybeSingle();
 
-    if (!order || !isOrderOwner(normalizedEmail, order.email)) {
+    if (!order || !isOrderOwner(normalizedEmail, order.email) || !await authorizeOrderRequest(req, order)) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     }
 

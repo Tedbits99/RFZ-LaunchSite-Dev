@@ -1,8 +1,6 @@
 import { notFound } from 'next/navigation';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { supabase } from '@/lib/supabase';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 import AccountOrderDetailClient from './AccountOrderDetailClient';
 
 export const dynamic = 'force-dynamic';
@@ -30,35 +28,32 @@ type TimelineEntry = {
   created_at: string;
 };
 
-export default async function AccountOrderDetail({ params, searchParams }: { params: { id: string }; searchParams: { email?: string } }) {
-  let authenticatedEmail: string | null = null;
+export default async function AccountOrderDetail({ params }: { params: { id: string } }) {
+  let authenticatedUserId: string | null = null;
+  let authClient: ReturnType<typeof createSupabaseServerClient> | null = null;
   try {
-    const authClient = createSupabaseServerClient();
+    authClient = createSupabaseServerClient();
     const { data: { user } } = await authClient.auth.getUser();
-    authenticatedEmail = normalizeOrderEmail(user?.email);
+    authenticatedUserId = user?.id || null;
   } catch {
-    authenticatedEmail = null;
+    authenticatedUserId = null;
   }
 
-  // Authenticated users are bound to their session email. Guests must provide
-  // the same order-specific email proof used by the tracking flow.
-  const accessEmail = authenticatedEmail || normalizeOrderEmail(searchParams.email);
-  if (!accessEmail) notFound();
+  // Guest access is handled by /track-order after one-time email verification;
+  // account detail pages authorize only by the verified Auth UUID.
+  if (!authenticatedUserId || !authClient) notFound();
 
-  // Prefer the service-role client, but fall back to the anon client so the
-  // page still renders in runtimes where the service key is not injected
-  // (RLS allows anon SELECT on orders/order_timeline). Without this fallback
-  // the client component never mounts and no live updates can reach the UI.
-  const client = adminSupabase || supabase;
+  const client = adminSupabase || authClient;
   if (!client) return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>;
 
   const { data } = await client
     .from('orders')
     .select('id, reference, email, status, payment_status, fulfillment_status, total_cents, created_at, updated_at, player_inputs, payment_method, games(name), packages(name, amount)')
     .eq('id', params.id)
+    .eq('customer_user_id', authenticatedUserId)
     .maybeSingle();
   const order = data as unknown as Order | null;
-  if (!order || !isOrderOwner(accessEmail, order.email)) notFound();
+  if (!order) notFound();
 
   const { data: timelineData } = await client
     .from('order_timeline')
@@ -67,5 +62,5 @@ export default async function AccountOrderDetail({ params, searchParams }: { par
     .order('created_at', { ascending: true });
   const timeline = (timelineData || []) as unknown as TimelineEntry[];
 
-  return <AccountOrderDetailClient order={order} timeline={timeline} accessEmail={accessEmail} />;
+  return <AccountOrderDetailClient order={order} timeline={timeline} />;
 }

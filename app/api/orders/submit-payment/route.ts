@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { authorizeOrderRequest } from '@/lib/orderCapability';
+import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,9 +16,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Payment proof image is too large. Please use a smaller image.' }, { status: 400 });
     }
 
-    const client = adminSupabase || supabase;
+    // This mutation now requires the protected service-side RPC boundary.
+    const client = adminSupabase;
     if (!client) {
       return NextResponse.json({ error: 'Service is not configured. Please contact support.' }, { status: 503 });
+    }
+
+    const normalizedEmail = normalizeOrderEmail(email);
+    const { data: order } = await client
+      .from('orders')
+      .select('id, reference, email, customer_user_id')
+      .eq('reference', String(orderReference).toUpperCase().trim())
+      .maybeSingle();
+    if (!order || !isOrderOwner(normalizedEmail, order.email) || !await authorizeOrderRequest(req, order)) {
+      return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     }
 
     const { data, error } = await client.rpc('submit_payment', {

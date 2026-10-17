@@ -144,7 +144,7 @@ export default function QrPhPayment({
     const poll = async () => {
       try {
         const res = await fetch(
-          `/api/orders/qrph-status?orderReference=${encodeURIComponent(orderReference)}&email=${encodeURIComponent(orderEmail)}`,
+          `/api/orders/qrph-status?orderReference=${encodeURIComponent(orderReference)}`,
           { cache: 'no-store' },
         );
         const data = await res.json().catch(() => null);
@@ -443,7 +443,7 @@ export default function QrPhPayment({
                     <button type="button" onClick={() => setModalOpen(false)} className="flex-1 rounded-xl border border-[#253451] px-4 py-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500">
                       Close
                     </button>
-                    <a href={`/track-order?ref=${encodeURIComponent(orderReference)}&email=${encodeURIComponent(orderEmail)}`} className="flex-[2] rounded-xl bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-3 text-center text-xs font-bold shadow-lg shadow-blue-900/30 transition hover:brightness-110">
+                    <a href={`/track-order?ref=${encodeURIComponent(orderReference)}`} className="flex-[2] rounded-xl bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-3 text-center text-xs font-bold shadow-lg shadow-blue-900/30 transition hover:brightness-110">
                       Track Order
                     </a>
                   </div>

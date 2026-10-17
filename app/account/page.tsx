@@ -9,19 +9,21 @@ type Order = { id: string; reference: string; status: string; total_cents: numbe
 
 export default async function Account() {
   let email: string | null = null;
+  let userId: string | null = null;
   let orders: Order[] = [];
 
   try {
     const authClient = createSupabaseServerClient();
     const { data: { user } } = await authClient.auth.getUser();
     email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : null;
+    userId = user?.id || null;
 
-    if (email) {
+    if (userId) {
       const db = adminSupabase || authClient;
       const { data } = await db
         .from('orders')
         .select('id, reference, status, total_cents, created_at, games(name)')
-        .eq('email', email)
+        .eq('customer_user_id', userId)
         .order('created_at', { ascending: false })
         .limit(20);
       orders = (data as unknown as Order[]) || [];

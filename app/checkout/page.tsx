@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { orderCapabilityCookieName, verifyOrderCapability } from '@/lib/orderCapability';
 import { paymentMethodLabel } from '@/lib/paymentMethods';
 import { ArrowRight, BadgeCheck, ShieldCheck } from 'lucide-react';
 import CheckoutPaymentForm from './CheckoutPaymentForm';
@@ -47,10 +49,17 @@ export default async function Checkout({ searchParams }: { searchParams: { ref?:
   if (searchParams.ref && db) {
     const { data } = await db
       .from('orders')
-      .select('id, reference, email, status, total_cents, payment_method, payment_reference, payment_submitted_at, payment_mode, payment_provider, payment_config_snapshot, games(name), packages(name), player_inputs')
+      .select('id, reference, email, customer_user_id, status, total_cents, payment_method, payment_reference, payment_submitted_at, payment_mode, payment_provider, payment_config_snapshot, games(name), packages(name), player_inputs')
       .eq('reference', searchParams.ref)
       .maybeSingle();
-    order = data as unknown as OrderDetail | null;
+    const candidate = data as unknown as OrderDetail & { customer_user_id: string | null } | null;
+    if (candidate) {
+      const token = cookies().get(orderCapabilityCookieName(candidate.reference))?.value;
+      if (await verifyOrderCapability(candidate.id, candidate.reference, token)) {
+        const { customer_user_id: _ownerId, ...safeOrder } = candidate;
+        order = safeOrder;
+      }
+    }
 
     if (order) {
       const { data: configs } = await db
@@ -189,7 +198,7 @@ export default async function Checkout({ searchParams }: { searchParams: { ref?:
             )}
 
             <div className="flex gap-3">
-              <Link href={`/track-order?ref=${encodeURIComponent(order.reference)}&email=${encodeURIComponent(order.email)}`} className="flex-1 rounded-xl border border-[#253451] px-4 py-3 text-center text-xs font-semibold text-slate-200 hover:border-cyan-400">Track This Order</Link>
+              <Link href={`/track-order?ref=${encodeURIComponent(order.reference)}`} className="flex-1 rounded-xl border border-[#253451] px-4 py-3 text-center text-xs font-semibold text-slate-200 hover:border-cyan-400">Track This Order</Link>
               <Link href="/" className="flex-1 rounded-xl bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-3 text-center text-xs font-semibold">Back to Store</Link>
             </div>
           </div>
