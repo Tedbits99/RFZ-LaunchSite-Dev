@@ -138,6 +138,9 @@ BEGIN
     IF has_table_privilege('authenticated', 'public.orders', 'UPDATE') THEN
       v_failures := array_append(v_failures, format('role=authenticated object=public.orders privilege=UPDATE expected=denied actual=granted public_acl=%s', v_public_grants));
     END IF;
+    IF has_any_column_privilege('authenticated', 'public.orders', 'UPDATE') THEN
+      v_failures := array_append(v_failures, 'role=authenticated object=public.orders columns privilege=UPDATE expected=denied actual=granted');
+    END IF;
     IF has_table_privilege('authenticated', 'public.orders', 'DELETE') THEN
       v_failures := array_append(v_failures, format('role=authenticated object=public.orders privilege=DELETE expected=denied actual=granted public_acl=%s', v_public_grants));
     END IF;
@@ -173,6 +176,9 @@ BEGIN
     END IF;
     IF has_table_privilege('authenticated', 'public.order_timeline', 'INSERT') THEN
       v_failures := array_append(v_failures, format('role=authenticated object=public.order_timeline privilege=INSERT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_any_column_privilege('authenticated', 'public.order_timeline', 'INSERT') THEN
+      v_failures := array_append(v_failures, 'role=authenticated object=public.order_timeline columns privilege=INSERT expected=denied actual=granted');
     END IF;
     IF has_table_privilege('authenticated', 'public.order_timeline', 'UPDATE') THEN
       v_failures := array_append(v_failures, format('role=authenticated object=public.order_timeline privilege=UPDATE expected=denied actual=granted public_acl=%s', v_public_grants));
