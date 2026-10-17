@@ -1,0 +1,2 @@
+INSERT INTO game_input_fields (game_id, label, field_key, placeholder, help_text, is_required, sort_order)
+VALUES ('da190138-3388-43cb-a443-8b9943cc0f0b', 'UID', 'uid', 'Enter your UID', 'Find your UID on your profile page.', true, 1);
