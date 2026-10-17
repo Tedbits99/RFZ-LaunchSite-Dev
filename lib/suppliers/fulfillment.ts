@@ -215,7 +215,11 @@ export async function startFulfillment(orderId: string, db?: any): Promise<{
     });
     // Fire-and-forget immediate polling so terminal supplier status is
     // reflected within seconds, not the 3-minute cron interval.
-    pollImmediately(orderId, client).catch(() => {});
+    // Admin requests intentionally keep their authenticated client for the
+    // claim, supplier transaction, and adapter work. Terminal reconciliation
+    // is service-role-only, so pass a separate server-created client for that
+    // single boundary instead of attempting the RPC with the admin session.
+    pollImmediately(orderId, client, getDb()).catch(() => {});
   }
 
   return {
@@ -237,10 +241,10 @@ export async function startFulfillment(orderId: string, db?: any): Promise<{
 
 const IMMEDIATE_POLL_DELAYS_MS = [2000, 5000, 10000, 20000];
 
-export async function pollImmediately(orderId: string, db: any): Promise<void> {
+export async function pollImmediately(orderId: string, db: any, reconciliationDb?: any): Promise<void> {
   for (const delay of IMMEDIATE_POLL_DELAYS_MS) {
     await sleep(delay);
-    const result = await pollFulfillmentStatus(orderId, db);
+    const result = await pollFulfillmentStatus(orderId, db, reconciliationDb);
     if (result.fulfillmentStatus === 'COMPLETED' || result.fulfillmentStatus === 'FAILED') {
       return;
     }
@@ -250,7 +254,7 @@ export async function pollImmediately(orderId: string, db: any): Promise<void> {
 // ─── Poll Supplier Status ───────────────────────────────────────────────────
 // accordingly. Only COMPLETED from supplier → COMPLETED for order.
 
-export async function pollFulfillmentStatus(orderId: string, db?: any): Promise<{
+export async function pollFulfillmentStatus(orderId: string, db?: any, reconciliationDb?: any): Promise<{
   success: boolean;
   fulfillmentStatus?: string;
   error?: string;
@@ -285,7 +289,14 @@ export async function pollFulfillmentStatus(orderId: string, db?: any): Promise<
     const supplierStatus = await adapter.queryStatus(config, tx.supplier_reference);
 
     if (supplierStatus.status === 'completed') {
-      const { data: finalization, error: finalizationError } = await client.rpc('finalize_supplier_reconciliation', {
+      // Reads and supplier status polling may use the caller's authenticated
+      // client, but the terminal reconciliation RPC is service-role-only.
+      // Never fall back to the caller client for this privileged operation.
+      const reconciliationClient = reconciliationDb || getDb();
+      if (!reconciliationClient) {
+        return { success: false, error: 'Privileged reconciliation is not configured.' };
+      }
+      const { data: finalization, error: finalizationError } = await reconciliationClient.rpc('finalize_supplier_reconciliation', {
         p_supplier_transaction_id: tx.id,
         p_outcome: 'completed',
         p_actor: 'fulfillment_system',
@@ -300,7 +311,11 @@ export async function pollFulfillmentStatus(orderId: string, db?: any): Promise<
     }
 
     if (supplierStatus.status === 'failed' && supplierStatus.error) {
-      const { data: finalization, error: finalizationError } = await client.rpc('finalize_supplier_reconciliation', {
+      const reconciliationClient = reconciliationDb || getDb();
+      if (!reconciliationClient) {
+        return { success: false, error: 'Privileged reconciliation is not configured.' };
+      }
+      const { data: finalization, error: finalizationError } = await reconciliationClient.rpc('finalize_supplier_reconciliation', {
         p_supplier_transaction_id: tx.id,
         p_outcome: 'failed',
         p_actor: 'fulfillment_system',
