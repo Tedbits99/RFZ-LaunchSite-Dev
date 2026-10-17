@@ -51,12 +51,13 @@ EOF
 
 excluded_scheduler="20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql"
 excluded_incomplete_fulfillment="20260928071820_20260928_order_fulfillment_schema.sql"
+excluded_ambiguous_status_rpc="20260928072329_20260928_fix_rpc_ambiguous_column.sql"
 excluded_count=0
 
 while IFS= read -r migration; do
   basename="$(basename "$migration")"
   case "$basename" in
-    "$excluded_scheduler"|"$excluded_incomplete_fulfillment")
+    "$excluded_scheduler"|"$excluded_incomplete_fulfillment"|"$excluded_ambiguous_status_rpc")
       echo "Excluding reviewed historical migration from disposable baseline: $basename"
       excluded_count=$((excluded_count + 1))
       continue
@@ -71,8 +72,8 @@ while IFS= read -r migration; do
   fi
 done < <(find "$project_root/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort)
 
-if [ "$excluded_count" -ne 2 ]; then
-  echo "ERROR: Expected exactly two reviewed baseline exclusions; found $excluded_count." >&2
+if [ "$excluded_count" -ne 3 ]; then
+  echo "ERROR: Expected exactly three reviewed baseline exclusions; found $excluded_count." >&2
   exit 3
 fi
 

@@ -34,9 +34,11 @@ The migration [20261008142813_20261008150000_schedule_auto_reconciliation.sql.sq
 
 The migration [20260928071820_20260928_order_fulfillment_schema.sql](../../supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql) is also excluded because it contains a clean-install ordering defect: it issues policies on `public.order_timeline`, `public.refunds`, and `public.order_notes` before creating those tables. The later corrected migration [20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql](../../supabase/migrations/20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql) creates the tables before applying the policies and remains in the test baseline.
 
-This is a test-only baseline reconstruction. It does not rewrite or delete either historical migration. The excluded fulfillment copy is not needed by later migrations because the corrected duplicate contains its schema, policies, seed data, and RPC replacement.
+The migration [20260928072329_20260928_fix_rpc_ambiguous_column.sql](../../supabase/migrations/20260928072329_20260928_fix_rpc_ambiguous_column.sql) is also excluded. It uses `CREATE OR REPLACE` to change `admin_change_order_status(uuid, text, text, text)` from `RETURNS TABLE (id uuid, status text)` to `RETURNS TABLE (id uuid, status text, updated_at timestamptz)`, which fails with PostgreSQL SQLSTATE 42P13. The immediately following migration [20260928072356_20260928_fix_rpc_ambiguous_v3.sql](../../supabase/migrations/20260928072356_20260928_fix_rpc_ambiguous_v3.sql) explicitly drops and recreates the function with the corrected output names, and remains in the test baseline. Later duplicate migrations preserve the corrected final schema and also remain included.
 
-The wrapper scans all other migrations for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added without being explicitly reviewed and added to the exclusion policy, or if either expected baseline exclusion disappears, the workflow exits before starting the database.
+This is a test-only baseline reconstruction. It does not rewrite or delete any historical migration. The excluded fulfillment copy is superseded by the corrected duplicate, and the excluded ambiguous-column copy is superseded by the explicit drop/recreate migration immediately after it. The retained migrations therefore provide the complete later schema and security behavior without replaying a known-invalid historical replacement.
+
+The wrapper scans all other migrations for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added without being explicitly reviewed and added to the exclusion policy, or if any expected baseline exclusion disappears, the workflow exits before starting the database.
 
 This prevents the known reconciliation scheduler from being created and prevents an accidental new outbound SQL integration from silently entering the test baseline. The historical production migration is not edited.
 
@@ -82,12 +84,13 @@ Guaranteed by the workflow:
 - No Supabase project reference or remote database URL is configured.
 - No `supabase db push`, remote link, Edge Function deployment, or Bolt publishing command exists.
 - The database URL is checked to be loopback before `psql` runs.
-- The known reconciliation scheduler and incomplete fulfillment migrations are explicitly excluded.
+- The known reconciliation scheduler, incomplete fulfillment migration, and invalid historical RPC replacement are explicitly excluded.
 - Temporary Docker services and files are cleaned up on exit.
 
 Limitations:
 
 - The excluded scheduler migration is not integration-tested here.
+- The excluded historical RPC replacement is not integration-tested as a standalone migration; its corrected drop/recreate successor and final hardened definition are tested.
 - The actual Bolt Database schema, roles, deployed functions, Vault contents, schedules, and secrets are not verified.
 - GitHub runner Docker isolation prevents normal access to the internet from the test SQL path, but this workflow is additionally protected by migration filtering; it is not a substitute for production network policy.
 - Database tests do not prove payment-provider or supplier-provider behavior.
@@ -101,7 +104,7 @@ To stop future runs, disable or remove the workflow from the branch after review
 
 ## Historical migration limitation
 
-The repository contains duplicate `.sql.sql` migrations and at least one superseded migration whose execution order is not valid on a clean database. The reported `order_timeline` error occurs at line 132 of the earlier fulfillment copy; its table is created only later in the corrected duplicate. This can also affect a clean installation that applies the raw history without the existing production schema. The workflow deliberately tests the corrected forward schema while preserving the historical files for production-state investigation.
+The repository contains duplicate `.sql.sql` migrations and superseded migrations whose execution order or replacement semantics are not valid on a clean database. The `order_timeline` policy error occurs at line 213 of the earlier fulfillment copy; its table is created only later in the corrected duplicate. The `admin_change_order_status` return-type error occurs in the earlier ambiguous-column copy because it attempts to replace a two-column OUT row with a three-column OUT row. These defects can affect a clean installation that applies the raw history without the existing production schema. The workflow deliberately tests the corrected forward schema while preserving the historical files for production-state investigation.
 
 ## Current status
 
