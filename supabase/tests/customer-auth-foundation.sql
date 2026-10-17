@@ -450,8 +450,15 @@ FROM public.create_order(
   jsonb_build_object('__rfz_order_access_hash', repeat('e', 64)), 'manual'
 ) \gset
 RESET ROLE;
+CREATE TEMP TABLE guest_order_fixture_ids (
+  order_id uuid PRIMARY KEY
+);
+INSERT INTO guest_order_fixture_ids (order_id)
+VALUES (:'guest_order_id'::uuid);
 DO $$
 DECLARE
+  v_fixture_count integer;
+  v_guest_order_id uuid;
   v_order_count integer;
   v_unowned_order_count integer;
   v_hash_stripped_count integer;
@@ -459,16 +466,25 @@ DECLARE
   v_matching_capability_count integer;
   v_active_capability_count integer;
 BEGIN
+  SELECT count(*) INTO v_fixture_count
+  FROM pg_temp.guest_order_fixture_ids;
+  IF v_fixture_count <> 1 THEN
+    RAISE EXCEPTION 'GUEST_FIXTURE_ID_INVALID';
+  END IF;
+
+  SELECT order_id INTO v_guest_order_id
+  FROM pg_temp.guest_order_fixture_ids;
+
   SELECT count(*) INTO v_order_count
   FROM public.orders
-  WHERE id = :'guest_order_id'::uuid;
+  WHERE id = v_guest_order_id;
   IF v_order_count = 0 THEN
     RAISE EXCEPTION 'GUEST_ORDER_NOT_FOUND';
   END IF;
 
   SELECT count(*) INTO v_unowned_order_count
   FROM public.orders
-  WHERE id = :'guest_order_id'::uuid
+  WHERE id = v_guest_order_id
     AND customer_user_id IS NULL;
   IF v_unowned_order_count = 0 THEN
     RAISE EXCEPTION 'GUEST_ORDER_OWNERSHIP_INVALID';
@@ -476,7 +492,7 @@ BEGIN
 
   SELECT count(*) INTO v_hash_stripped_count
   FROM public.orders
-  WHERE id = :'guest_order_id'::uuid
+  WHERE id = v_guest_order_id
     AND NOT (player_inputs ? '__rfz_order_access_hash');
   IF v_hash_stripped_count = 0 THEN
     RAISE EXCEPTION 'GUEST_ORDER_HASH_NOT_STRIPPED';
@@ -484,7 +500,7 @@ BEGIN
 
   SELECT count(*) INTO v_capability_count
   FROM public.guest_order_access
-  WHERE order_id = :'guest_order_id'::uuid;
+  WHERE order_id = v_guest_order_id;
   IF v_capability_count = 0 THEN
     RAISE EXCEPTION 'GUEST_CAPABILITY_NOT_FOUND';
   ELSIF v_capability_count <> 1 THEN
@@ -493,7 +509,7 @@ BEGIN
 
   SELECT count(*) INTO v_matching_capability_count
   FROM public.guest_order_access
-  WHERE order_id = :'guest_order_id'::uuid
+  WHERE order_id = v_guest_order_id
     AND token_hash = repeat('e', 64);
   IF v_matching_capability_count = 0 THEN
     RAISE EXCEPTION 'GUEST_CAPABILITY_HASH_MISMATCH';
@@ -501,7 +517,7 @@ BEGIN
 
   SELECT count(*) INTO v_active_capability_count
   FROM public.guest_order_access
-  WHERE order_id = :'guest_order_id'::uuid
+  WHERE order_id = v_guest_order_id
     AND token_hash = repeat('e', 64)
     AND revoked_at IS NULL;
   IF v_active_capability_count = 0 THEN
