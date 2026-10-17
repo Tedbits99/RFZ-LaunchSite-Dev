@@ -352,7 +352,7 @@ Deno.serve(async (req: Request) => {
     if (logError) {
       const msg = String(logError.message || "");
       if (msg.includes("duplicate key") || msg.includes("unique") || msg.includes("violates")) {
-        return json({ received: true, message: "Email already sent for this order and template" });
+        return json({ received: true, message: "Email already sent for this order and template" }, 200);
       }
       console.error("email_sent_log insert error:", msg);
     }
@@ -391,7 +391,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Failed to send email", detail: result.error }, 500);
     }
 
-    return json({ success: true, template: body.template, recipient: body.to });
+    return json({ success: true, template: body.template, recipient: body.to }, 200);
   } catch (err) {
     console.error("send-transactional-email error:", err);
     const msg = err instanceof Error ? err.message : String(err);
