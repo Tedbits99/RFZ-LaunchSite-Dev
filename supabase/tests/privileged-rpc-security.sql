@@ -41,7 +41,9 @@ INSERT INTO public.orders (
   subtotal_cents, discount_cents, fee_cents, total_cents, payment_method, status
 )
 SELECT order_id, 'SECURITY-TEST-ORDER', 'security-test@example.invalid', 'Security Test',
-       game_id, package_id, '{}'::jsonb, 1, 0, 0, 1, 'manual', 'PENDING'
+       game_id, package_id,
+       jsonb_build_object('__rfz_order_access_hash', repeat('a', 64)),
+       1, 0, 0, 1, 'manual', 'PENDING'
 FROM security_test_ids
 ON CONFLICT (id) DO NOTHING;
 
