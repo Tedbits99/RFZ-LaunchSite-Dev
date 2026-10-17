@@ -94,6 +94,8 @@ cp "$project_root/supabase/tests/customer-confirmation-resend-rate-limit.sql" \
   "$test_root/supabase/tests/customer-confirmation-resend-rate-limit.sql"
 cp "$project_root/supabase/tests/customer-confirmation-resend-concurrency-assertion.sql" \
   "$test_root/supabase/tests/customer-confirmation-resend-concurrency-assertion.sql"
+cp "$project_root/supabase/tests/fulfillment-completion-guard.sql" \
+  "$test_root/supabase/tests/fulfillment-completion-guard.sql"
 cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
   "$test_root/supabase/tests/reconciliation-atomicity.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
@@ -135,6 +137,11 @@ echo "Executing customer confirmation-resend rate-limit assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/customer-confirmation-resend-rate-limit.sql
+
+echo "Executing direct fulfillment completion guard assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/fulfillment-completion-guard.sql
 
 echo "Executing reconciliation atomicity assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
