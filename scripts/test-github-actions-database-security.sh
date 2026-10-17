@@ -98,6 +98,8 @@ cp "$project_root/supabase/tests/fulfillment-completion-guard.sql" \
   "$test_root/supabase/tests/fulfillment-completion-guard.sql"
 cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
   "$test_root/supabase/tests/reconciliation-atomicity.sql"
+cp "$project_root/supabase/tests/completion-receipt-outbox.sql" \
+  "$test_root/supabase/tests/completion-receipt-outbox.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
   "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
