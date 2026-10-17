@@ -47,6 +47,98 @@ SELECT order_id, 'SECURITY-TEST-ORDER', 'security-test@example.invalid', 'Securi
 FROM security_test_ids
 ON CONFLICT (id) DO NOTHING;
 
+DO $$
+DECLARE
+  v_capability_count integer;
+  v_token_hash text;
+  v_deferrable boolean;
+  v_initially_deferred boolean;
+BEGIN
+  SELECT count(*), min(token_hash)
+  INTO v_capability_count, v_token_hash
+  FROM public.guest_order_access
+  WHERE order_id = '00000000-0000-0000-0000-000000000004';
+
+  IF v_capability_count <> 1
+     OR v_token_hash !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'guest order capability was not created with the required scoped hash';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.orders
+    WHERE id = '00000000-0000-0000-0000-000000000004'
+      AND player_inputs ? '__rfz_order_access_hash'
+  ) THEN
+    RAISE EXCEPTION 'internal guest capability hash was persisted in player_inputs';
+  END IF;
+
+  SELECT condeferrable, condeferred
+  INTO v_deferrable, v_initially_deferred
+  FROM pg_constraint
+  WHERE conrelid = 'public.guest_order_access'::regclass
+    AND conname = 'guest_order_access_order_id_fkey';
+
+  IF v_deferrable IS DISTINCT FROM true
+     OR v_initially_deferred IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'guest order capability foreign key is not initially deferred';
+  END IF;
+END $$;
+
+-- A malformed capability is rejected before a guest order can be created.
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO public.orders (
+      id, reference, email, customer_name, game_id, package_id, player_inputs,
+      subtotal_cents, discount_cents, fee_cents, total_cents, payment_method, status
+    ) VALUES (
+      '00000000-0000-0000-0000-000000000005', 'SECURITY-TEST-INVALID-CAPABILITY',
+      'security-test@example.invalid', 'Security Test',
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000003', '{}'::jsonb,
+      1, 0, 0, 1, 'manual', 'PENDING'
+    );
+    RAISE EXCEPTION 'order without a capability unexpectedly inserted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'ORDER_ACCESS_CAPABILITY_REQUIRED' THEN
+      RAISE;
+    END IF;
+  END;
+END $$;
+
+-- The deferred FK must not leave a capability behind when a later order
+-- constraint rejects the parent insert.
+DO $$
+DECLARE
+  v_capability_count integer;
+BEGIN
+  BEGIN
+    INSERT INTO public.orders (
+      id, reference, email, customer_name, game_id, package_id, player_inputs,
+      subtotal_cents, discount_cents, fee_cents, total_cents, payment_method, status
+    ) VALUES (
+      '00000000-0000-0000-0000-000000000006', 'SECURITY-TEST-ROLLBACK',
+      'security-test@example.invalid', 'Security Test',
+      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000003',
+      jsonb_build_object('__rfz_order_access_hash', repeat('b', 64)),
+      1, 0, 0, 1, 'manual', 'NOT-A-VALID-ORDER-STATUS'
+    );
+    RAISE EXCEPTION 'invalid order unexpectedly inserted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+
+  SELECT count(*) INTO v_capability_count
+  FROM public.guest_order_access
+  WHERE order_id = '00000000-0000-0000-0000-000000000006';
+
+  IF v_capability_count <> 0 THEN
+    RAISE EXCEPTION 'failed order insert left a guest capability behind';
+  END IF;
+END $$;
+
 -- The migration must remove implicit PUBLIC execution and explicit anonymous
 -- execution for privileged functions. Anonymous and authenticated grants are
 -- checked separately because an explicit grant can hide a PUBLIC revocation.
