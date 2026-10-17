@@ -90,6 +90,10 @@ cp "$project_root/supabase/tests/privileged-rpc-security.sql" \
   "$test_root/supabase/tests/privileged-rpc-security.sql"
 cp "$project_root/supabase/tests/customer-auth-foundation.sql" \
   "$test_root/supabase/tests/customer-auth-foundation.sql"
+cp "$project_root/supabase/tests/customer-confirmation-resend-rate-limit.sql" \
+  "$test_root/supabase/tests/customer-confirmation-resend-rate-limit.sql"
+cp "$project_root/supabase/tests/customer-confirmation-resend-concurrency-assertion.sql" \
+  "$test_root/supabase/tests/customer-confirmation-resend-concurrency-assertion.sql"
 cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
   "$test_root/supabase/tests/reconciliation-atomicity.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
@@ -127,6 +131,11 @@ PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/customer-auth-foundation.sql
 
+echo "Executing customer confirmation-resend rate-limit assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/customer-confirmation-resend-rate-limit.sql
+
 echo "Executing reconciliation atomicity assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
@@ -150,6 +159,34 @@ pid_b=$!
 
 wait "$pid_a"
 wait "$pid_b"
+
+echo "Preparing concurrent customer confirmation-resend assertion..."
+resend_concurrency_a="$test_root/customer-confirmation-resend-concurrency-a.out"
+resend_concurrency_b="$test_root/customer-confirmation-resend-concurrency-b.out"
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --tuples-only --no-align --quiet \
+  --command "BEGIN; SET LOCAL ROLE service_role; SELECT allowed FROM public.reserve_customer_confirmation_resend(repeat('8', 64), repeat('9', 64)); COMMIT;" \
+  >"$resend_concurrency_a" 2>&1 &
+pid_resend_a=$!
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --tuples-only --no-align --quiet \
+  --command "BEGIN; SET LOCAL ROLE service_role; SELECT allowed FROM public.reserve_customer_confirmation_resend(repeat('8', 64), repeat('9', 64)); COMMIT;" \
+  >"$resend_concurrency_b" 2>&1 &
+pid_resend_b=$!
+
+wait "$pid_resend_a"
+wait "$pid_resend_b"
+
+if ! awk '$0 == "t" { true_count++ } $0 == "f" { false_count++ } END { exit !(true_count == 1 && false_count == 1) }' \
+  "$resend_concurrency_a" "$resend_concurrency_b"; then
+  cat "$resend_concurrency_a" "$resend_concurrency_b" >&2
+  echo "ERROR: concurrent confirmation-resend calls did not produce exactly one allowed and one denied outcome." >&2
+  exit 6
+fi
+
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/customer-confirmation-resend-concurrency-assertion.sql
 
 if ! grep -Eq 'applied|already-finalized' "$concurrency_a" "$concurrency_b"; then
   cat "$concurrency_a" "$concurrency_b" >&2
