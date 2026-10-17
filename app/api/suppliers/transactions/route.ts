@@ -1,15 +1,11 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdmin } from '@/lib/adminGuard';
 
-function getDb() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
-export async function GET(req: Request) {
-  const db = getDb();
+export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
   const { searchParams } = new URL(req.url);

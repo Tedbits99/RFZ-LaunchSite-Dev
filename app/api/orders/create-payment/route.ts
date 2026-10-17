@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { getPaymentAdapter, buildProviderConfig } from '@/lib/paymentProviderAdapters';
+import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 
 /*
   Create an automated payment for an existing order.
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { orderReference, email, configId } = body;
 
-    if (!orderReference || !email) {
+    const normalizedEmail = normalizeOrderEmail(email);
+    if (!orderReference || !normalizedEmail) {
       return NextResponse.json({ error: 'Order reference and email are required.' }, { status: 400 });
     }
 
@@ -32,10 +34,9 @@ export async function POST(req: NextRequest) {
       .from('orders')
       .select('id, reference, email, status, total_cents, payment_method')
       .eq('reference', String(orderReference).toUpperCase().trim())
-      .ilike('email', String(email).trim())
       .maybeSingle();
 
-    if (!order) {
+    if (!order || !isOrderOwner(normalizedEmail, order.email)) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     }
 

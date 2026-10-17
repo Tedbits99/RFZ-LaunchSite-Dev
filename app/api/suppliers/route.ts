@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
 import { SUPPORTED_ADAPTERS } from '@/lib/suppliers/adapter';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdmin } from '@/lib/adminGuard';
 
 const VALID_ADAPTERS = new Set<string>(SUPPORTED_ADAPTERS);
 
@@ -12,15 +13,10 @@ function normalizeAdapter(value: unknown): string {
   return adapter;
 }
 
-function getDb() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
-export async function GET() {
-  const db = getDb();
+export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
   const { data, error } = await db
@@ -32,8 +28,10 @@ export async function GET() {
   return NextResponse.json({ data });
 }
 
-export async function POST(req: Request) {
-  const db = getDb();
+export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
   const body = await req.json();
@@ -70,8 +68,10 @@ export async function POST(req: Request) {
   return NextResponse.json({ data });
 }
 
-export async function PATCH(req: Request) {
-  const db = getDb();
+export async function PATCH(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
   const body = await req.json();
@@ -95,8 +95,10 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ data });
 }
 
-export async function DELETE(req: Request) {
-  const db = getDb();
+export async function DELETE(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
   const { searchParams } = new URL(req.url);

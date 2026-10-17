@@ -3,6 +3,8 @@ import { ChevronRight, Package } from 'lucide-react';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
 import SiteFooter from '@/components/SiteFooter';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { normalizeOrderEmail } from '@/lib/orderAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,20 +29,27 @@ const statusColor: Record<string, string> = {
   REFUNDED: 'text-slate-400',
 };
 
-export default async function AccountOrders({ searchParams }: { searchParams: { email?: string } }) {
+export default async function AccountOrders() {
   let orders: Order[] = [];
-  let hasEmail = false;
+  let authenticatedEmail: string | null = null;
 
-  // The account page is email-based (no auth yet). If an email param is provided,
-  // load that customer's orders. Otherwise show the search prompt.
-  if (searchParams.email) {
+  try {
+    const authClient = createSupabaseServerClient();
+    const { data: { user } } = await authClient.auth.getUser();
+    authenticatedEmail = normalizeOrderEmail(user?.email);
+  } catch {
+    authenticatedEmail = null;
+  }
+
+  // Never use a caller-provided email as ownership proof. Guest users must use
+  // the reference + email tracking flow instead.
+  if (authenticatedEmail) {
     const client = adminSupabase || supabase;
     if (client) {
-      hasEmail = true;
       const { data } = await client
         .from('orders')
         .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
-        .ilike('email', searchParams.email)
+        .eq('email', authenticatedEmail)
         .order('created_at', { ascending: false })
         .limit(20);
       orders = (data || []) as unknown as Order[];
@@ -65,13 +74,9 @@ export default async function AccountOrders({ searchParams }: { searchParams: { 
         <h1 className="font-display mt-4 text-2xl font-bold">My Orders</h1>
         <p className="mt-2 text-sm text-slate-400">View your order history and track status.</p>
 
-        {!hasEmail ? (
+        {!authenticatedEmail ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-sm text-slate-500">
-            <p>Enter your email to see your orders, or <Link href="/track-order" className="text-cyan-300">track a specific order</Link>.</p>
-            <form className="mt-4 flex gap-2" action="/account/orders" method="GET">
-              <input name="email" type="email" placeholder="your@email.com" className="flex-1 rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-2.5 text-sm outline-none focus:border-cyan-400" />
-              <button type="submit" className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-5 py-2.5 text-sm font-semibold">Show Orders</button>
-            </form>
+            <p>Sign in to view private order history, or <Link href="/track-order" className="text-cyan-300">track a specific guest order</Link> using its reference and email.</p>
           </div>
         ) : orders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-center text-sm text-slate-500">

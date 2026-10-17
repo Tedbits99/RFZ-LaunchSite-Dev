@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 import AccountOrderDetailClient from './AccountOrderDetailClient';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +30,21 @@ type TimelineEntry = {
   created_at: string;
 };
 
-export default async function AccountOrderDetail({ params }: { params: { id: string } }) {
+export default async function AccountOrderDetail({ params, searchParams }: { params: { id: string }; searchParams: { email?: string } }) {
+  let authenticatedEmail: string | null = null;
+  try {
+    const authClient = createSupabaseServerClient();
+    const { data: { user } } = await authClient.auth.getUser();
+    authenticatedEmail = normalizeOrderEmail(user?.email);
+  } catch {
+    authenticatedEmail = null;
+  }
+
+  // Authenticated users are bound to their session email. Guests must provide
+  // the same order-specific email proof used by the tracking flow.
+  const accessEmail = authenticatedEmail || normalizeOrderEmail(searchParams.email);
+  if (!accessEmail) notFound();
+
   // Prefer the service-role client, but fall back to the anon client so the
   // page still renders in runtimes where the service key is not injected
   // (RLS allows anon SELECT on orders/order_timeline). Without this fallback
@@ -42,7 +58,7 @@ export default async function AccountOrderDetail({ params }: { params: { id: str
     .eq('id', params.id)
     .maybeSingle();
   const order = data as unknown as Order | null;
-  if (!order) notFound();
+  if (!order || !isOrderOwner(accessEmail, order.email)) notFound();
 
   const { data: timelineData } = await client
     .from('order_timeline')
@@ -51,5 +67,5 @@ export default async function AccountOrderDetail({ params }: { params: { id: str
     .order('created_at', { ascending: true });
   const timeline = (timelineData || []) as unknown as TimelineEntry[];
 
-  return <AccountOrderDetailClient order={order} timeline={timeline} />;
+  return <AccountOrderDetailClient order={order} timeline={timeline} accessEmail={accessEmail} />;
 }

@@ -1884,24 +1884,24 @@ describe('Immediate polling — supplier completion propagates to order status',
   });
 
   it('supplier reports processing → order stays PROCESSING', () => {
-    const supplierStatus = 'processing';
+    const supplierStatus: string = 'processing';
     const orderBefore = 'PROCESSING';
     const orderAfter = supplierStatus === 'completed' ? 'COMPLETED' : supplierStatus === 'failed' ? 'FAILED' : orderBefore;
     expect(orderAfter).toBe('PROCESSING');
   });
 
   it('COMPLETED transition only happens if payment is VERIFIED', () => {
-    const supplierStatus = 'completed';
-    const paymentStatus = 'VERIFIED';
-    const fulfillmentStatus = 'PROCESSING';
+    const supplierStatus: string = 'completed';
+    const paymentStatus: string = 'VERIFIED';
+    const fulfillmentStatus: string = 'PROCESSING';
     const canTransition = supplierStatus === 'completed' && paymentStatus === 'VERIFIED' && fulfillmentStatus === 'PROCESSING';
     expect(canTransition).toBe(true);
   });
 
   it('COMPLETED transition is blocked if payment is NOT verified', () => {
-    const supplierStatus = 'completed';
-    const paymentStatus = 'UNPAID';
-    const fulfillmentStatus = 'PROCESSING';
+    const supplierStatus: string = 'completed';
+    const paymentStatus: string = 'UNPAID';
+    const fulfillmentStatus: string = 'PROCESSING';
     const canTransition = supplierStatus === 'completed' && paymentStatus === 'VERIFIED' && fulfillmentStatus === 'PROCESSING';
     expect(canTransition).toBe(false);
   });
@@ -1909,7 +1909,7 @@ describe('Immediate polling — supplier completion propagates to order status',
   it('COMPLETED transition is blocked if order is already COMPLETED', () => {
     const supplierStatus = 'completed';
     const paymentStatus = 'VERIFIED';
-    const fulfillmentStatus = 'COMPLETED';
+    const fulfillmentStatus: string = 'COMPLETED';
     const canTransition = fulfillmentStatus === 'PROCESSING';
     expect(canTransition).toBe(false);
   });
@@ -1949,7 +1949,7 @@ describe('Immediate polling — no duplicate fulfillment', () => {
     // The first update sets COMPLETED; the second's WHERE clause no longer
     // matches (fulfillment_status is now COMPLETED), so it's a no-op.
     const firstUpdateMatched = true;
-    const statusAfterFirst = 'COMPLETED';
+    const statusAfterFirst: string = 'COMPLETED';
     const secondUpdateMatched = statusAfterFirst === 'PROCESSING';
     expect(firstUpdateMatched).toBe(true);
     expect(secondUpdateMatched).toBe(false);

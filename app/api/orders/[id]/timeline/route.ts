@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const client = adminSupabase || supabase;
@@ -8,7 +9,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Service unavailable.' }, { status: 503 });
   }
   const { searchParams } = new URL(req.url);
-  const email = searchParams.get('email');
+  const email = normalizeOrderEmail(searchParams.get('email'));
 
   if (!email) {
     return NextResponse.json({ error: 'Email is required.' }, { status: 400 });
@@ -18,10 +19,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     .from('orders')
     .select('id, email')
     .eq('id', params.id)
-    .ilike('email', email.trim())
     .maybeSingle();
 
-  if (!order) {
+  if (!order || !isOrderOwner(email, order.email)) {
     return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
   }
 

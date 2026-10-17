@@ -1,14 +1,10 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-function getClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return url && key ? createClient(url, key, { auth: { persistSession: false } }) : null;
-}
+import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdmin } from '@/lib/adminGuard';
 
 export async function GET() {
-  const sb = getClient();
+  const sb = supabase;
   if (!sb) return NextResponse.json({ data: null, error: 'Database not configured' }, { status: 503 });
 
   const { data, error } = await sb
@@ -22,8 +18,10 @@ export async function GET() {
   return NextResponse.json({ data });
 }
 
-export async function POST(req: Request) {
-  const sb = getClient();
+export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const sb = adminSupabase || auth.client;
   if (!sb) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
   const body = await req.json();

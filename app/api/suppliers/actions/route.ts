@@ -1,7 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { testSupplierConnection, checkSupplierBalance, syncSupplierCatalog } from '@/lib/suppliers/fulfillment';
+import { requireAdmin } from '@/lib/adminGuard';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
   const body = await req.json();
   const { action, supplier_id } = body;
 
