@@ -38,6 +38,10 @@ The migration [20260928072329_20260928_fix_rpc_ambiguous_column.sql](../../supab
 
 This is a test-only baseline reconstruction. It does not rewrite or delete any historical migration. The excluded fulfillment copy is superseded by the corrected duplicate, and the excluded ambiguous-column copy is superseded by the explicit drop/recreate migration immediately after it. The retained migrations therefore provide the complete later schema and security behavior without replaying a known-invalid historical replacement.
 
+The migration [20260928124803_honor_of_kings_uid_input_field.sql](../../supabase/migrations/20260928124803_honor_of_kings_uid_input_field.sql) is excluded because it inserts a hardcoded game UUID that is not created by the catalog seed. The catalog migration [20260927062024_runfazone_core_catalog.sql](../../supabase/migrations/20260927062024_runfazone_core_catalog.sql) creates Honor of Kings by slug with `gen_random_uuid()`. The later corrected migration [20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql](../../supabase/migrations/20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql) resolves the game ID by slug, raises if the catalog record is absent, and remains included. A test fixture for the hardcoded UUID would conflict with the generated catalog identity and could alter catalog semantics, so the superseded historical copy is excluded instead.
+
+The baseline now has four explicit exclusions: the reconciliation scheduler, incomplete fulfillment schema, invalid status-RPC replacement, and hardcoded Honor of Kings UID migration. The wrapper also fails closed before database startup if the corrected slug-based Honor of Kings migration is missing. All other migrations are copied in timestamp order; the expected count check fails closed if an exclusion is missing or the filter is changed.
+
 The wrapper scans all other migrations for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added without being explicitly reviewed and added to the exclusion policy, or if any expected baseline exclusion disappears, the workflow exits before starting the database.
 
 This prevents the known reconciliation scheduler from being created and prevents an accidental new outbound SQL integration from silently entering the test baseline. The historical production migration is not edited.
@@ -84,13 +88,14 @@ Guaranteed by the workflow:
 - No Supabase project reference or remote database URL is configured.
 - No `supabase db push`, remote link, Edge Function deployment, or Bolt publishing command exists.
 - The database URL is checked to be loopback before `psql` runs.
-- The known reconciliation scheduler, incomplete fulfillment migration, and invalid historical RPC replacement are explicitly excluded.
+- The known reconciliation scheduler, incomplete fulfillment migration, invalid historical RPC replacement, and hardcoded Honor of Kings UID migration are explicitly excluded.
 - Temporary Docker services and files are cleaned up on exit.
 
 Limitations:
 
 - The excluded scheduler migration is not integration-tested here.
 - The excluded historical RPC replacement is not integration-tested as a standalone migration; its corrected drop/recreate successor and final hardened definition are tested.
+- The excluded hardcoded Honor of Kings migration is not integration-tested as a standalone migration; its slug-based corrected successor is tested.
 - The actual Bolt Database schema, roles, deployed functions, Vault contents, schedules, and secrets are not verified.
 - GitHub runner Docker isolation prevents normal access to the internet from the test SQL path, but this workflow is additionally protected by migration filtering; it is not a substitute for production network policy.
 - Database tests do not prove payment-provider or supplier-provider behavior.
