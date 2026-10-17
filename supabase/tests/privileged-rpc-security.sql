@@ -187,6 +187,14 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
   END;
+  BEGIN
+    PERFORM 1 FROM public.admin_delete_payment_config(
+      '00000000-0000-0000-0000-000000000099'
+    );
+    RAISE EXCEPTION 'anonymous payment-config deletion unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
 END $$;
 RESET ROLE;
 
@@ -222,6 +230,16 @@ BEGIN
       p_logo_url => NULL::text
     );
     RAISE EXCEPTION 'non-admin hardened payment-config mutation unexpectedly executed';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'FORBIDDEN' THEN
+      RAISE;
+    END IF;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_delete_payment_config(
+      '00000000-0000-0000-0000-000000000099'
+    );
+    RAISE EXCEPTION 'non-admin payment-config deletion unexpectedly executed';
   EXCEPTION WHEN raise_exception THEN
     IF SQLERRM <> 'FORBIDDEN' THEN
       RAISE;
@@ -329,10 +347,14 @@ DO $$
 DECLARE
   r record;
 BEGIN
+  IF to_regprocedure('public.admin_delete_payment_config(uuid)') IS NULL THEN
+    RAISE EXCEPTION 'Expected admin_delete_payment_config(uuid) is missing';
+  END IF;
+
   FOR r IN
     SELECT p.oid::regprocedure AS signature,
            p.prosecdef AS security_definer,
-           pg_get_functiondef(p.oid) AS definition
+           p.proconfig AS config
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
@@ -345,13 +367,31 @@ BEGIN
     IF NOT r.security_definer THEN
       RAISE EXCEPTION '% is not SECURITY DEFINER', r.signature;
     END IF;
-    IF r.definition NOT ILIKE '%search_path = public%' THEN
-      RAISE EXCEPTION '% does not lock search_path to public', r.signature;
+    IF NOT EXISTS (
+         SELECT 1
+         FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
+         WHERE setting = 'search_path=public'
+       )
+       OR EXISTS (
+         SELECT 1
+         FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
+         WHERE setting LIKE 'search_path=%'
+           AND setting <> 'search_path=public'
+       ) THEN
+      RAISE EXCEPTION '% does not lock search_path to exactly public (proconfig=%)', r.signature, r.config;
     END IF;
     IF pg_get_userbyid((SELECT proowner FROM pg_proc WHERE oid = r.signature::regprocedure)) IN ('anon', 'authenticated') THEN
       RAISE EXCEPTION '% is owned by an untrusted API role', r.signature;
     END IF;
   END LOOP;
+END $$;
+
+DO $$
+BEGIN
+  IF has_schema_privilege('anon', 'public', 'CREATE')
+     OR has_schema_privilege('authenticated', 'public', 'CREATE') THEN
+    RAISE EXCEPTION 'An untrusted API role can CREATE objects in public';
+  END IF;
 END $$;
 
 ROLLBACK;
