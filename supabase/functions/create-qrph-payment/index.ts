@@ -257,7 +257,7 @@ Deno.serve(async (req: Request) => {
     if (!capability) return json({ error: "Order not found." }, 404);
     if (order.status !== "WAITING_PAYMENT") {
       if (["PAID", "PROCESSING", "COMPLETED"].includes(order.status)) {
-        return json({ success: true, alreadyPaid: true });
+        return json({ success: true, alreadyPaid: true }, 200);
       }
       return json({ error: "Order is not awaiting payment." }, 400);
     }
@@ -271,7 +271,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (existingTx?.status === "paid") {
-      return json({ success: true, alreadyPaid: true });
+      return json({ success: true, alreadyPaid: true }, 200);
     }
 
     if (existingTx?.qr_image_url && ["pending", "processing"].includes(existingTx.status)) {
@@ -284,7 +284,7 @@ Deno.serve(async (req: Request) => {
           expiresAt: existingTx.expires_at,
           amountCents: order.total_cents,
           message: "Existing QR Ph payment session found.",
-        });
+        }, 200);
       }
     }
 
@@ -355,7 +355,7 @@ Deno.serve(async (req: Request) => {
       paymentIntentId: result.paymentIntentId,
       expiresAt: result.expiresAt,
       amountCents: order.total_cents,
-    });
+    }, 200);
   } catch {
     return json({ error: "Something went wrong." }, 500);
   }
