@@ -67,13 +67,13 @@ describe('customer order ownership contracts', () => {
     const listCode = source('app/account/orders/page.tsx');
     const accountCode = source('app/account/page.tsx');
 
-    expect(pageCode).toContain('createSupabaseServerClient');
-    expect(pageCode).toContain(".eq('customer_user_id', authenticatedUserId)");
+    expect(pageCode).toContain('getActiveCustomerSession');
+    expect(pageCode).toContain(".eq('customer_user_id', session.user.id)");
     expect(pageCode).not.toContain('isOrderOwner');
-    expect(listCode).toContain('createSupabaseServerClient');
-    expect(listCode).toContain(".eq('customer_user_id', authenticatedUserId)");
+    expect(listCode).toContain('getActiveCustomerSession');
+    expect(listCode).toContain(".eq('customer_user_id', session.user.id)");
     expect(listCode).not.toContain(".ilike('email'");
-    expect(accountCode).toContain('createSupabaseServerClient');
-    expect(accountCode).toContain(".eq('customer_user_id', userId)");
+    expect(accountCode).toContain('getActiveCustomerSession');
+    expect(accountCode).toContain(".eq('customer_user_id', session.user.id)");
   });
 });

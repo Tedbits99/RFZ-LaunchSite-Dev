@@ -1,6 +1,5 @@
-import { notFound } from 'next/navigation';
-import { adminSupabase } from '@/lib/supabaseAdmin';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { notFound, redirect } from 'next/navigation';
+import { getActiveCustomerSession } from '@/lib/customerSession';
 import AccountOrderDetailClient from './AccountOrderDetailClient';
 
 export const dynamic = 'force-dynamic';
@@ -29,28 +28,19 @@ type TimelineEntry = {
 };
 
 export default async function AccountOrderDetail({ params }: { params: { id: string } }) {
-  let authenticatedUserId: string | null = null;
-  let authClient: ReturnType<typeof createSupabaseServerClient> | null = null;
-  try {
-    authClient = createSupabaseServerClient();
-    const { data: { user } } = await authClient.auth.getUser();
-    authenticatedUserId = user?.id || null;
-  } catch {
-    authenticatedUserId = null;
-  }
+  const session = await getActiveCustomerSession();
 
   // Guest access is handled by /track-order after one-time email verification;
   // account detail pages authorize only by the verified Auth UUID.
-  if (!authenticatedUserId || !authClient) notFound();
+  if (!session) redirect('/login');
 
-  const client = adminSupabase || authClient;
-  if (!client) return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>;
+  const client = session.client;
 
   const { data } = await client
     .from('orders')
     .select('id, reference, email, status, payment_status, fulfillment_status, total_cents, created_at, updated_at, player_inputs, payment_method, games(name), packages(name, amount)')
     .eq('id', params.id)
-    .eq('customer_user_id', authenticatedUserId)
+    .eq('customer_user_id', session.user.id)
     .maybeSingle();
   const order = data as unknown as Order | null;
   if (!order) notFound();

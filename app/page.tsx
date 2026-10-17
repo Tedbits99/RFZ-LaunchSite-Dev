@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, BadgeCheck, ChevronLeft, ChevronRight, Headphones, Menu, Search, ShieldCheck, Sparkles, Tag, UserRound, WalletCards, X, Zap } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
+import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
 import AnnouncementPopup from '@/components/AnnouncementPopup';
 import SiteFooter from '@/components/SiteFooter';
 
@@ -35,6 +36,7 @@ export default function Home() {
   const [heroAspect, setHeroAspect] = useState<number | null>(null);
   const [heroLoaded, setHeroLoaded] = useState(false);
   const [cardBanners, setCardBanners] = useState<Record<string, string>>({});
+  const [customerSignedIn, setCustomerSignedIn] = useState(false);
 
   useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('*').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => {}); } catch {} }, []);
   useEffect(() => {
@@ -61,6 +63,18 @@ export default function Home() {
     } catch { clearTimeout(timeout); finish(); }
   }, []);
   useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('promotions').select('target_game_id, image_url').eq('is_active', true).eq('placement', 'GAME_CARD').order('sort_order')).then(({ data }) => { if (data?.length) { const banners: Record<string, string> = {}; (data as CardPromo[]).forEach(p => { if (p.target_game_id && p.image_url && !banners[p.target_game_id]) banners[p.target_game_id] = p.image_url; }); setCardBanners(banners); } }).catch(() => {}); } catch {} }, []);
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const customer = createCustomerBrowserClient();
+      customer.auth.getSession().then(({ data }) => {
+        if (!cancelled) setCustomerSignedIn(Boolean(data.session));
+      }).catch(() => {});
+    } catch {
+      // The signed-out destination is the safe default while Auth is unavailable.
+    }
+    return () => { cancelled = true; };
+  }, []);
   const slideCount = heroImages.length;
   useEffect(() => { if (slide > 0 && slide >= slideCount) setSlide(0); }, [slideCount, slide]);
   useEffect(() => { if (slideCount <= 1) return; const timer = setInterval(() => setSlide((s) => (s + 1) % slideCount), 6000); return () => clearInterval(timer); }, [slideCount]);
@@ -74,9 +88,9 @@ export default function Home() {
     <AnnouncementPopup />
     <header className="sticky top-0 z-30 border-b border-[#14203a] bg-[#030718]/90 backdrop-blur-xl"><div className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-4">
       <a href="#top" className="font-display flex items-center text-xl font-bold tracking-tight"><img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1789837643/R_logo_1_au2g5c.png" alt="RunFazone" width={1701} height={378} className="h-10 w-auto object-contain" /></a>
-      <div className="hidden items-center gap-2 md:flex"><nav className="mr-5 flex items-center gap-5 text-[12px] text-slate-400"><a className="text-cyan-300" href="#top">Home</a><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></nav><a href="#track" className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-200 transition hover:border-cyan-400"><Search size={13} className="mr-1 inline text-cyan-300" />Track Order</a><a href="/account" className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-300"><UserRound size={13} className="mr-1 inline" />Account</a></div>
+      <div className="hidden items-center gap-2 md:flex"><nav className="mr-5 flex items-center gap-5 text-[12px] text-slate-400"><a className="text-cyan-300" href="#top">Home</a><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></nav><a href="#track" className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-200 transition hover:border-cyan-400"><Search size={13} className="mr-1 inline text-cyan-300" />Track Order</a><a href={customerSignedIn ? '/account' : '/login'} className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-300"><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a></div>
       <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Open menu">{mobileOpen ? <X /> : <Menu />}</button>
-    </div>{mobileOpen && <nav className="border-t border-[#14203a] px-5 py-4 md:hidden"><div className="flex flex-col gap-4 text-slate-300"><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></div></nav>}</header>
+    </div>{mobileOpen && <nav className="border-t border-[#14203a] px-5 py-4 md:hidden"><div className="flex flex-col gap-4 text-slate-300"><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a><a href={customerSignedIn ? '/account' : '/login'}><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a></div></nav>}</header>
 
     <section id="top" className="mx-auto max-w-[1180px] px-5 pt-7"><div className="hero-glow grid-bg relative overflow-hidden rounded-2xl border border-[#1a3553] bg-gradient-to-br from-[#0b2840] via-[#09152d] to-[#1b092d]" style={heroAspect ? { aspectRatio: String(heroAspect) } : { minHeight: '300px' }}>{!heroLoaded ? <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-[#0b2840] via-[#09152d] to-[#1b092d]" /> : heroImages.length > 0 ? <>{heroImages.map((img, i) => img ? <img key={i} src={img} alt="" aria-hidden="true" className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${slide === i ? 'opacity-100' : 'opacity-0'}`} /> : <span key={i} />)}{heroCtas[slide] && <a href={heroCtas[slide]!} className="absolute inset-0 z-10" aria-label="Promotion link" />}</> : <><div className="absolute -right-20 top-1/2 h-80 w-80 -translate-y-1/2 rounded-full bg-cyan-400/10 blur-3xl" /><div className="absolute inset-0 flex flex-col justify-center p-6 sm:p-8 md:p-14"><div className="relative max-w-xl"><span className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-300 sm:mb-5"><Sparkles size={12} /> Limited time offer</span><h1 className="font-display text-4xl font-bold leading-[.95] sm:text-5xl md:text-7xl">{heroCopy[0]}<br /><span className="bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">{heroCopy[1]}</span></h1><p className="mt-4 max-w-sm text-xs text-slate-300 sm:mt-5 sm:text-sm">{heroCopy[2]}</p><a href="#games" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-2.5 text-xs font-semibold shadow-lg shadow-blue-900/40 transition hover:brightness-110 sm:mt-7 sm:px-5 sm:py-3">Explore Games <ArrowRight size={14} /></a><div className="mt-6 flex gap-4 text-[10px] text-slate-400 sm:mt-8 sm:gap-5"><span><Zap size={13} className="mr-1 inline text-cyan-300" />Easy & Fast</span><span><ShieldCheck size={13} className="mr-1 inline text-cyan-300" />Secure</span><span><Tag size={13} className="mr-1 inline text-violet-300" />Best Prices</span></div></div></div></>}{slideCount > 1 && <><button className="absolute left-2 top-1/2 z-20 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-black/30 sm:left-0 sm:h-8 sm:w-8" onClick={() => setSlide((slide + slideCount - 1) % slideCount)}><ChevronLeft size={16}/></button><button className="absolute right-2 top-1/2 z-20 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-black/30 sm:right-0 sm:h-8 sm:w-8" onClick={() => setSlide((slide + 1) % slideCount)}><ChevronRight size={16}/></button><div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-2 sm:bottom-4">{Array.from({ length: slideCount }, (_, i) => <button key={i} onClick={() => setSlide(i)} className={`h-1.5 w-1.5 rounded-full ${slide === i ? 'w-5 bg-cyan-300' : 'bg-slate-600'}`} />)}</div></>}</div></section>
 

@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
-import { adminSupabase } from '@/lib/supabaseAdmin';
 import SiteFooter from '@/components/SiteFooter';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { redirect } from 'next/navigation';
+import { getActiveCustomerSession } from '@/lib/customerSession';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,31 +28,18 @@ const statusColor: Record<string, string> = {
 };
 
 export default async function AccountOrders() {
-  let orders: Order[] = [];
-  let authenticatedUserId: string | null = null;
-
-  try {
-    const authClient = createSupabaseServerClient();
-    const { data: { user } } = await authClient.auth.getUser();
-    authenticatedUserId = user?.id || null;
-  } catch {
-    authenticatedUserId = null;
-  }
-
   // Account history is based only on immutable Auth UUID ownership. Existing
   // guest orders remain unlinked and use the separate verified recovery flow.
-  if (authenticatedUserId) {
-    const client = adminSupabase || createSupabaseServerClient();
-    if (client) {
-      const { data } = await client
-        .from('orders')
-        .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
-        .eq('customer_user_id', authenticatedUserId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      orders = (data || []) as unknown as Order[];
-    }
-  }
+  const session = await getActiveCustomerSession();
+  if (!session) redirect('/login');
+
+  const { data } = await session.client
+    .from('orders')
+    .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
+    .eq('customer_user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  const orders = (data || []) as unknown as Order[];
 
   const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
 
@@ -72,11 +59,7 @@ export default async function AccountOrders() {
         <h1 className="font-display mt-4 text-2xl font-bold">My Orders</h1>
         <p className="mt-2 text-sm text-slate-400">View your order history and track status.</p>
 
-        {!authenticatedUserId ? (
-          <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-sm text-slate-500">
-            <p>Sign in to view private order history, or <Link href="/track-order" className="text-cyan-300">track a specific guest order</Link> using its reference and email.</p>
-          </div>
-        ) : orders.length === 0 ? (
+        {orders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-center text-sm text-slate-500">
             <Package className="mx-auto mb-2 text-slate-700" size={24} />
             No orders found for this email. <Link href="/" className="text-cyan-300">Browse games</Link> to place your first order.

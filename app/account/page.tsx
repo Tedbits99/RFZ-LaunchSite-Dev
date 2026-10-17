@@ -1,37 +1,24 @@
 import { Package, UserRound, Wallet } from 'lucide-react';
-import { adminSupabase } from '@/lib/supabaseAdmin';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import SiteFooter from '@/components/SiteFooter';
+import { redirect } from 'next/navigation';
+import { getActiveCustomerSession } from '@/lib/customerSession';
 
 export const dynamic = 'force-dynamic';
 
 type Order = { id: string; reference: string; status: string; total_cents: number; created_at: string; games?: { name: string } | null };
 
 export default async function Account() {
-  let email: string | null = null;
-  let userId: string | null = null;
-  let orders: Order[] = [];
+  const session = await getActiveCustomerSession();
+  if (!session) redirect('/login');
 
-  try {
-    const authClient = createSupabaseServerClient();
-    const { data: { user } } = await authClient.auth.getUser();
-    email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : null;
-    userId = user?.id || null;
-
-    if (userId) {
-      const db = adminSupabase || authClient;
-      const { data } = await db
-        .from('orders')
-        .select('id, reference, status, total_cents, created_at, games(name)')
-        .eq('customer_user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      orders = (data as unknown as Order[]) || [];
-    }
-  } catch {
-    // Missing local configuration or an unavailable session is treated as a
-    // guest account, which must not receive private order data.
-  }
+  const { data } = await session.client
+    .from('orders')
+    .select('id, reference, status, total_cents, created_at, games(name)')
+    .eq('customer_user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  const orders = (data as unknown as Order[]) || [];
+  const email = typeof session.user.email === 'string' ? session.user.email.trim().toLowerCase() : null;
 
   const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
   const totalSpent = orders.filter((o) => o.status === 'PAID' || o.status === 'COMPLETED').reduce((s, o) => s + o.total_cents, 0);
@@ -48,7 +35,7 @@ export default async function Account() {
         </div>
         <h2 className="font-display mt-10 mb-4 text-xl font-bold">Order History</h2>
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225]">
-          {!email ? <p className="p-6 text-sm text-slate-500">Sign in to view private order history, or <a href="/track-order" className="text-cyan-300">track a guest order</a> using its reference and email.</p> : orders.length === 0 ? <p className="p-6 text-sm text-slate-500">No orders yet. <a href="/" className="text-cyan-300">Browse games</a> to get started.</p> :
+          {orders.length === 0 ? <p className="p-6 text-sm text-slate-500">No orders yet. <a href="/" className="text-cyan-300">Browse games</a> to get started.</p> :
             <table className="w-full text-left text-xs"><thead className="text-slate-500"><tr className="border-b border-[#1b2a45]"><th className="p-4 font-medium">Reference</th><th className="p-4 font-medium">Game</th><th className="p-4 font-medium">Status</th><th className="p-4 text-right font-medium">Total</th></tr></thead>
               <tbody>{orders.map((o) => <tr key={o.id} className="border-b border-[#0f1b31]"><td className="p-4 font-mono text-cyan-300"><a href={`/account/orders/${o.id}`}>{o.reference}</a></td><td className="p-4 text-slate-300">{o.games?.name || '—'}</td><td className="p-4 text-slate-400">{o.status}</td><td className="p-4 text-right font-medium">{fmtP(o.total_cents)}</td></tr>)}</tbody>
             </table>}

@@ -1,7 +1,8 @@
 import { cookies } from 'next/headers';
-import { createBrowserClient, createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sessionCookieName, type AuthSessionContext } from '@/lib/authSessionConfig';
+export { createCustomerBrowserClient, createAdminBrowserClient } from '@/lib/authSessionBrowserClients';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -10,26 +11,6 @@ function supabaseConfig() {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) throw new Error('Supabase is not configured.');
   return { url, anonKey };
-}
-
-function browserOptions(context: AuthSessionContext) {
-  return {
-    cookieOptions: { name: sessionCookieName(context) },
-    cookieEncoding: 'base64url' as const,
-    // The existing browser factory is a singleton. These isolated factories
-    // must never share that cache across customer/admin contexts.
-    isSingleton: false,
-  };
-}
-
-export function createCustomerBrowserClient(): SupabaseClient {
-  const { url, anonKey } = supabaseConfig();
-  return createBrowserClient(url, anonKey, browserOptions('customer'));
-}
-
-export function createAdminBrowserClient(): SupabaseClient {
-  const { url, anonKey } = supabaseConfig();
-  return createBrowserClient(url, anonKey, browserOptions('admin'));
 }
 
 function createServerClientForContext(context: AuthSessionContext) {
