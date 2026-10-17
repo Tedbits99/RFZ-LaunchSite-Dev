@@ -1065,14 +1065,28 @@ BEGIN
     RAISE EXCEPTION 'admin activated a user without confirmed email';
   EXCEPTION WHEN raise_exception THEN
     IF SQLERRM <> 'EMAIL_NOT_VERIFIED' THEN RAISE; END IF;
-  END;
+    END;
+END $$;
 
+SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000011"}', true);
+DO $$
+DECLARE
+  v_status text;
+  v_error text;
+BEGIN
   SELECT out_status, out_error INTO v_status, v_error
   FROM public.activate_customer_profile();
   IF v_status <> 'suspended' OR v_error <> 'ACCOUNT_RESTRICTED' THEN
     RAISE EXCEPTION 'activation unexpectedly changed a suspended account: %, %', v_status, v_error;
   END IF;
+END $$;
 
+SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000013"}', true);
+DO $$
+DECLARE
+  v_status text;
+  v_error text;
+BEGIN
   SELECT out_status, out_error INTO v_status, v_error
   FROM public.admin_set_customer_profile_status(
     '00000000-0000-0000-0000-000000000011', 'deactivated'
@@ -1080,11 +1094,18 @@ BEGIN
   IF v_status <> 'deactivated' OR v_error IS NOT NULL THEN
     RAISE EXCEPTION 'admin deactivation failed: %, %', v_status, v_error;
   END IF;
+END $$;
 
+SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000011"}', true);
+DO $$
+DECLARE
+  v_status text;
+  v_error text;
+BEGIN
   SELECT out_status, out_error INTO v_status, v_error
   FROM public.activate_customer_profile();
   IF v_status <> 'deactivated' OR v_error <> 'ACCOUNT_RESTRICTED' THEN
-    RAISE EXCEPTION 'deactivated customer was reactivated unexpectedly';
+    RAISE EXCEPTION 'deactivated customer was reactivated unexpectedly: %, %', v_status, v_error;
   END IF;
 END $$;
 RESET ROLE;
