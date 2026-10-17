@@ -92,6 +92,8 @@ DO $$
 DECLARE
   legacy_fn text := 'public.admin_upsert_payment_config(uuid,text,text,text,text,text,boolean,text,text,text,text,text,boolean,text,text[],integer,integer,integer,text,text)';
   current_fn text := 'public.admin_upsert_payment_config(uuid,text,text,text,text,text,boolean,text,text,text,text,text,boolean,text,text[],integer,integer,integer,text,text,text)';
+  legacy_oid oid;
+  current_oid oid;
   legacy_owner text;
   current_owner text;
 BEGIN
@@ -99,23 +101,26 @@ BEGIN
     RAISE EXCEPTION 'Expected payment-config overloads are missing';
   END IF;
 
+  legacy_oid := to_regprocedure(legacy_fn)::oid;
+  current_oid := to_regprocedure(current_fn)::oid;
+
   SELECT pg_get_userbyid(p.proowner)
   INTO legacy_owner
   FROM pg_proc p
-  WHERE p.oid = to_regprocedure(legacy_fn)::oid;
+  WHERE p.oid = legacy_oid;
 
   SELECT pg_get_userbyid(p.proowner)
   INTO current_owner
   FROM pg_proc p
-  WHERE p.oid = to_regprocedure(current_fn)::oid;
+  WHERE p.oid = current_oid;
 
   IF legacy_owner IN ('anon', 'authenticated') OR current_owner IN ('anon', 'authenticated') THEN
     RAISE EXCEPTION 'Payment-config overload has an untrusted owner';
   END IF;
 
-  IF has_function_privilege('anon', legacy_fn, 'EXECUTE')
-     OR has_function_privilege('authenticated', legacy_fn, 'EXECUTE')
-     OR has_function_privilege('service_role', legacy_fn, 'EXECUTE') THEN
+  IF has_function_privilege('anon', legacy_oid, 'EXECUTE')
+     OR has_function_privilege('authenticated', legacy_oid, 'EXECUTE')
+     OR has_function_privilege('service_role', legacy_oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'Legacy payment-config overload remains executable by a restricted role';
   END IF;
 
@@ -123,16 +128,16 @@ BEGIN
     SELECT 1
     FROM pg_proc p,
          LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
-    WHERE p.oid = to_regprocedure(legacy_fn)::oid
+    WHERE p.oid = legacy_oid
       AND acl.grantee = 0
       AND acl.privilege_type = 'EXECUTE'
   ) THEN
     RAISE EXCEPTION 'Legacy payment-config overload retains PUBLIC EXECUTE';
   END IF;
 
-  IF has_function_privilege('anon', current_fn, 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', current_fn, 'EXECUTE')
-     OR NOT has_function_privilege('service_role', current_fn, 'EXECUTE') THEN
+  IF has_function_privilege('anon', current_oid, 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', current_oid, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', current_oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'Hardened payment-config overload has unexpected EXECUTE privileges';
   END IF;
 
@@ -140,13 +145,21 @@ BEGIN
     SELECT 1
     FROM pg_proc p,
          LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
-    WHERE p.oid = to_regprocedure(current_fn)::oid
+    WHERE p.oid = current_oid
       AND acl.grantee = 0
       AND acl.privilege_type = 'EXECUTE'
   ) THEN
     RAISE EXCEPTION 'Hardened payment-config overload retains PUBLIC EXECUTE';
   END IF;
 END $$;
+
+-- PostgreSQL cannot unambiguously execute the legacy overload with 20
+-- arguments because the hardened 21-argument overload has a defaulted
+-- p_logo_url and shares the first 20 input types. Explicit casts do not change
+-- that overload resolution. The exact legacy OID ACL assertions above are
+-- therefore the security test for that overload; they fail CI if EXECUTE is
+-- restored to anon, authenticated, service_role, or PUBLIC. Runtime tests
+-- below target the unambiguous hardened 21-argument overload.
 
 -- Anonymous callers must fail at the privilege boundary, not merely return no
 -- rows. The role and claim are set exactly as PostgREST sets them.
@@ -161,24 +174,16 @@ BEGIN
     NULL;
   END;
 END $$;
-RESET ROLE;
 
--- The legacy overload must fail by role privilege even when targeted with its
--- exact 20-argument positional signature. This prevents another overload from
--- making the negative assertion pass accidentally.
-SET LOCAL ROLE anon;
-SELECT set_config('request.jwt.claims', '{"role":"anon"}', true);
 DO $$
 BEGIN
   BEGIN
     PERFORM 1 FROM public.admin_upsert_payment_config(
-      NULL::uuid, 'legacy-anon-test'::text, 'Legacy Anon Test'::text,
-      'manual'::text, 'manual'::text, 'manual'::text, false,
-      ''::text, ''::text, NULL::text, ''::text, ''::text, false,
-      'PHP'::text, '{}'::text[], 0::integer, NULL::integer, NULL::integer,
-      ''::text, NULL::text
+      p_method_key => 'hardened-anon-test',
+      p_display_name => 'Hardened Anon Test',
+      p_logo_url => NULL::text
     );
-    RAISE EXCEPTION 'anonymous legacy payment-config mutation unexpectedly executed';
+    RAISE EXCEPTION 'anonymous hardened payment-config mutation unexpectedly executed';
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
   END;
@@ -209,18 +214,6 @@ BEGIN
     IF SQLERRM NOT IN ('FORBIDDEN', 'permission denied for function admin_change_order_status') THEN
       RAISE;
     END IF;
-  END;
-  BEGIN
-    PERFORM 1 FROM public.admin_upsert_payment_config(
-      NULL::uuid, 'legacy-user-test'::text, 'Legacy User Test'::text,
-      'manual'::text, 'manual'::text, 'manual'::text, false,
-      ''::text, ''::text, NULL::text, ''::text, ''::text, false,
-      'PHP'::text, '{}'::text[], 0::integer, NULL::integer, NULL::integer,
-      ''::text, NULL::text
-    );
-    RAISE EXCEPTION 'non-admin legacy payment-config mutation unexpectedly executed';
-  EXCEPTION WHEN insufficient_privilege THEN
-    NULL;
   END;
   BEGIN
     PERFORM 1 FROM public.admin_upsert_payment_config(
@@ -260,19 +253,6 @@ BEGIN
   IF v_count < 1 THEN
     RAISE EXCEPTION 'authorized admin payment-config read assertion failed';
   END IF;
-
-  BEGIN
-    PERFORM 1 FROM public.admin_upsert_payment_config(
-      NULL::uuid, 'legacy-admin-test'::text, 'Legacy Admin Test'::text,
-      'manual'::text, 'manual'::text, 'manual'::text, false,
-      ''::text, ''::text, NULL::text, ''::text, ''::text, false,
-      'PHP'::text, '{}'::text[], 0::integer, NULL::integer, NULL::integer,
-      ''::text, NULL::text
-    );
-    RAISE EXCEPTION 'authenticated admin legacy payment-config mutation unexpectedly executed';
-  EXCEPTION WHEN insufficient_privilege THEN
-    NULL;
-  END;
 
   SELECT id INTO v_id
   FROM public.admin_set_game_active(
