@@ -97,15 +97,15 @@ async function sendPaymentSuccessEmail(
     if (!orderData || !orderData.to) return;
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    if (!SUPABASE_URL || !ANON_KEY) return;
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!SUPABASE_URL || !SERVICE_KEY) return;
 
     await fetch(`${SUPABASE_URL}${EMAIL_FUNCTION_PATH}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${ANON_KEY}`,
-        "apikey": ANON_KEY,
+        "Authorization": `Bearer ${SERVICE_KEY}`,
+        "apikey": SERVICE_KEY,
       },
       body: JSON.stringify({
         ...orderData,
@@ -128,15 +128,15 @@ async function sendFulfillmentFailedEmail(
     if (!orderData || !orderData.to) return;
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    if (!SUPABASE_URL || !ANON_KEY) return;
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!SUPABASE_URL || !SERVICE_KEY) return;
 
     await fetch(`${SUPABASE_URL}${EMAIL_FUNCTION_PATH}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${ANON_KEY}`,
-        "apikey": ANON_KEY,
+        "Authorization": `Bearer ${SERVICE_KEY}`,
+        "apikey": SERVICE_KEY,
       },
       body: JSON.stringify({
         ...orderData,

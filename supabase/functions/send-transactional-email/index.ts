@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { hasAuthorizedTransactionalEmailRequest } from "../../../lib/transactionalEmailAuth.ts";
 
 /*
   Shared transactional email sender for RunFazone.
@@ -30,16 +31,10 @@ import { createClient } from "npm:@supabase/supabase-js@2";
   }
 */
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
-
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 
 interface EmailRequest {
@@ -295,7 +290,7 @@ async function sendSmtp(
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 204 });
   }
 
   try {
@@ -313,6 +308,9 @@ Deno.serve(async (req: Request) => {
     if (!SUPABASE_URL || !SERVICE_KEY) {
       return json({ error: "Service unavailable" }, 503);
     }
+    if (!hasAuthorizedTransactionalEmailRequest(req, SERVICE_KEY)) {
+      return json({ error: "Unauthorized" }, 401);
+    }
     if (!SMTP_USER || !SMTP_PASSWORD) {
       return json({ error: "SMTP credentials not configured" }, 503);
     }
@@ -327,10 +325,6 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Unknown template: " + body.template }, 400);
     }
 
-    if (body.template === "guest_order_access"
-      && req.headers.get("authorization") !== `Bearer ${SERVICE_KEY}`) {
-      return json({ error: "Unauthorized" }, 401);
-    }
     if (body.template === "guest_order_access"
       && (!body.access_code || !body.order_reference || !body.to)) {
       return json({ error: "Missing guest-access email fields" }, 400);

@@ -81,16 +81,16 @@ export async function sendPaymentSuccessEmail(
     if (!orderData || !orderData.to) return;
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anonKey) return;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !serviceRoleKey) return;
 
     const payload: EmailPayload = { ...orderData, template: 'payment_success' };
     await fetch(`${url}/functions/v1/send-transactional-email`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${anonKey}`,
-        apikey: anonKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15000),
@@ -110,16 +110,16 @@ export async function sendFulfillmentFailedEmail(
     if (!orderData || !orderData.to) return;
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anonKey) return;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !serviceRoleKey) return;
 
     const payload: EmailPayload = { ...orderData, template: 'fulfillment_failed', error_detail: errorDetail };
     await fetch(`${url}/functions/v1/send-transactional-email`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${anonKey}`,
-        apikey: anonKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15000),
