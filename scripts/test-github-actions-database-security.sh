@@ -148,6 +148,11 @@ PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/reconciliation-atomicity.sql
 
+echo "Executing completion receipt outbox assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/completion-receipt-outbox.sql
+
 echo "Preparing concurrent reconciliation assertion..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
