@@ -74,6 +74,8 @@ DO $$
 DECLARE
   v_status text;
   v_email text;
+  v_failures text[];
+  v_public_grants text;
 BEGIN
   IF to_regprocedure('public.activate_customer_profile()') IS NULL
      OR to_regprocedure('public.admin_set_customer_profile_status(uuid,text)') IS NULL THEN
@@ -104,20 +106,92 @@ BEGIN
     RAISE EXCEPTION 'new customer profile was not created in pending state';
   END IF;
 
-  IF has_table_privilege('anon', 'public.orders', 'SELECT')
-     OR has_table_privilege('anon', 'public.orders', 'INSERT')
-     OR has_table_privilege('authenticated', 'public.orders', 'INSERT')
-     OR has_table_privilege('authenticated', 'public.orders', 'UPDATE')
-     OR has_any_column_privilege('anon', 'public.orders', 'SELECT')
-     OR has_any_column_privilege('anon', 'public.orders', 'INSERT')
-     OR has_any_column_privilege('anon', 'public.orders', 'UPDATE')
-     OR has_table_privilege('anon', 'public.order_timeline', 'SELECT')
-     OR has_table_privilege('anon', 'public.order_timeline', 'INSERT')
-     OR has_table_privilege('authenticated', 'public.order_timeline', 'INSERT')
-     OR has_any_column_privilege('anon', 'public.order_timeline', 'SELECT')
-     OR has_any_column_privilege('anon', 'public.order_timeline', 'INSERT')
-     OR has_any_column_privilege('anon', 'public.order_timeline', 'UPDATE') THEN
-    RAISE EXCEPTION 'anonymous order/timeline access or direct order insertion remains granted';
+  -- Keep these as individually labeled effective-privilege checks. The
+  -- has_*_privilege functions include privileges inherited through PUBLIC and
+  -- role membership; the column checks separately catch column ACLs that can
+  -- survive a table-level REVOKE. Direct PUBLIC ACLs are reported as context,
+  -- not as a warning-only bypass of the assertion.
+  v_failures := ARRAY[]::text[];
+    SELECT COALESCE(string_agg(acl.privilege_type, ',' ORDER BY acl.privilege_type), 'none')
+    INTO v_public_grants
+    FROM pg_class c,
+         LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) acl
+    WHERE c.oid = 'public.orders'::regclass
+      AND acl.grantee = 0
+      AND acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE');
+
+    IF has_table_privilege('anon', 'public.orders', 'SELECT') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.orders privilege=SELECT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('anon', 'public.orders', 'INSERT') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.orders privilege=INSERT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('anon', 'public.orders', 'UPDATE') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.orders privilege=UPDATE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('anon', 'public.orders', 'DELETE') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.orders privilege=DELETE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('authenticated', 'public.orders', 'INSERT') THEN
+      v_failures := array_append(v_failures, format('role=authenticated object=public.orders privilege=INSERT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('authenticated', 'public.orders', 'UPDATE') THEN
+      v_failures := array_append(v_failures, format('role=authenticated object=public.orders privilege=UPDATE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('authenticated', 'public.orders', 'DELETE') THEN
+      v_failures := array_append(v_failures, format('role=authenticated object=public.orders privilege=DELETE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_any_column_privilege('anon', 'public.orders', 'SELECT') THEN
+      v_failures := array_append(v_failures, 'role=anon object=public.orders columns privilege=SELECT expected=denied actual=granted');
+    END IF;
+    IF has_any_column_privilege('anon', 'public.orders', 'INSERT') THEN
+      v_failures := array_append(v_failures, 'role=anon object=public.orders columns privilege=INSERT expected=denied actual=granted');
+    END IF;
+    IF has_any_column_privilege('anon', 'public.orders', 'UPDATE') THEN
+      v_failures := array_append(v_failures, 'role=anon object=public.orders columns privilege=UPDATE expected=denied actual=granted');
+    END IF;
+
+    SELECT COALESCE(string_agg(acl.privilege_type, ',' ORDER BY acl.privilege_type), 'none')
+    INTO v_public_grants
+    FROM pg_class c,
+         LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) acl
+    WHERE c.oid = 'public.order_timeline'::regclass
+      AND acl.grantee = 0
+      AND acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE');
+
+    IF has_table_privilege('anon', 'public.order_timeline', 'SELECT') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.order_timeline privilege=SELECT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('anon', 'public.order_timeline', 'INSERT') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.order_timeline privilege=INSERT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('anon', 'public.order_timeline', 'UPDATE') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.order_timeline privilege=UPDATE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('anon', 'public.order_timeline', 'DELETE') THEN
+      v_failures := array_append(v_failures, format('role=anon object=public.order_timeline privilege=DELETE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('authenticated', 'public.order_timeline', 'INSERT') THEN
+      v_failures := array_append(v_failures, format('role=authenticated object=public.order_timeline privilege=INSERT expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('authenticated', 'public.order_timeline', 'UPDATE') THEN
+      v_failures := array_append(v_failures, format('role=authenticated object=public.order_timeline privilege=UPDATE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_table_privilege('authenticated', 'public.order_timeline', 'DELETE') THEN
+      v_failures := array_append(v_failures, format('role=authenticated object=public.order_timeline privilege=DELETE expected=denied actual=granted public_acl=%s', v_public_grants));
+    END IF;
+    IF has_any_column_privilege('anon', 'public.order_timeline', 'SELECT') THEN
+      v_failures := array_append(v_failures, 'role=anon object=public.order_timeline columns privilege=SELECT expected=denied actual=granted');
+    END IF;
+    IF has_any_column_privilege('anon', 'public.order_timeline', 'INSERT') THEN
+      v_failures := array_append(v_failures, 'role=anon object=public.order_timeline columns privilege=INSERT expected=denied actual=granted');
+    END IF;
+    IF has_any_column_privilege('anon', 'public.order_timeline', 'UPDATE') THEN
+      v_failures := array_append(v_failures, 'role=anon object=public.order_timeline columns privilege=UPDATE expected=denied actual=granted');
+    END IF;
+
+  IF cardinality(v_failures) > 0 THEN
+    RAISE EXCEPTION 'unauthorized order/timeline privileges: %', array_to_string(v_failures, ' | ');
   END IF;
 
   IF to_regprocedure('public.create_order(uuid,uuid,text,text,jsonb,text,text,text)') IS NULL
