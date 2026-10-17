@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { validateRegistrationInput } from '@/lib/authValidation';
+import { getAuthCallbackUrl } from '@/lib/authRedirect';
 
 const pendingMessage = 'If the address can receive mail, confirmation instructions will be sent.';
 
@@ -47,6 +48,9 @@ export async function POST(req: NextRequest) {
   const validation = validateRegistrationInput(input);
   if (!validation.ok) return errorResponse(validation.error, 400);
 
+  const emailRedirectTo = getAuthCallbackUrl();
+  if (!emailRedirectTo) return errorResponse('Registration is temporarily unavailable.', 503);
+
   let supabase: ReturnType<typeof createSupabaseServerClient>;
   try {
     supabase = createSupabaseServerClient();
@@ -59,6 +63,7 @@ export async function POST(req: NextRequest) {
       email: validation.value.email,
       password: validation.value.password,
       options: {
+        emailRedirectTo,
         data: { full_name: validation.value.displayName },
       },
     });

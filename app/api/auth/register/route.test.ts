@@ -33,6 +33,7 @@ describe('customer registration route', () => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
+    process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
     mocks.signUp.mockResolvedValue({ data: { user: { id: 'user-1' }, session: null }, error: null });
     mocks.signOut.mockResolvedValue({ error: null });
   });
@@ -46,7 +47,10 @@ describe('customer registration route', () => {
     expect(mocks.signUp).toHaveBeenCalledWith({
       email: validInput.email,
       password: validInput.password,
-      options: { data: { full_name: validInput.name } },
+      options: {
+        emailRedirectTo: 'https://example.test/auth/callback',
+        data: { full_name: validInput.name },
+      },
     });
   });
 
