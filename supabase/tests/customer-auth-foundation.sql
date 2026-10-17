@@ -244,9 +244,13 @@ SET LOCAL ROLE anon;
 SELECT set_config('request.jwt.claims', '{"role":"anon"}', true);
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM public.customer_profiles) THEN
+  BEGIN
+    PERFORM 1 FROM public.customer_profiles;
     RAISE EXCEPTION 'anonymous profile access unexpectedly succeeded';
-  END IF;
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      NULL;
+  END;
   BEGIN
     PERFORM 1 FROM public.activate_customer_profile();
     RAISE EXCEPTION 'anonymous profile activation unexpectedly executed';
