@@ -634,8 +634,106 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+DECLARE
+  v_order_id uuid;
+BEGIN
+  BEGIN
+    SELECT o.id INTO v_order_id
+    FROM public.orders o
+    JOIN pg_temp.guest_recovery_fixture f ON f.order_id = o.id
+    WHERE upper(o.reference) = upper(btrim(f.reference))
+      AND lower(btrim(o.email)) = lower(btrim(f.email))
+      AND o.customer_user_id IS NULL
+    FOR UPDATE OF o;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'RECOVERY_FIXTURE_LOOKUP_NO_MATCH role=fixture_session expected=one actual=zero';
+    END IF;
+
+    RAISE NOTICE 'RECOVERY_FIXTURE_LOOKUP_MATCH role=fixture_session found=true';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE EXCEPTION 'RECOVERY_FIXTURE_LOOKUP_PERMISSION_DENIED role=fixture_session sqlstate=42501';
+  END;
+END $$;
+
 SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+DO $$
+DECLARE
+  v_order_id uuid;
+  v_order_challenge_count integer;
+  v_rate_key_challenge_count integer;
+  v_function_owner text;
+  v_owner_bypass_rls boolean;
+  v_orders_rls boolean;
+  v_orders_force_rls boolean;
+  v_owner_select boolean;
+  v_owner_update boolean;
+  v_service_select boolean;
+  v_service_update boolean;
+BEGIN
+  SELECT r.rolname, r.rolbypassrls, c.relrowsecurity, c.relforcerowsecurity,
+         has_table_privilege(r.rolname, 'public.orders', 'SELECT'),
+         has_table_privilege(r.rolname, 'public.orders', 'UPDATE'),
+         has_table_privilege('service_role', 'public.orders', 'SELECT'),
+         has_table_privilege('service_role', 'public.orders', 'UPDATE')
+  INTO v_function_owner, v_owner_bypass_rls, v_orders_rls, v_orders_force_rls,
+       v_owner_select, v_owner_update, v_service_select, v_service_update
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  JOIN pg_roles r ON r.oid = p.proowner
+  CROSS JOIN pg_class c
+  WHERE n.nspname = 'public'
+    AND p.proname = 'create_guest_order_access_challenge'
+    AND p.proargtypes = ARRAY[
+      'text'::regtype::oid,
+      'text'::regtype::oid,
+      'text'::regtype::oid,
+      'text'::regtype::oid
+    ]::oidvector
+    AND c.oid = 'public.orders'::regclass;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'RECOVERY_FUNCTION_METADATA_MISSING expected=one actual=zero';
+  END IF;
+
+  RAISE NOTICE 'RECOVERY_FUNCTION_METADATA owner=% owner_bypassrls=% orders_rls=% orders_force_rls=% owner_select=% owner_update=% service_select=% service_update=%',
+    v_function_owner, v_owner_bypass_rls, v_orders_rls, v_orders_force_rls,
+    v_owner_select, v_owner_update, v_service_select, v_service_update;
+
+  BEGIN
+    SELECT o.id INTO v_order_id
+    FROM public.orders o
+    JOIN pg_temp.guest_recovery_fixture f ON f.order_id = o.id
+    WHERE upper(o.reference) = upper(btrim(f.reference))
+      AND lower(btrim(o.email)) = lower(btrim(f.email))
+      AND o.customer_user_id IS NULL
+    FOR UPDATE OF o;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'RECOVERY_SERVICE_LOOKUP_NO_MATCH role=service_role expected=one actual=zero';
+    END IF;
+
+    RAISE NOTICE 'RECOVERY_SERVICE_LOOKUP_MATCH role=service_role found=true';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'RECOVERY_SERVICE_LOOKUP_PERMISSION_DENIED role=service_role sqlstate=42501';
+  END;
+
+  SELECT count(*) INTO v_order_challenge_count
+  FROM public.guest_order_access_challenges c
+  JOIN pg_temp.guest_recovery_fixture f ON f.order_id = c.order_id
+  WHERE c.created_at > now() - interval '1 hour';
+
+  SELECT count(*) INTO v_rate_key_challenge_count
+  FROM public.guest_order_access_challenges c
+  JOIN pg_temp.guest_recovery_fixture f ON f.rate_limit_key = c.rate_limit_key
+  WHERE c.created_at > now() - interval '1 hour';
+
+  RAISE NOTICE 'RECOVERY_SERVICE_RATE_LIMITS order_count=% rate_key_count=% order_limit_ok=% rate_key_limit_ok=%',
+    v_order_challenge_count, v_rate_key_challenge_count,
+    v_order_challenge_count < 3, v_rate_key_challenge_count < 10;
+END $$;
 SELECT CASE WHEN public.create_guest_order_access_challenge(
   :'guest_reference', 'guest@example.invalid', repeat('3', 64), repeat('4', 64)
 ) THEN 1 ELSE 1/0 END AS challenge_created;
