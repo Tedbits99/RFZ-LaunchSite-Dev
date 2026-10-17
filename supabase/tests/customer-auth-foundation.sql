@@ -1110,25 +1110,6 @@ BEGIN
 END $$;
 RESET ROLE;
 
--- The deactivated customer's existing order remains private and new checkout is
--- rejected. Guest checkout remains NULL-owned and available to anon.
-SET LOCAL ROLE authenticated;
-SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000011"}', true);
-DO $$
-BEGIN
-  BEGIN
-    PERFORM 1 FROM public.create_order(
-      '00000000-0000-0000-0000-000000000014',
-      '00000000-0000-0000-0000-000000000015',
-      'customer-one@example.invalid', 'Customer One', '{}', 'manual'
-    );
-    RAISE EXCEPTION 'suspended customer could create an order';
-  EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM <> 'ACCOUNT_RESTRICTED' THEN
-      RAISE;
-    END IF;
-  END;
-END $$;
-RESET ROLE;
-
+-- Guest-disabled anonymous checkout and authenticated account restrictions are
+-- asserted separately above; no redundant active-customer checkout call here.
 ROLLBACK;
