@@ -131,14 +131,23 @@ BEGIN
     RAISE EXCEPTION 'COMPLETION_RECEIPT_COMPLETION_NOT_APPLIED';
   END IF;
 
-  SELECT count(*), max(receipt_snapshot)
-  INTO v_count, v_snapshot
+  SELECT count(*)
+  INTO v_count
   FROM public.order_email_outbox
   WHERE order_id = '00000000-0000-0000-0000-000000000404'
     AND template = 'completion_receipt';
 
-  IF v_count <> 1
-     OR v_snapshot->>'reference' <> 'RECEIPT-COMPLETE-1'
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'COMPLETION_RECEIPT_OUTBOX_ROW_INVALID';
+  END IF;
+
+  SELECT receipt_snapshot
+  INTO v_snapshot
+  FROM public.order_email_outbox
+  WHERE order_id = '00000000-0000-0000-0000-000000000404'
+    AND template = 'completion_receipt';
+
+  IF v_snapshot->>'reference' <> 'RECEIPT-COMPLETE-1'
      OR (v_snapshot->>'total_cents')::integer <> 12345
      OR v_snapshot->>'payment_method' <> 'manual' THEN
     RAISE EXCEPTION 'COMPLETION_RECEIPT_OUTBOX_ROW_INVALID';
