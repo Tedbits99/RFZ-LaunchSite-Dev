@@ -67,6 +67,16 @@ function mapOrderStatus(raw: string): TransactionStatusResult['status'] {
   return 'processing';
 }
 
+function hasExplicitCreateFailure(data: Record<string, unknown> | null): boolean {
+  const order = data?.order as Record<string, unknown> | undefined;
+  const rawStatus = order?.status ?? data?.status;
+  const rawError = order?.error ?? order?.fail_reason ?? data?.error ?? data?.message;
+  return typeof rawStatus === 'string'
+    && mapOrderStatus(rawStatus) === 'failed'
+    && typeof rawError === 'string'
+    && rawError.trim().length > 0;
+}
+
 export class FazerCardsAdapter implements SupplierAdapter {
   readonly adapterName = 'fazercards';
 
@@ -200,7 +210,10 @@ export class FazerCardsAdapter implements SupplierAdapter {
       return {
         success: false,
         supplierReference: null,
-        status: 'failed',
+        // HTTP status alone does not prove that the supplier never accepted
+        // the request. Only an explicit terminal status in the response may
+        // be finalized; all other errors remain recoverable.
+        status: hasExplicitCreateFailure(data) ? 'failed' : 'pending',
         error: normalizeHttpError(res.status, data),
         rawResponse: data,
       };

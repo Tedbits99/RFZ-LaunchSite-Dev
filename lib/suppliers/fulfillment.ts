@@ -86,6 +86,35 @@ async function updateSupplierStatus(db: any, supplierId: string, success: boolea
   await (db.from('suppliers') as any).update(update).eq('id', supplierId);
 }
 
+async function finalizeConfirmedSupplierFailure(
+  db: any,
+  supplier: SupplierRow,
+  supplierTransactionId: string,
+  error: string,
+): Promise<{ applied: boolean; error?: string }> {
+  // The atomic reconciliation RPC is intentionally restricted to the active
+  // FazerCards adapter. Other adapters must remain recoverable rather than
+  // being sent through a FazerCards-specific finalization boundary.
+  if (supplier.code !== 'fazercards' || supplier.adapter !== 'custom') {
+    return { applied: false, error: 'Supplier failure requires controlled recovery.' };
+  }
+
+  const { data, error: rpcError } = await db.rpc('finalize_supplier_reconciliation', {
+    p_supplier_transaction_id: supplierTransactionId,
+    p_outcome: 'failed',
+    p_actor: 'fulfillment_system',
+    p_fail_reason: error,
+  });
+  if (rpcError) return { applied: false, error: 'Failed to atomically finalize supplier failure.' };
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (result?.out_outcome === 'applied' || result?.out_outcome === 'already-finalized') {
+    return { applied: true };
+  }
+
+  return { applied: false, error: 'Supplier failure requires reconciliation recovery.' };
+}
+
 // ─── Fulfillment Authorization Gate ──────────────────────────────────────────
 //
 // canFulfill(order) is TRUE only when:
@@ -187,14 +216,6 @@ export async function startFulfillment(orderId: string, db?: any): Promise<{
     // Fire-and-forget immediate polling so terminal supplier status is
     // reflected within seconds, not the 3-minute cron interval.
     pollImmediately(orderId, client).catch(() => {});
-  } else {
-    // Supplier fulfillment failed — set FAILED, do NOT reset payment
-    await client.rpc('complete_fulfillment', {
-      p_order_id: orderId,
-      p_fulfillment_status: 'FAILED',
-      p_actor_email: 'fulfillment_system',
-      p_note: `Fulfillment failed: ${result.error || 'Unknown error'}`,
-    });
   }
 
   return {
@@ -262,31 +283,37 @@ export async function pollFulfillmentStatus(orderId: string, db?: any): Promise<
 
   try {
     const supplierStatus = await adapter.queryStatus(config, tx.supplier_reference);
-    const polledAt = new Date().toISOString();
 
     if (supplierStatus.status === 'completed') {
-      await (client.from('supplier_transactions') as any).update({ status: 'success', last_polled_at: polledAt }).eq('id', tx.id);
-      await client.rpc('complete_fulfillment', {
-        p_order_id: orderId,
-        p_fulfillment_status: 'COMPLETED',
-        p_actor_email: 'fulfillment_system',
-        p_note: `Supplier confirmed completion: ${tx.supplier_reference}`,
+      const { data: finalization, error: finalizationError } = await client.rpc('finalize_supplier_reconciliation', {
+        p_supplier_transaction_id: tx.id,
+        p_outcome: 'completed',
+        p_actor: 'fulfillment_system',
+        p_fail_reason: null,
       });
+      if (finalizationError) return { success: false, error: 'Failed to finalize supplier completion.' };
+      const result = Array.isArray(finalization) ? finalization[0] : finalization;
+      if (!result || !['applied', 'already-finalized'].includes(result.out_outcome)) {
+        return { success: false, error: 'Supplier completion requires reconciliation recovery.' };
+      }
       return { success: true, fulfillmentStatus: 'COMPLETED' };
     }
 
-    if (supplierStatus.status === 'failed') {
-      await (client.from('supplier_transactions') as any).update({ status: 'failed', last_polled_at: polledAt }).eq('id', tx.id);
-      await client.rpc('complete_fulfillment', {
-        p_order_id: orderId,
-        p_fulfillment_status: 'FAILED',
-        p_actor_email: 'fulfillment_system',
-        p_note: `Supplier reported failure: ${tx.supplier_reference}`,
+    if (supplierStatus.status === 'failed' && supplierStatus.error) {
+      const { data: finalization, error: finalizationError } = await client.rpc('finalize_supplier_reconciliation', {
+        p_supplier_transaction_id: tx.id,
+        p_outcome: 'failed',
+        p_actor: 'fulfillment_system',
+        p_fail_reason: supplierStatus.error,
       });
+      if (finalizationError) return { success: false, error: 'Failed to finalize supplier failure.' };
+      const result = Array.isArray(finalization) ? finalization[0] : finalization;
+      if (!result || !['applied', 'already-finalized'].includes(result.out_outcome)) {
+        return { success: false, error: 'Supplier failure requires reconciliation recovery.' };
+      }
       return { success: true, fulfillmentStatus: 'FAILED' };
     }
 
-    await (client.from('supplier_transactions') as any).update({ last_polled_at: polledAt }).eq('id', tx.id);
     return { success: true, fulfillmentStatus: 'PROCESSING' };
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : 'Status query failed';
@@ -380,9 +407,6 @@ export async function fulfillOrder(
   }
 
   // 5. Attempt fulfillment with each eligible supplier (failover order by priority).
-  let attemptedCount = 0;
-  let lastError = '';
-
   for (const mapping of eligibleMappings) {
     const supplier = mapping.suppliers;
     const config = toConfig(supplier);
@@ -415,9 +439,6 @@ export async function fulfillOrder(
       return { success: false, error: 'Fulfillment already in progress for this order' };
     }
 
-    let supplierFailed = false;
-    attemptedCount++;
-
     for (let attempt = 1; attempt <= supplier.retry_count; attempt++) {
       const start = Date.now();
 
@@ -435,7 +456,9 @@ export async function fulfillOrder(
 
         await (client.from('supplier_transactions') as any)
           .update({
-            status: result.success ? 'submitted' : 'failed',
+            // A false result is not terminal until the adapter explicitly
+            // classifies it as failed and the atomic RPC accepts it.
+            status: result.success ? 'submitted' : 'pending',
             supplier_reference: result.supplierReference || null,
             response_payload: result.rawResponse,
             error_message: result.error || null,
@@ -450,38 +473,32 @@ export async function fulfillOrder(
           return { success: true, supplierReference: result.supplierReference, supplierId: supplier.id };
         }
 
-        lastError = result.error || 'Unknown error';
+        if (result.status === 'failed') {
+          const failure = await finalizeConfirmedSupplierFailure(
+            client,
+            supplier,
+            pendingTx.id,
+            result.error || 'Supplier rejected the order',
+          );
+          return {
+            success: false,
+            error: failure.applied ? result.error || 'Supplier rejected the order' : failure.error,
+          };
+        }
 
-        if (attempt >= supplier.retry_count) {
-          supplierFailed = true;
-        }
-        if (attempt < supplier.retry_count) {
-          await sleep(Math.min(1000 * Math.pow(2, attempt - 1), 10000));
-        }
+        // Pending/processing responses are ambiguous. Keep the transaction
+        // pending and recover with the same idempotency key; never fail over.
+        return {
+          success: false,
+          error: result.error || 'Supplier response is pending and requires reconciliation.',
+        };
       } catch (e) {
         const durationMs = Date.now() - start;
         const errMsg = e instanceof Error ? e.message : 'Unknown error';
-        const isTimeout = errMsg.includes('abort');
-
-        if (isTimeout) {
-          // Ambiguous timeout — keep tx pending, reuse same idempotency key.
-          // Do NOT failover to another supplier.
-          await (client.from('supplier_transactions') as any)
-            .update({
-              error_message: errMsg,
-              duration_ms: durationMs,
-              attempt,
-            })
-            .eq('id', pendingTx.id);
-
-          await updateSupplierStatus(client, supplier.id, false, errMsg);
-
-          return { success: false, error: `Supplier timeout — fulfillment is pending and will be retried with the same idempotency key. (${errMsg})` };
-        }
-
+        // Any thrown create error has an unknown supplier outcome. Keep the
+        // pre-persisted transaction pending and reuse its idempotency key.
         await (client.from('supplier_transactions') as any)
           .update({
-            status: 'failed',
             error_message: errMsg,
             duration_ms: durationMs,
             attempt,
@@ -489,30 +506,12 @@ export async function fulfillOrder(
           .eq('id', pendingTx.id);
 
         await updateSupplierStatus(client, supplier.id, false, errMsg);
-
-        lastError = errMsg;
-
-        if (attempt >= supplier.retry_count) {
-          supplierFailed = true;
-        }
-        if (attempt < supplier.retry_count) {
-          await sleep(Math.min(1000 * Math.pow(2, attempt - 1), 10000));
-        }
+        return { success: false, error: `Supplier response is unknown and remains pending. (${errMsg})` };
       }
     }
-
-    if (supplierFailed) {
-      continue;
-    }
-    // pending (timeout) — stop here, do not try next supplier
-    break;
   }
 
-  if (attemptedCount === 1) {
-    return { success: false, error: `FULFILLMENT_FAILED: ${lastError}` };
-  }
-
-  return { success: false, error: `All suppliers failed to fulfill order. Last error: ${lastError}` };
+  return { success: false, error: 'Supplier fulfillment requires controlled recovery.' };
 }
 
 async function resumePendingFulfillment(
@@ -530,11 +529,9 @@ async function resumePendingFulfillment(
     .maybeSingle();
 
   if (!supplier) {
-    // Supplier was deleted — mark the pending tx as failed and let the caller retry
-    await (db.from('supplier_transactions') as any)
-      .update({ status: 'failed', error_message: 'Supplier no longer exists' })
-      .eq('id', pendingTx.id);
-    return { success: false, error: 'Supplier for pending transaction no longer exists' };
+    // A missing supplier is not evidence that the upstream request failed.
+    // Leave the transaction pending for controlled recovery.
+    return { success: false, error: 'Supplier for pending transaction requires controlled recovery' };
   }
 
   const config = toConfig(supplier as SupplierRow);
@@ -572,7 +569,7 @@ async function resumePendingFulfillment(
 
     await (db.from('supplier_transactions') as any)
       .update({
-        status: result.success ? 'submitted' : 'failed',
+        status: result.success ? 'submitted' : 'pending',
         supplier_reference: result.supplierReference || null,
         response_payload: result.rawResponse,
         error_message: result.error || null,
@@ -581,6 +578,20 @@ async function resumePendingFulfillment(
       .eq('id', pendingTx.id);
 
     await updateSupplierStatus(db, supplier.id, result.success, result.error || undefined);
+
+    if (!result.success && result.status === 'failed') {
+      const failure = await finalizeConfirmedSupplierFailure(
+        db,
+        supplier as SupplierRow,
+        pendingTx.id,
+        result.error || 'Supplier rejected the order',
+      );
+      return {
+        success: false,
+        supplierId: supplier.id,
+        error: failure.applied ? result.error || 'Supplier rejected the order' : failure.error,
+      };
+    }
 
     return {
       success: result.success,
@@ -591,36 +602,17 @@ async function resumePendingFulfillment(
   } catch (e) {
     const durationMs = Date.now() - start;
     const errMsg = e instanceof Error ? e.message : 'Unknown error';
-    const isTimeout = errMsg.includes('abort');
-
-    if (isTimeout) {
-      // Network timeout — outcome is ambiguous. FazerCards guarantees that
-      // reusing the same Idempotency-Key returns the original order if it
-      // was created. Leave the tx as 'pending' so the next recovery attempt
-      // reuses the same key — no duplicate possible.
-      await (db.from('supplier_transactions') as any)
-        .update({
-          error_message: errMsg,
-          duration_ms: durationMs,
-        })
-        .eq('id', pendingTx.id);
-
-      await updateSupplierStatus(db, supplier.id, false, errMsg);
-      return { success: false, error: errMsg };
-    }
-
-    // Confirmed non-timeout error — mark as failed
+    // Any thrown error has an unknown supplier outcome. Keep the transaction
+    // pending and reuse the same idempotency key on recovery.
     await (db.from('supplier_transactions') as any)
       .update({
-        status: 'failed',
         error_message: errMsg,
         duration_ms: durationMs,
       })
       .eq('id', pendingTx.id);
 
     await updateSupplierStatus(db, supplier.id, false, errMsg);
-
-    return { success: false, error: errMsg };
+    return { success: false, error: `Supplier response is unknown and remains pending. (${errMsg})` };
   }
 }
 

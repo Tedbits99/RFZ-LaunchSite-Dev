@@ -461,63 +461,33 @@ async function pollSupplierImmediately(
 
     const ref = (tx as Record<string, any>).supplier_reference as string;
     const polled = await fazercardsPollOrder(apiKey, ref);
-    const polledAt = new Date().toISOString();
 
     if (polled.status === "completed") {
-      await supabase.from("supplier_transactions").update({ status: "success", last_polled_at: polledAt }).eq("id", (tx as Record<string, any>).id);
-      const { data: ord } = await supabase
-        .from("orders")
-        .select("id, fulfillment_status, payment_status")
-        .eq("id", orderId)
-        .maybeSingle();
-      const o = (ord as Record<string, any>) || null;
-      if (o && o.payment_status === "VERIFIED" && o.fulfillment_status === "PROCESSING") {
-        const { error } = await supabase
-          .from("orders")
-          .update({ fulfillment_status: "COMPLETED", status: "COMPLETED", updated_at: polledAt })
-          .eq("id", orderId)
-          .eq("fulfillment_status", "PROCESSING");
-        if (!error) {
-          await supabase.from("order_timeline").insert({
-            order_id: orderId,
-            status: "COMPLETED",
-            actor_email: "auto-reconciliation",
-            note: `Supplier confirmed completion: ${ref}`,
-          });
-        }
-      }
+      const { data: finalization, error: finalizationError } = await supabase.rpc("finalize_supplier_reconciliation", {
+        p_supplier_transaction_id: (tx as Record<string, any>).id,
+        p_outcome: "completed",
+        p_actor: "fulfillment_system",
+        p_fail_reason: null,
+      });
+      if (finalizationError || !["applied", "already-finalized"].includes((Array.isArray(finalization) ? finalization[0] : finalization)?.out_outcome)) return;
       return;
     }
 
     if (polled.status === "failed" && polled.failReason) {
-      await supabase.from("supplier_transactions").update({ status: "failed", error_message: polled.failReason, last_polled_at: polledAt }).eq("id", (tx as Record<string, any>).id);
-      const { data: ord } = await supabase
-        .from("orders")
-        .select("id, fulfillment_status, payment_status")
-        .eq("id", orderId)
-        .maybeSingle();
-      const o = (ord as Record<string, any>) || null;
-      if (o && o.payment_status === "VERIFIED" && o.fulfillment_status === "PROCESSING") {
-        const { error } = await supabase
-          .from("orders")
-          .update({ fulfillment_status: "FAILED", status: "FULFILLMENT_FAILED", updated_at: polledAt })
-          .eq("id", orderId)
-          .eq("fulfillment_status", "PROCESSING");
-        if (!error) {
-          await supabase.from("order_timeline").insert({
-            order_id: orderId,
-            status: "FAILED",
-            actor_email: "auto-reconciliation",
-            note: `Supplier reported failure (${ref}): ${polled.failReason}`,
-          });
-          // Send fulfillment-failed email (fire-and-forget, duplicate-guarded).
-          sendFulfillmentFailedEmail(supabase, orderId, `Supplier reported failure: ${polled.failReason}`).catch(() => {});
-        }
+      const { data: finalization, error: finalizationError } = await supabase.rpc("finalize_supplier_reconciliation", {
+        p_supplier_transaction_id: (tx as Record<string, any>).id,
+        p_outcome: "failed",
+        p_actor: "fulfillment_system",
+        p_fail_reason: polled.failReason,
+      });
+      const result = Array.isArray(finalization) ? finalization[0] : finalization;
+      if (!finalizationError && ["applied", "already-finalized"].includes(result?.out_outcome)) {
+        // Send fulfillment-failed email (fire-and-forget, duplicate-guarded).
+        sendFulfillmentFailedEmail(supabase, orderId, `Supplier reported failure: ${polled.failReason}`).catch(() => {});
       }
       return;
     }
 
-    await supabase.from("supplier_transactions").update({ last_polled_at: polledAt }).eq("id", (tx as Record<string, any>).id);
   }
 }
 

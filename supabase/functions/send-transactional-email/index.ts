@@ -19,13 +19,14 @@ import { createClient } from "npm:@supabase/supabase-js@2";
   POST /functions/v1/send-transactional-email
   Body: {
     order_id: string,
-    template: "payment_success" | "fulfillment_failed",
+    template: "payment_success" | "fulfillment_failed" | "guest_order_access",
     to: string (customer email),
     order_reference: string,
     customer_name: string,
     package_name: string,
     total_php: string,
-    error_detail?: string (for fulfillment_failed only)
+  error_detail?: string (for fulfillment_failed only)
+  access_code?: string (for guest_order_access only)
   }
 */
 
@@ -43,13 +44,14 @@ const json = (body: unknown, status: number) =>
 
 interface EmailRequest {
   order_id: string;
-  template: "payment_success" | "fulfillment_failed";
+  template: "payment_success" | "fulfillment_failed" | "guest_order_access";
   to: string;
   order_reference: string;
   customer_name: string;
   package_name: string;
   total_php: string;
   error_detail?: string;
+  access_code?: string;
 }
 
 function escapeHtml(s: string): string {
@@ -145,6 +147,21 @@ Game Top-Up Made Easy
 
 RunFazone Support Team
 Need help with your order? Reply to this email or contact orders@runfazone.com.`;
+}
+
+function buildGuestAccessHtml(r: EmailRequest): string {
+  return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1a1a1a">
+  <div style="background:#0a1124;border-radius:12px;padding:24px 28px">
+    <h1 style="color:#22d3ee;font-size:22px">Verify guest order access</h1>
+    <p style="color:#cbd5e1">Use this one-time code to access order ${escapeHtml(r.order_reference)}:</p>
+    <p style="font-family:monospace;font-size:22px;font-weight:700;letter-spacing:2px;color:#22d3ee">${escapeHtml(r.access_code || '')}</p>
+    <p style="color:#94a3b8">The code expires in 15 minutes and can be used once. If you did not request it, you can ignore this email.</p>
+    <p style="color:#94a3b8">RunFazone Support Team</p>
+  </div></body></html>`;
+}
+
+function buildGuestAccessText(r: EmailRequest): string {
+  return `Verify guest order access\n\nUse this one-time code to access order ${r.order_reference}:\n\n${r.access_code || ''}\n\nThe code expires in 15 minutes and can be used once. If you did not request it, ignore this email.`;
 }
 
 async function sendSmtp(
@@ -306,8 +323,17 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Missing required fields: order_id, template, to" }, 400);
     }
 
-    if (body.template !== "payment_success" && body.template !== "fulfillment_failed") {
+    if (body.template !== "payment_success" && body.template !== "fulfillment_failed" && body.template !== "guest_order_access") {
       return json({ error: "Unknown template: " + body.template }, 400);
+    }
+
+    if (body.template === "guest_order_access"
+      && req.headers.get("authorization") !== `Bearer ${SERVICE_KEY}`) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+    if (body.template === "guest_order_access"
+      && (!body.access_code || !body.order_reference || !body.to)) {
+      return json({ error: "Missing guest-access email fields" }, 400);
     }
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -315,11 +341,13 @@ Deno.serve(async (req: Request) => {
     // Duplicate prevention: insert into email_sent_log.
     // Unique constraint on (order_id, template) means a second insert for the
     // same order+template fails — the email was already sent.
-    const { error: logError } = await supabase.from("email_sent_log").insert({
-      order_id: body.order_id,
-      template: body.template,
-      recipient: body.to,
-    });
+    const { error: logError } = body.template === "guest_order_access"
+      ? { error: null }
+      : await supabase.from("email_sent_log").insert({
+        order_id: body.order_id,
+        template: body.template,
+        recipient: body.to,
+      });
 
     if (logError) {
       const msg = String(logError.message || "");
@@ -332,14 +360,20 @@ Deno.serve(async (req: Request) => {
     const from = SMTP_USER.includes("@") ? SMTP_USER : "orders@runfazone.com";
     const subject = body.template === "payment_success"
       ? `Payment Confirmed — Order ${body.order_reference}`
-      : `Fulfillment Update — Order ${body.order_reference}`;
+      : body.template === "guest_order_access"
+        ? `Guest Order Access Code — ${body.order_reference}`
+        : `Fulfillment Update — Order ${body.order_reference}`;
 
     const html = body.template === "payment_success"
       ? buildPaymentSuccessHtml(body)
-      : buildFulfillmentFailedHtml(body);
+      : body.template === "guest_order_access"
+        ? buildGuestAccessHtml(body)
+        : buildFulfillmentFailedHtml(body);
     const text = body.template === "payment_success"
       ? buildPaymentSuccessText(body)
-      : buildFulfillmentFailedText(body);
+      : body.template === "guest_order_access"
+        ? buildGuestAccessText(body)
+        : buildFulfillmentFailedText(body);
 
     const result = await sendSmtp(
       SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
