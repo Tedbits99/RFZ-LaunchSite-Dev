@@ -100,6 +100,8 @@ cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
   "$test_root/supabase/tests/reconciliation-atomicity.sql"
 cp "$project_root/supabase/tests/completion-receipt-outbox.sql" \
   "$test_root/supabase/tests/completion-receipt-outbox.sql"
+cp "$project_root/supabase/tests/completion-receipt-data-contract.sql" \
+  "$test_root/supabase/tests/completion-receipt-data-contract.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
   "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
@@ -154,6 +156,11 @@ echo "Executing completion receipt outbox assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/completion-receipt-outbox.sql
+
+echo "Executing completion receipt data contract assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/completion-receipt-data-contract.sql
 
 echo "Preparing concurrent reconciliation assertion..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
