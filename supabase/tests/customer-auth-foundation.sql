@@ -839,6 +839,11 @@ BEGIN
   IF v_enabled IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'authorized super admin could not disable guest checkout';
   END IF;
+END $$;
+RESET ROLE;
+
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.checkout_policy_audit
     WHERE setting_key = 'allow_guest_checkout'
@@ -848,7 +853,6 @@ BEGIN
     RAISE EXCEPTION 'checkout policy change was not audited';
   END IF;
 END $$;
-RESET ROLE;
 
 UPDATE auth.users SET email_confirmed_at = NULL
 WHERE id = '00000000-0000-0000-0000-000000000013';
