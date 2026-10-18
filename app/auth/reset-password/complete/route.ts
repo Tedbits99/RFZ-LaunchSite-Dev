@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin } from '@/lib/authRedirect';
-import { clearRecoveryProofCookie, verifyRecoveryProof } from '@/lib/recoveryProof';
+import { clearRecoveryProofCookie, sessionFingerprint, verifyRecoveryProof } from '@/lib/recoveryProof';
 import { RECOVERY_PROOF_COOKIE } from '@/lib/authSessionConfig';
 
 const GENERIC_INVALID = 'This reset link is invalid or has expired. Please request a new one.';
@@ -54,20 +54,26 @@ export async function POST(request: NextRequest) {
     // The recovery namespace is the ONLY trusted source of reset authority.
     // Customer, admin and default-namespace cookies are invisible to this
     // client and can never satisfy these checks.
-    const { data: userData, error: userError } = await recovery.auth.getUser();
-    const user = userData?.user;
-    if (userError || !user?.id) return json({ error: GENERIC_INVALID }, 403);
-
     const { data: sessionData, error: sessionError } = await recovery.auth.getSession();
     const session = sessionData?.session;
-    if (sessionError || !session?.session_id) return json({ error: GENERIC_INVALID }, 403);
+    const accessToken = session?.access_token;
+    if (sessionError || !session?.user?.id || !accessToken) {
+      return json({ error: GENERIC_INVALID }, 403);
+    }
+
+    const { data: userData, error: userError } = await recovery.auth.getUser();
+    const user = userData?.user;
+    if (userError || !user?.id || user.id !== session.user.id) {
+      return json({ error: GENERIC_INVALID }, 403);
+    }
 
     // The signed proof must be valid, unexpired, issued for exactly this
-    // recovery user and this recovery session, and carry the password-reset
-    // purpose. Fail closed on any mismatch.
+    // recovery user and this recovery session (SHA-256 access-token
+    // fingerprint, same derivation as the callback), and carry the
+    // password-reset purpose. Fail closed on any mismatch.
     const proof = verifyRecoveryProof(request.cookies.get(RECOVERY_PROOF_COOKIE)?.value, {
       userId: user.id,
-      sessionId: session.session_id,
+      sessionFingerprint: sessionFingerprint(accessToken),
     });
     if (!proof.ok) return json({ error: GENERIC_INVALID }, 403);
 

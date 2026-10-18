@@ -1,15 +1,15 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { NextRequest } from 'next/server';
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
 const USER_ID = 'customer-1';
-const SESSION_ID = 'recovery-session-1';
+const ACCESS_TOKEN = 'recovery-access-token';
 const GENERIC_INVALID = 'This reset link is invalid or has expired. Please request a new one.';
 
 const mocks = vi.hoisted(() => ({
-  getUser: vi.fn(),
   getSession: vi.fn(),
+  getUser: vi.fn(),
   updateUser: vi.fn(),
   signOut: vi.fn(),
 }));
@@ -17,8 +17,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/authSessionClients', () => ({
   createRecoveryServerClient: vi.fn(() => ({
     auth: {
-      getUser: mocks.getUser,
       getSession: mocks.getSession,
+      getUser: mocks.getUser,
       updateUser: mocks.updateUser,
       signOut: mocks.signOut,
     },
@@ -27,12 +27,39 @@ vi.mock('@/lib/authSessionClients', () => ({
 
 import { POST } from './route';
 
-function makeProof(opts: { userId?: string; sessionId?: string; exp?: number; secret?: string; breakSig?: boolean } = {}) {
+function fingerprintOf(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+// Documented SDK contracts: getSession/getUser return their payloads through
+// data; the session carries access_token — never a fabricated top-level
+// session_id.
+function recoverySessionResult(opts: { userId?: string; accessToken?: string | null } = {}) {
+  const userId = opts.userId ?? USER_ID;
+  const accessToken = opts.accessToken === null ? undefined : opts.accessToken ?? ACCESS_TOKEN;
+  return {
+    data: {
+      session: accessToken
+        ? { access_token: accessToken, token_type: 'bearer', user: { id: userId } }
+        : null,
+    },
+    error: null,
+  };
+}
+
+function makeProof(opts: {
+  userId?: string;
+  fingerprint?: string;
+  exp?: number;
+  secret?: string;
+  breakSig?: boolean;
+  purpose?: string;
+} = {}) {
   const claims = {
     token: 'a'.repeat(48),
     userId: opts.userId ?? USER_ID,
-    sessionId: opts.sessionId ?? SESSION_ID,
-    purpose: 'password-reset',
+    sessionFingerprint: opts.fingerprint ?? fingerprintOf(ACCESS_TOKEN),
+    purpose: opts.purpose ?? 'password-reset',
     exp: opts.exp ?? Math.floor(Date.now() / 1000) + 300,
   };
   const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
@@ -61,8 +88,8 @@ function setCookies(response: Response): string[] {
 const VALID_COOKIE = `rfz-recovery-proof=${makeProof()}`;
 
 function validAuthMocks() {
+  mocks.getSession.mockResolvedValue(recoverySessionResult());
   mocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
-  mocks.getSession.mockResolvedValue({ data: { session: { session_id: SESSION_ID } }, error: null });
   mocks.updateUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
   mocks.signOut.mockResolvedValue({ error: null });
 }
@@ -79,7 +106,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
   });
 
-  it('a valid signed proof with a matching recovery user and session permits the update, signs out only recovery and clears the proof', async () => {
+  it('a valid signed proof with matching recovery user and session permits the update, signs out recovery and clears the proof', async () => {
     const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
 
     expect(response.status).toBe(200);
@@ -144,8 +171,8 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });
 
-  it('rejects a proof bound to a different recovery session', async () => {
-    const replayed = makeProof({ sessionId: 'other-session' });
+  it('rejects a proof bound to a different session fingerprint', async () => {
+    const replayed = makeProof({ fingerprint: fingerprintOf('a-different-session-token') });
     const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: `rfz-recovery-proof=${replayed}` }));
 
     expect(response.status).toBe(403);
@@ -153,16 +180,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
   });
 
   it('rejects a proof with the wrong purpose', async () => {
-    const claims = {
-      token: 'a'.repeat(48),
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      purpose: 'email-change',
-      exp: Math.floor(Date.now() / 1000) + 300,
-    };
-    const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
-    const sig = createHmac('sha256', TEST_SECRET).update(payload, 'utf8').digest('base64url');
-    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: `rfz-recovery-proof=${payload}.${sig}` }));
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: `rfz-recovery-proof=${makeProof({ purpose: 'email-change' })}` }));
 
     expect(response.status).toBe(403);
     expect(mocks.updateUser).not.toHaveBeenCalled();
@@ -176,16 +194,32 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });
 
-  it('rejects when the recovery namespace has no authenticated user', async () => {
-    mocks.getUser.mockResolvedValue({ data: { user: null }, error: { message: 'no session' } });
+  it('rejects when the recovery namespace has no session', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
     const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
 
     expect(response.status).toBe(403);
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });
 
-  it('rejects when the recovery namespace has no session ID to bind against', async () => {
-    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
+  it('rejects when the recovery namespace has no access token', async () => {
+    mocks.getSession.mockResolvedValue(recoverySessionResult({ accessToken: null }));
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the recovery namespace has no authenticated user', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: null }, error: { message: 'no user' } });
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects when getUser() returns a different user than the recovery session', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'someone-else' } }, error: null });
     const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
 
     expect(response.status).toBe(403);
@@ -196,7 +230,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     const response = await POST(postRequest({ password: 'new-password-1' }, { origin: 'https://evil.example', cookie: VALID_COOKIE }));
 
     expect(response.status).toBe(403);
-    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.getSession).not.toHaveBeenCalled();
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });
 
@@ -255,9 +289,6 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
   });
 
   it('GET is not allowed', async () => {
-    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
-    expect(response.status).not.toBe(405);
-
     const { GET } = await import('./route');
     const getResponse = await GET();
     expect(getResponse.status).toBe(405);

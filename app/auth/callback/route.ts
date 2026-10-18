@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin, getConfirmationUrl } from '@/lib/authRedirect';
-import { newRecoveryProofCookie } from '@/lib/recoveryProof';
-import type { Session } from '@supabase/supabase-js';
+import { newRecoveryProofCookie, sessionFingerprint } from '@/lib/recoveryProof';
 
 type ConfirmationStatus = 'success' | 'pending' | 'restricted' | 'invalid' | 'error';
 
@@ -74,24 +73,29 @@ export async function GET(request: NextRequest) {
     // recovery code has none in the default namespace, so editing type= in
     // the URL can never cross the flows.
     if (recovery) {
-      const { error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
+      const { data: exchangeData, error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
       if (recoveryExchangeError) return redirectToResetPassword(origin);
+
+      // The documented contract: exchangeCodeForSession returns the session
+      // via data.session. getUser() is used only to confirm the identity.
+      const session = exchangeData?.session;
+      const accessToken = session?.access_token;
+      if (!session?.user?.id || !accessToken) return redirectToResetPassword(origin);
 
       const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
       if (recoveryUserError || !recoveryUser.user) return redirectToResetPassword(origin);
+      if (recoveryUser.user.id !== session.user.id) return redirectToResetPassword(origin);
 
-      // The proof is signed over the verified recovery user ID and the
-      // recovery session ID so the reset endpoint can re-verify both. If
-      // signing fails (e.g. the HMAC secret is missing) no proof is issued.
-      const session = (recoveryUser.data as { session?: Session | null } | null)?.session;
-      console.log('DEBUG-ROUTE session:', JSON.stringify(session), 'data:', JSON.stringify(recoveryUser.data).slice(0, 120));
-      if (!session?.session_id) return redirectToResetPassword(origin);
-
+      // The proof is signed over the verified recovery user ID and a SHA-256
+      // fingerprint of the exchange-issued access token, so the reset
+      // endpoint can re-verify both against its own recovery-namespace
+      // session. The raw token never enters the cookie. If signing fails
+      // (e.g. the HMAC secret is missing) no proof is issued.
       try {
         const res = redirectToResetPassword(origin);
         const proof = newRecoveryProofCookie({
           userId: recoveryUser.user.id,
-          sessionId: session.session_id,
+          sessionFingerprint: sessionFingerprint(accessToken),
         });
         res.cookies.set(proof.name, proof.value, proof.options);
         return res;
@@ -120,8 +124,7 @@ export async function GET(request: NextRequest) {
     }
     if (result.status === 'active' && result.error === null) return redirectToConfirmation('success');
     return redirectToConfirmation('error');
-  } catch (e) {
-    console.log('DEBUG-CATCH:', String(e).slice(0, 400));
+  } catch {
     return redirectToConfirmation('error');
   }
 }

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
 const USER_ID = 'customer-1';
-const SESSION_ID = 'recovery-session-1';
+const ACCESS_TOKEN = 'recovery-access-token';
 
 const mocks = vi.hoisted(() => ({
   defaultExchangeCodeForSession: vi.fn(),
@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   recoveryExchangeCodeForSession: vi.fn(),
   recoveryGetUser: vi.fn(),
 }));
-
 
 vi.mock('@/lib/supabaseServer', () => ({
   createSupabaseServerClient: vi.fn(() => ({
@@ -50,16 +49,23 @@ function proofCookie(response: Response): string | undefined {
   return cookies.find((c) => c.startsWith('rfz-recovery-proof='));
 }
 
-function recoveryGetUserResult(opts: { userId?: string; sessionId?: string | null } = {}) {
-  const userId = opts.userId ?? USER_ID;
-  const sessionId = opts.sessionId === null ? undefined : opts.sessionId ?? SESSION_ID;
+// Documented SDK contract: exchangeCodeForSession returns the session via
+// data.session; getUser returns ONLY data.user — never a fabricated
+// data.session or top-level session_id.
+function recoveryExchangeResult(opts: { accessToken?: string | null } = {}) {
+  const accessToken = opts.accessToken === null ? undefined : opts.accessToken ?? ACCESS_TOKEN;
   return {
     data: {
-      user: { id: userId, email_confirmed_at: '2026-10-17T12:00:00Z' },
-      session: sessionId ? { user: { id: userId }, session_id: sessionId } : null,
+      session: accessToken
+        ? { access_token: accessToken, token_type: 'bearer', user: { id: USER_ID } }
+        : null,
     },
     error: null,
   };
+}
+
+function fingerprintOf(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
 function decodeProof(cookie: string) {
@@ -67,7 +73,7 @@ function decodeProof(cookie: string) {
   const [payload, sig] = value.split('.');
   const expectedSig = createHmac('sha256', TEST_SECRET).update(payload, 'utf8').digest('base64url');
   const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
-    token: string; userId: string; sessionId: string; purpose: string; exp: number;
+    token: string; userId: string; sessionFingerprint: string; purpose: string; exp: number;
   };
   return { payload, sig, expectedSig, claims, valid: sig === expectedSig };
 }
@@ -83,7 +89,7 @@ describe('email confirmation callback (default namespace)', () => {
       error: null,
     });
     mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
-    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: null, error: { message: 'no recovery verifier' } });
+    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'no recovery verifier' } });
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: null });
   });
 
@@ -174,8 +180,12 @@ describe('password recovery callback (recovery namespace isolation)', () => {
       error: null,
     });
     mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
-    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
-    mocks.recoveryGetUser.mockResolvedValue(recoveryGetUserResult());
+    mocks.recoveryExchangeCodeForSession.mockResolvedValue(recoveryExchangeResult());
+    // getUser returns ONLY data.user — the SDK contract.
+    mocks.recoveryGetUser.mockResolvedValue({
+      data: { user: { id: USER_ID, email_confirmed_at: null } },
+      error: null,
+    });
   });
 
   it('exchanges a recovery code via the RECOVERY client and issues a signed proof cookie', async () => {
@@ -199,10 +209,18 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     const decoded = decodeProof(proof!);
     expect(decoded.valid).toBe(true);
     expect(decoded.claims.userId).toBe(USER_ID);
-    expect(decoded.claims.sessionId).toBe(SESSION_ID);
+    expect(decoded.claims.sessionFingerprint).toBe(fingerprintOf(ACCESS_TOKEN));
     expect(decoded.claims.purpose).toBe('password-reset');
     expect(decoded.claims.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
     expect(decoded.claims.exp).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 600);
+  });
+
+  it('issues the proof even when getUser() returns ONLY data.user (no data.session)', async () => {
+    mocks.recoveryGetUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
+
+    const response = await GET(request('?code=recovery-code&type=recovery'));
+
+    expect(proofCookie(response)).toBeDefined();
   });
 
   it('never activates a profile or calls activation RPC from the recovery branch', async () => {
@@ -214,7 +232,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
   });
 
   it('fails closed when the recovery exchange errors (no proof cookie issued)', async () => {
-    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: null, error: { message: 'expired provider detail' } });
+    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'expired provider detail' } });
 
     const response = await GET(request('?code=secret-code&type=recovery'));
 
@@ -227,6 +245,16 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(await response.text()).not.toContain('provider detail');
   });
 
+  it('fails closed when the exchange succeeds but returns no access token', async () => {
+    mocks.recoveryExchangeCodeForSession.mockResolvedValue(recoveryExchangeResult({ accessToken: null }));
+
+    const response = await GET(request('?code=secret-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(mocks.recoveryGetUser).not.toHaveBeenCalled();
+  });
+
   it('fails closed when the recovery exchange succeeds but no user resolves', async () => {
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: { message: 'no session' } });
 
@@ -236,8 +264,8 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(proofCookie(response)).toBeUndefined();
   });
 
-  it('fails closed when the recovery session has no session_id to bind the proof to', async () => {
-    mocks.recoveryGetUser.mockResolvedValue(recoveryGetUserResult({ sessionId: null }));
+  it('fails closed when getUser() returns a different user than the exchange session', async () => {
+    mocks.recoveryGetUser.mockResolvedValue({ data: { user: { id: 'someone-else' } }, error: null });
 
     const response = await GET(request('?code=secret-code&type=recovery'));
 
@@ -272,7 +300,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
   it('a signup confirmation code cannot authorize password reset by adding type=recovery', async () => {
     // The signup code has a verifier only in the DEFAULT namespace; the
     // recovery client has no verifier, so the recovery exchange fails closed.
-    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: null, error: { code: 'pkce_code_verifier_not_found' } });
+    mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { code: 'pkce_code_verifier_not_found' } });
 
     const response = await GET(request('?code=signup-code&type=recovery'));
 
@@ -308,6 +336,11 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(location(response)).not.toContain('super-secret-code');
     expect(await response.text()).not.toContain('super-secret-code');
+
+    const proof = proofCookie(response);
+    expect(proof).toBeDefined();
+    expect(proof).not.toContain('super-secret-code');
+    expect(proof).not.toContain(ACCESS_TOKEN);
   });
 
   it('fails closed when the trusted application origin is unavailable during recovery', async () => {

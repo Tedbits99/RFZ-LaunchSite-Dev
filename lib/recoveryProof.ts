@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 
 import { RECOVERY_PROOF_COOKIE, RECOVERY_PROOF_MAX_AGE_SECONDS } from '@/lib/authSessionConfig';
 
@@ -9,16 +9,29 @@ const MIN_SECRET_BYTES = 32;
 const MAX_AGE_SECONDS = Math.min(RECOVERY_PROOF_MAX_AGE_SECONDS, 600);
 
 /**
+ * SHA-256 fingerprint of the recovery session's access token. Both the
+ * callback (from exchangeCodeForSession().data.session.access_token) and the
+ * completion endpoint (from getSession().data.session.access_token) derive
+ * the same binding value; the raw token itself is never stored or
+ * transmitted in the proof cookie. If the access token is refreshed the
+ * fingerprint no longer matches and the reset fails closed — the user
+ * requests a new reset link.
+ */
+export function sessionFingerprint(accessToken: string): string {
+  return createHash('sha256').update(accessToken, 'utf8').digest('hex');
+}
+
+/**
  * HMAC-SHA256 signed recovery proof: an opaque random token plus a signature
  * that binds the token to the verified recovery Auth user ID, the recovery
- * session ID, the password-reset purpose and an absolute expiry. Only the
- * signed statement travels in the HttpOnly cookie; it never contains
- * passwords, bearer tokens, PKCE verifiers or the signing secret.
+ * session fingerprint, the password-reset purpose and an absolute expiry.
+ * Only the signed statement travels in the HttpOnly cookie; it never
+ * contains passwords, bearer tokens, PKCE verifiers or the signing secret.
  */
 export type RecoveryProofClaims = {
   token: string;
   userId: string;
-  sessionId: string;
+  sessionFingerprint: string;
   purpose: string;
   exp: number;
 };
@@ -27,8 +40,6 @@ export type RecoveryProof = { name: string; value: string; options: CookieOption
 type RecoveryProofVerification =
   | { ok: true; claims: RecoveryProofClaims }
   | { ok: false };
-
-type ProofEnvelope = { token: string; sig: string };
 
 interface CookieOptions {
   httpOnly: boolean;
@@ -49,7 +60,9 @@ function isUsableSecret(secret: string | undefined): boolean {
 function getSecret(): string {
   if (typeof window !== 'undefined') throw new Error('Recovery proof signing is server-only.');
   const secret = process.env[RECOVERY_PROOF_HMAC_SECRET_ENV];
-  if (!isUsableSecret(secret)) throw new Error('Recovery proof signing secret is unavailable.');
+  if (typeof secret !== 'string' || !isUsableSecret(secret)) {
+    throw new Error('Recovery proof signing secret is unavailable.');
+  }
   return secret;
 }
 
@@ -78,14 +91,14 @@ function proofCookie(maxAge: number): RecoveryProof {
   };
 }
 
-export function newRecoveryProofCookie(binding: { userId: string; sessionId: string }): RecoveryProof {
+export function newRecoveryProofCookie(binding: { userId: string; sessionFingerprint: string }): RecoveryProof {
   const secret = getSecret();
   const token = randomBytes(24).toString('hex');
   const exp = Math.floor(Date.now() / 1000) + MAX_AGE_SECONDS;
   const signedClaims: RecoveryProofClaims = {
     token,
     userId: binding.userId,
-    sessionId: binding.sessionId,
+    sessionFingerprint: binding.sessionFingerprint,
     purpose: RECOVERY_PROOF_PURPOSE,
     exp,
   };
@@ -100,7 +113,7 @@ export function clearRecoveryProofCookie(): RecoveryProof {
 
 export function verifyRecoveryProof(
   cookieValue: string | undefined,
-  expected: { userId: string; sessionId: string },
+  expected: { userId: string; sessionFingerprint: string },
 ): RecoveryProofVerification {
   if (typeof cookieValue !== 'string' || cookieValue.length === 0 || cookieValue.length > 4096) {
     return { ok: false };
@@ -132,9 +145,8 @@ export function verifyRecoveryProof(
     typeof record.userId !== 'string' ||
     !record.userId ||
     record.userId.length > 128 ||
-    typeof record.sessionId !== 'string' ||
-    !record.sessionId ||
-    record.sessionId.length > 128 ||
+    typeof record.sessionFingerprint !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(record.sessionFingerprint) ||
     typeof record.exp !== 'number' ||
     !Number.isFinite(record.exp)
   ) {
@@ -145,23 +157,30 @@ export function verifyRecoveryProof(
   if (record.exp <= Math.floor(Date.now() / 1000)) return { ok: false };
   if (!safeEqual(sig, sign(payload, secret))) return { ok: false };
   if (!safeEqual(record.userId, expected.userId)) return { ok: false };
-  if (!safeEqual(record.sessionId, expected.sessionId)) return { ok: false };
+  if (!safeEqual(record.sessionFingerprint, expected.sessionFingerprint)) return { ok: false };
 
   return {
     ok: true,
     claims: {
       token: record.token,
       userId: record.userId,
-      sessionId: record.sessionId,
+      sessionFingerprint: record.sessionFingerprint,
       purpose: RECOVERY_PROOF_PURPOSE,
       exp: record.exp,
     },
   };
 }
 
+/**
+ * Cheap structural check that a proof-shaped cookie is present. This is NOT
+ * an authorization decision — signature, expiry, user and session binding
+ * are all verified server-side by verifyRecoveryProof.
+ */
 export function isRecoveryProofPresent(cookies: {
   get(name: string): { value: string } | undefined;
 }): boolean {
   const cookie = cookies.get(RECOVERY_PROOF_COOKIE);
-  return Boolean(cookie && cookie.value.length > 0);
+  if (!cookie || cookie.value.length === 0) return false;
+  const parts = cookie.value.split('.');
+  return parts.length === 2 && parts[0].length > 0 && parts[1].length > 0;
 }
