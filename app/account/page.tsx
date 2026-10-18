@@ -33,6 +33,10 @@ export default async function Account() {
           <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><Package className="text-violet-300" size={20} /><p className="mt-3 text-xs text-slate-400">Total Orders</p><p className="font-display text-lg font-bold">{orders.length}</p></div>
           <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><Wallet className="text-emerald-300" size={20} /><p className="mt-3 text-xs text-slate-400">Total Spent</p><p className="font-display text-lg font-bold">{fmtP(totalSpent)}</p></div>
         </div>
+        <div className="mt-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
+          <p className="text-xs text-slate-400">RF Coins Wallet</p>
+          <p className="mt-2 text-sm text-slate-300">Balance, coin packages and transaction history are in your <a href="/account/wallet" className="text-cyan-300">RF Coins wallet</a>.</p>
+        </div>
         <h2 className="font-display mt-10 mb-4 text-xl font-bold">Order History</h2>
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225]">
           {orders.length === 0 ? <p className="p-6 text-sm text-slate-500">No orders yet. <a href="/" className="text-cyan-300">Browse games</a> to get started.</p> :

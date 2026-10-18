@@ -21,3 +21,6 @@ verify_jwt = false
 
 [functions.completion-receipt-email-worker]
 verify_jwt = false
+
+[functions.create-coin-topup-payment]
+verify_jwt = false

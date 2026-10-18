@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PAYMENT_METHODS, paymentMethodLabel, type PaymentMethodKey } from '@/lib/paymentMethods';
+import { formatCoins } from '@/lib/rfCoins';
 import { ArrowLeft, BadgeCheck, ChevronDown, CircleHelp, CreditCard, Download, Info, Loader2, LockKeyhole, Mail, ShieldCheck, Sparkles, Tag, Ticket, Upload, UserRound, WalletCards, X, Zap } from 'lucide-react';
 
 import { createPortal } from 'react-dom';
@@ -50,7 +51,22 @@ function gameBadge(name: string): string {
   return initials.length >= 2 ? initials : name.slice(0, 4).toUpperCase();
 }
 
-export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], bannerUrl = null }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; bannerUrl?: string | null }) {
+export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], bannerUrl = null, coinPaymentEnabled = false }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; bannerUrl?: string | null; coinPaymentEnabled?: boolean }) {
+  const [coinWallet, setCoinWallet] = useState<{ balance: number } | null>(null);
+
+  useEffect(() => {
+    if (!coinPaymentEnabled) return;
+    // Load the wallet balance only when the server has enabled coin payment.
+    void (async () => {
+      try {
+        const res = await fetch('/api/account/wallet', { cache: 'no-store' });
+        const data = await res.json().catch(() => null) as { wallet?: { balance_coins?: number } | null } | null;
+        if (res.ok && data?.wallet) setCoinWallet({ balance: Number(data.wallet.balance_coins || 0) });
+      } catch {
+        setCoinWallet(null);
+      }
+    })();
+  }, [coinPaymentEnabled]);
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(packages[0] || null);
   const [playerInputs, setPlayerInputs] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
@@ -143,18 +159,33 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     { id: 'zone-id', label: 'Zone ID', field_key: 'zone_id', placeholder: 'Enter your Zone ID', help_text: 'Find your Zone ID beside your User ID.', is_required: true },
   ];
   const resolvedMethods = useMemo(() => {
-    if (dbPaymentMethods.length > 0) {
-      return dbPaymentMethods.map((m) => {
-        const style = METHOD_STYLES[m.method_key] || DEFAULT_STYLE;
-        return { key: m.method_key, name: m.display_name, detail: style.detail, className: style.className, logo_url: m.logo_url || null };
-      });
-    }
-    return PAYMENT_METHODS.map((m) => ({ ...m, logo_url: null as string | null }));
-  }, [dbPaymentMethods]);
+    const base = dbPaymentMethods.length > 0
+      ? dbPaymentMethods.map((m) => {
+          const style = METHOD_STYLES[m.method_key] || DEFAULT_STYLE;
+          return { key: m.method_key, name: m.display_name, detail: style.detail, className: style.className, logo_url: m.logo_url || null };
+        })
+      : PAYMENT_METHODS.map((m) => ({ ...m, logo_url: null as string | null }));
+    if (!coinPaymentEnabled) return base;
+    const coinsNeeded = selectedPackage ? Math.ceil(selectedPackage.price_cents / 100) : null;
+    const coinMethod = {
+      key: 'rf_coin_wallet',
+      name: 'RF Coins Wallet',
+      detail: coinWallet && coinsNeeded
+        ? `${formatCoins(coinWallet.balance)} RF verfügbar · Kosten: ${formatCoins(coinsNeeded)} RF · Danach: ${formatCoins(Math.max(0, coinWallet.balance - coinsNeeded))} RF`
+        : 'Bezahlen Sie vollständig mit Ihrem RF-Coins-Guthaben',
+      className: 'from-[#b45309] to-[#92400e]',
+      logo_url: null as string | null,
+    };
+    const insufficient = Boolean(coinWallet && coinsNeeded && coinWallet.balance < coinsNeeded);
+    return [...base, { ...coinMethod, insufficient } as typeof base[number] & { insufficient?: boolean }];
+  }, [dbPaymentMethods, coinPaymentEnabled, coinWallet, selectedPackage]);
 
   const isUidOnly = useMemo(() => displayFields.every((field) => field.field_key === 'uid'), [displayFields]);
   const emailValid = Boolean(email.trim() && email.includes('@'));
-  const isReady = Boolean(verified && selectedPackage && paymentMethod && emailValid);
+  const coinPaymentSelected = paymentMethod === 'rf_coin_wallet';
+  const coinBalanceSufficient = !coinPaymentSelected || Boolean(
+    coinWallet && selectedPackage && coinWallet.balance >= Math.ceil(selectedPackage.price_cents / 100));
+  const isReady = Boolean(verified && selectedPackage && paymentMethod && emailValid && coinBalanceSufficient);
 
   const subtotalCents = selectedPackage?.price_cents ?? 0;
   const finalCents = voucher ? voucher.total : subtotalCents;
@@ -256,20 +287,29 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     if (!isReady || !selectedPackage || !paymentMethod) return;
     setSubmitting(true);
     try {
-      const response = await fetch('/api/orders', {
+      const response = await fetch(coinPaymentSelected ? '/api/orders/coin' : '/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gameId: game.id, packageId: selectedPackage.id, email: email.trim(), name: 'RunFazone Customer', playerInputs, paymentMethod: paymentMethod, voucherCode: voucher?.code || '' }),
       });
-      const data = await response.json() as { reference?: string; totalCents?: number; qrData?: string | null; paymentDisplayName?: string; error?: string };
+      const data = await response.json() as { reference?: string; totalCents?: number; coinsCharged?: number; balanceAfter?: number; qrData?: string | null; paymentDisplayName?: string; error?: string };
       if (!response.ok || !data.reference) {
         setError(data.error || 'We could not create your order. Please try again.');
         setShowReview(false);
         return;
       }
       setShowReview(false);
+      if (coinPaymentSelected) {
+        setQrModal({
+          reference: data.reference,
+          totalCents: data.totalCents ?? finalCents,
+          qrData: null,
+          displayName: `RF Coins Wallet · ${formatCoins(data.coinsCharged ?? 0)} RF abgebucht · Restguthaben: ${formatCoins(data.balanceAfter ?? 0)} RF`,
+        });
+        return;
+      }
       // For QR Ph (automated), redirect to checkout page which generates
-      // a dynamic QR via PayMongo — no manual proof upload needed.
+      // a dynamic QR via PayMongo - no manual proof upload needed.
       if (paymentMethod === 'paymongo_qrph') {
         window.location.assign(`/checkout?ref=${encodeURIComponent(data.reference)}`);
         return;

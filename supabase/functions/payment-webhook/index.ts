@@ -551,7 +551,24 @@ Deno.serve(async (req: Request) => {
 
     // Resolve the order: metadata order_id, else provider reference lookup,
     // else nested payment id (QR Ph Payment Intent flow).
+    // Coin top-ups are detected first via their dedicated metadata purpose and
+    // handled by a separate crediting path (exact-once via the ledger RPC).
     let orderId: string | null = result.orderId;
+    let coinTopupId: string | null = null;
+    const rawAttrs = (result.rawPayload as any)?.data?.attributes?.data?.attributes || {};
+    if ((rawAttrs.metadata || {} as any).purpose === "rf_coin_topup") {
+      coinTopupId = (rawAttrs.metadata as any).rf_coin_topup_id || null;
+    }
+    if (!coinTopupId && result.providerReference) {
+      const { data: coinTx } = await supabase
+        .from("payment_transactions")
+        .select("rf_coin_topup_id")
+        .eq("provider_reference", result.providerReference)
+        .not("rf_coin_topup_id", "is", null)
+        .limit(1)
+        .maybeSingle();
+      coinTopupId = (coinTx as any)?.rf_coin_topup_id || null;
+    }
     if (!orderId && result.providerReference) {
       const { data: tx } = await supabase
         .from("payment_transactions")
@@ -574,6 +591,52 @@ Deno.serve(async (req: Request) => {
         orderId = (tx as any)?.order_id || null;
       }
     }
+    if (!orderId && !coinTopupId) {
+      return json({ received: true, message: "Order not found for webhook" }, 200);
+    }
+
+    // ---- RF Coins top-up settlement branch (exact-once crediting) ----
+    if (coinTopupId && !orderId) {
+      if (result.status === "PAID") {
+        // Amount check: paid cents must match the top-up's snapshotted price.
+        const { data: topup } = await supabase
+          .from("rf_coin_topups")
+          .select("price_cents, status")
+          .eq("id", coinTopupId)
+          .maybeSingle();
+        if (!topup) return json({ received: true, message: "Top-up not found" }, 200);
+        if (result.amountCents != null && result.amountCents !== (topup as any).price_cents) {
+          return json({ received: true, message: "Top-up amount mismatch" }, 400);
+        }
+        const { data: credit, error: creditError } = await supabase.rpc("rf_coin_credit_paid_topup", {
+          p_topup_id: coinTopupId,
+          p_provider_reference: result.providerReference,
+        });
+        if (creditError) return json({ error: "Coin crediting failed" }, 500);
+        const creditRow = Array.isArray(credit) ? credit[0] : credit;
+        if (creditRow?.out_error) {
+          return json({ received: true, message: String(creditRow.out_error) }, 200);
+        }
+        return json({ received: true, status: "PAID", credited: creditRow?.out_credited ?? false }, 200);
+      }
+      // Failed / expired / cancelled top-ups issue ZERO coins.
+      const failStatus = result.status === "FAILED" ? "FAILED"
+        : result.status === "EXPIRED" ? "EXPIRED"
+        : result.status === "CANCELLED" ? "CANCELLED"
+        : result.status === "REFUNDED" ? "REFUNDED"
+        : null;
+      if (failStatus) {
+        const { error: markError } = await supabase.rpc("rf_coin_mark_topup_status", {
+          p_topup_id: coinTopupId,
+          p_status: failStatus,
+          p_provider_reference: result.providerReference,
+        });
+        if (markError) return json({ error: "Top-up status update failed" }, 500);
+        return json({ received: true, status: failStatus }, 200);
+      }
+      return json({ received: true, message: `Unhandled top-up status: ${result.status}` }, 200);
+    }
+
     if (!orderId) {
       return json({ received: true, message: "Order not found for webhook" }, 200);
     }
