@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
+import { requireAdmin } from '@/lib/adminGuard';
 
 export async function GET(req: NextRequest) {
-  const db = adminSupabase || supabase;
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+
+  const db = adminSupabase || auth.client || supabase;
   if (!db) {
     return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
   }

@@ -1,6 +1,5 @@
-import { notFound } from 'next/navigation';
-import { adminSupabase } from '@/lib/supabaseAdmin';
-import { supabase } from '@/lib/supabase';
+import { notFound, redirect } from 'next/navigation';
+import { getActiveCustomerSession } from '@/lib/customerSession';
 import AccountOrderDetailClient from './AccountOrderDetailClient';
 
 export const dynamic = 'force-dynamic';
@@ -29,17 +28,19 @@ type TimelineEntry = {
 };
 
 export default async function AccountOrderDetail({ params }: { params: { id: string } }) {
-  // Prefer the service-role client, but fall back to the anon client so the
-  // page still renders in runtimes where the service key is not injected
-  // (RLS allows anon SELECT on orders/order_timeline). Without this fallback
-  // the client component never mounts and no live updates can reach the UI.
-  const client = adminSupabase || supabase;
-  if (!client) return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>;
+  const session = await getActiveCustomerSession();
+
+  // Guest access is handled by /track-order after one-time email verification;
+  // account detail pages authorize only by the verified Auth UUID.
+  if (!session) redirect('/login');
+
+  const client = session.client;
 
   const { data } = await client
     .from('orders')
     .select('id, reference, email, status, payment_status, fulfillment_status, total_cents, created_at, updated_at, player_inputs, payment_method, games(name), packages(name, amount)')
     .eq('id', params.id)
+    .eq('customer_user_id', session.user.id)
     .maybeSingle();
   const order = data as unknown as Order | null;
   if (!order) notFound();

@@ -39,6 +39,11 @@ const json = (body: unknown, status: number) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
+// Instantiate createClient with its runtime schema defaults. Using
+// ReturnType<typeof createClient> directly loses the generic defaults and
+// produces an unusable unknown/never client type under Deno.
+type WebhookSupabaseClient = ReturnType<typeof createClient<any>>;
+
 const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const FULFILLMENT_TIMEOUT_MS = 25000;
 const EMAIL_FUNCTION_PATH = "/functions/v1/send-transactional-email";
@@ -53,7 +58,7 @@ interface OrderEmailData {
 }
 
 async function loadOrderForEmail(
-  supabase: ReturnType<typeof createClient>,
+  supabase: WebhookSupabaseClient,
   orderId: string,
 ): Promise<OrderEmailData | null> {
   const { data: order } = await supabase
@@ -84,7 +89,7 @@ async function loadOrderForEmail(
 }
 
 async function sendPaymentSuccessEmail(
-  supabase: ReturnType<typeof createClient>,
+  supabase: WebhookSupabaseClient,
   orderId: string,
 ): Promise<void> {
   try {
@@ -92,15 +97,15 @@ async function sendPaymentSuccessEmail(
     if (!orderData || !orderData.to) return;
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    if (!SUPABASE_URL || !ANON_KEY) return;
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!SUPABASE_URL || !SERVICE_KEY) return;
 
     await fetch(`${SUPABASE_URL}${EMAIL_FUNCTION_PATH}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${ANON_KEY}`,
-        "apikey": ANON_KEY,
+        "Authorization": `Bearer ${SERVICE_KEY}`,
+        "apikey": SERVICE_KEY,
       },
       body: JSON.stringify({
         ...orderData,
@@ -114,7 +119,7 @@ async function sendPaymentSuccessEmail(
 }
 
 async function sendFulfillmentFailedEmail(
-  supabase: ReturnType<typeof createClient>,
+  supabase: WebhookSupabaseClient,
   orderId: string,
   errorDetail: string,
 ): Promise<void> {
@@ -123,15 +128,15 @@ async function sendFulfillmentFailedEmail(
     if (!orderData || !orderData.to) return;
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    if (!SUPABASE_URL || !ANON_KEY) return;
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    if (!SUPABASE_URL || !SERVICE_KEY) return;
 
     await fetch(`${SUPABASE_URL}${EMAIL_FUNCTION_PATH}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${ANON_KEY}`,
-        "apikey": ANON_KEY,
+        "Authorization": `Bearer ${SERVICE_KEY}`,
+        "apikey": SERVICE_KEY,
       },
       body: JSON.stringify({
         ...orderData,
@@ -260,7 +265,7 @@ async function fazercardsCreateOrder(
 
 // Mirrors lib/suppliers/fulfillment.ts startFulfillment + fulfillOrder.
 // Returns quietly — fulfillment failure must not undo payment verification.
-async function triggerFulfillment(supabase: ReturnType<typeof createClient>, orderId: string): Promise<void> {
+async function triggerFulfillment(supabase: WebhookSupabaseClient, orderId: string): Promise<void> {
   try {
     // 1. Load order and check the gate (payment VERIFIED, not already fulfilled).
     const { data: order } = await supabase
@@ -443,7 +448,7 @@ async function fazercardsPollOrder(
 }
 
 async function pollSupplierImmediately(
-  supabase: ReturnType<typeof createClient>,
+  supabase: WebhookSupabaseClient,
   orderId: string,
 ): Promise<void> {
   const apiKey = Deno.env.get("SUPPLIER_FAZERCARDS_API_KEY") || "";
@@ -461,63 +466,33 @@ async function pollSupplierImmediately(
 
     const ref = (tx as Record<string, any>).supplier_reference as string;
     const polled = await fazercardsPollOrder(apiKey, ref);
-    const polledAt = new Date().toISOString();
 
     if (polled.status === "completed") {
-      await supabase.from("supplier_transactions").update({ status: "success", last_polled_at: polledAt }).eq("id", (tx as Record<string, any>).id);
-      const { data: ord } = await supabase
-        .from("orders")
-        .select("id, fulfillment_status, payment_status")
-        .eq("id", orderId)
-        .maybeSingle();
-      const o = (ord as Record<string, any>) || null;
-      if (o && o.payment_status === "VERIFIED" && o.fulfillment_status === "PROCESSING") {
-        const { error } = await supabase
-          .from("orders")
-          .update({ fulfillment_status: "COMPLETED", status: "COMPLETED", updated_at: polledAt })
-          .eq("id", orderId)
-          .eq("fulfillment_status", "PROCESSING");
-        if (!error) {
-          await supabase.from("order_timeline").insert({
-            order_id: orderId,
-            status: "COMPLETED",
-            actor_email: "auto-reconciliation",
-            note: `Supplier confirmed completion: ${ref}`,
-          });
-        }
-      }
+      const { data: finalization, error: finalizationError } = await supabase.rpc("finalize_supplier_reconciliation", {
+        p_supplier_transaction_id: (tx as Record<string, any>).id,
+        p_outcome: "completed",
+        p_actor: "fulfillment_system",
+        p_fail_reason: null,
+      });
+      if (finalizationError || !["applied", "already-finalized"].includes((Array.isArray(finalization) ? finalization[0] : finalization)?.out_outcome)) return;
       return;
     }
 
     if (polled.status === "failed" && polled.failReason) {
-      await supabase.from("supplier_transactions").update({ status: "failed", error_message: polled.failReason, last_polled_at: polledAt }).eq("id", (tx as Record<string, any>).id);
-      const { data: ord } = await supabase
-        .from("orders")
-        .select("id, fulfillment_status, payment_status")
-        .eq("id", orderId)
-        .maybeSingle();
-      const o = (ord as Record<string, any>) || null;
-      if (o && o.payment_status === "VERIFIED" && o.fulfillment_status === "PROCESSING") {
-        const { error } = await supabase
-          .from("orders")
-          .update({ fulfillment_status: "FAILED", status: "FULFILLMENT_FAILED", updated_at: polledAt })
-          .eq("id", orderId)
-          .eq("fulfillment_status", "PROCESSING");
-        if (!error) {
-          await supabase.from("order_timeline").insert({
-            order_id: orderId,
-            status: "FAILED",
-            actor_email: "auto-reconciliation",
-            note: `Supplier reported failure (${ref}): ${polled.failReason}`,
-          });
-          // Send fulfillment-failed email (fire-and-forget, duplicate-guarded).
-          sendFulfillmentFailedEmail(supabase, orderId, `Supplier reported failure: ${polled.failReason}`).catch(() => {});
-        }
+      const { data: finalization, error: finalizationError } = await supabase.rpc("finalize_supplier_reconciliation", {
+        p_supplier_transaction_id: (tx as Record<string, any>).id,
+        p_outcome: "failed",
+        p_actor: "fulfillment_system",
+        p_fail_reason: polled.failReason,
+      });
+      const result = Array.isArray(finalization) ? finalization[0] : finalization;
+      if (!finalizationError && ["applied", "already-finalized"].includes(result?.out_outcome)) {
+        // Send fulfillment-failed email (fire-and-forget, duplicate-guarded).
+        sendFulfillmentFailedEmail(supabase, orderId, `Supplier reported failure: ${polled.failReason}`).catch(() => {});
       }
       return;
     }
 
-    await supabase.from("supplier_transactions").update({ last_polled_at: polledAt }).eq("id", (tx as Record<string, any>).id);
   }
 }
 
@@ -557,10 +532,10 @@ Deno.serve(async (req: Request) => {
       matchedConfig = configs[0];
     }
     if (!matchedConfig) {
-      return json({ received: true, message: "No matching provider config" });
+      return json({ received: true, message: "No matching provider config" }, 200);
     }
     if (matchedConfig.provider_name !== "paymongo") {
-      return json({ received: true, message: "Unknown provider" });
+      return json({ received: true, message: "Unknown provider" }, 200);
     }
 
     const sigHeader = req.headers.get("paymongo-signature") || "";
@@ -600,7 +575,7 @@ Deno.serve(async (req: Request) => {
       }
     }
     if (!orderId) {
-      return json({ received: true, message: "Order not found for webhook" });
+      return json({ received: true, message: "Order not found for webhook" }, 200);
     }
 
     // Idempotency: unique key on payment_transactions backs this up.
@@ -611,7 +586,7 @@ Deno.serve(async (req: Request) => {
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
     if (existingTx) {
-      return json({ received: true, message: "Already processed" });
+      return json({ received: true, message: "Already processed" }, 200);
     }
 
     // Log the webhook transaction.
@@ -632,7 +607,7 @@ Deno.serve(async (req: Request) => {
       // Unique violation on concurrent duplicate = already processed.
       const msg = String((insertError as any).message || "");
       if (msg.includes("duplicate key") || msg.includes("unique")) {
-        return json({ received: true, message: "Already processed" });
+        return json({ received: true, message: "Already processed" }, 200);
       }
       return json({ error: "Could not log webhook." }, 500);
     }
@@ -643,12 +618,12 @@ Deno.serve(async (req: Request) => {
       .eq("id", orderId)
       .maybeSingle();
     if (!order) {
-      return json({ received: true, message: "Order not found" });
+      return json({ received: true, message: "Order not found" }, 200);
     }
 
     const terminalStatuses = ["COMPLETED", "DELIVERED", "REFUNDED"];
     if (terminalStatuses.includes((order as any).status)) {
-      return json({ received: true, message: "Order already in terminal state" });
+      return json({ received: true, message: "Order already in terminal state" }, 200);
     }
 
     const statusMap: Record<string, string> = {
@@ -663,11 +638,11 @@ Deno.serve(async (req: Request) => {
     };
     const targetStatus = statusMap[result.status] || null;
     if (!targetStatus) {
-      return json({ received: true, message: `Unhandled status: ${result.status}` });
+      return json({ received: true, message: `Unhandled status: ${result.status}` }, 200);
     }
 
     if (targetStatus === "PAID" && (order as any).status !== "WAITING_PAYMENT") {
-      return json({ received: true, message: "Order not awaiting payment" });
+      return json({ received: true, message: "Order not awaiting payment" }, 200);
     }
 
     if (targetStatus === "PAID") {
@@ -719,7 +694,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ received: true, status: targetStatus });
+    return json({ received: true, status: targetStatus }, 200);
   } catch {
     return json({ received: true, error: "Webhook processing failed" }, 500);
   }

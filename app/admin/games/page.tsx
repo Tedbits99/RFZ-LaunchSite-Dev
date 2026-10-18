@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Gamepad2, Plus, Package as PackageIcon } from 'lucide-react'
@@ -25,14 +25,19 @@ export default async function AdminGamesPage() {
   let dbReady = false
   let loadError: string | null = null
 
-  if (supabase) {
+  try {
+    const db = createSupabaseServerClient()
+    const { data: { user } } = await db.auth.getUser()
+    if (!user) throw new Error('Not authenticated')
     dbReady = true
-    const { data, error } = await supabase.rpc('admin_get_games_with_package_counts')
+    const { data, error } = await db.rpc('admin_get_games_with_package_counts')
     if (error) {
       loadError = `Database error: ${error.message}`
     } else {
       games = (data || []) as Game[]
     }
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : 'Database error'
   }
 
   return (

@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
-import { adminSupabase } from '@/lib/supabaseAdmin';
-import { supabase } from '@/lib/supabase';
 import SiteFooter from '@/components/SiteFooter';
+import { redirect } from 'next/navigation';
+import { getActiveCustomerSession } from '@/lib/customerSession';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,25 +27,19 @@ const statusColor: Record<string, string> = {
   REFUNDED: 'text-slate-400',
 };
 
-export default async function AccountOrders({ searchParams }: { searchParams: { email?: string } }) {
-  let orders: Order[] = [];
-  let hasEmail = false;
+export default async function AccountOrders() {
+  // Account history is based only on immutable Auth UUID ownership. Existing
+  // guest orders remain unlinked and use the separate verified recovery flow.
+  const session = await getActiveCustomerSession();
+  if (!session) redirect('/login');
 
-  // The account page is email-based (no auth yet). If an email param is provided,
-  // load that customer's orders. Otherwise show the search prompt.
-  if (searchParams.email) {
-    const client = adminSupabase || supabase;
-    if (client) {
-      hasEmail = true;
-      const { data } = await client
-        .from('orders')
-        .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
-        .ilike('email', searchParams.email)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      orders = (data || []) as unknown as Order[];
-    }
-  }
+  const { data } = await session.client
+    .from('orders')
+    .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
+    .eq('customer_user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  const orders = (data || []) as unknown as Order[];
 
   const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
 
@@ -65,15 +59,7 @@ export default async function AccountOrders({ searchParams }: { searchParams: { 
         <h1 className="font-display mt-4 text-2xl font-bold">My Orders</h1>
         <p className="mt-2 text-sm text-slate-400">View your order history and track status.</p>
 
-        {!hasEmail ? (
-          <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-sm text-slate-500">
-            <p>Enter your email to see your orders, or <Link href="/track-order" className="text-cyan-300">track a specific order</Link>.</p>
-            <form className="mt-4 flex gap-2" action="/account/orders" method="GET">
-              <input name="email" type="email" placeholder="your@email.com" className="flex-1 rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-2.5 text-sm outline-none focus:border-cyan-400" />
-              <button type="submit" className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-5 py-2.5 text-sm font-semibold">Show Orders</button>
-            </form>
-          </div>
-        ) : orders.length === 0 ? (
+        {orders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-center text-sm text-slate-500">
             <Package className="mx-auto mb-2 text-slate-700" size={24} />
             No orders found for this email. <Link href="/" className="text-cyan-300">Browse games</Link> to place your first order.

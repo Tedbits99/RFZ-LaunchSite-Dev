@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdmin } from '@/lib/adminGuard';
 
-export async function GET() {
-  if (!supabase) {
+export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
+  if (!db) {
     return NextResponse.json(
       { error: 'Database connection is not available. Please check server configuration.' },
       { status: 503 }
     );
   }
-  const { data, error } = await supabase.rpc('admin_get_all_games');
+  const { data, error } = await db.rpc('admin_get_all_games');
   if (error) {
     return NextResponse.json(
       { error: `Failed to load games: ${error.message}` },
@@ -19,7 +23,10 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!supabase) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
+  if (!db) {
     return NextResponse.json(
       { error: 'Database connection is not available. Please check server configuration.' },
       { status: 503 }
@@ -38,7 +45,7 @@ export async function PATCH(req: NextRequest) {
   if (typeof is_active !== 'boolean') {
     return NextResponse.json({ error: 'Invalid request: is_active must be a boolean.' }, { status: 400 });
   }
-  const { data, error } = await supabase.rpc('admin_set_game_active', { game_id: id, active: is_active });
+  const { data, error } = await db.rpc('admin_set_game_active', { game_id: id, active: is_active });
   if (error) {
     return NextResponse.json(
       { error: `Failed to update game visibility: ${error.message}` },

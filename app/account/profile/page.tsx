@@ -9,11 +9,9 @@ export default function AccountProfile() {
       <div className="mx-auto max-w-2xl px-5 py-10">
         <nav className="flex items-center gap-2 text-xs text-slate-500"><Link href="/account">Account</Link><ChevronRight size={12} /><span className="text-slate-300">Profile</span></nav>
         <h1 className="font-display mt-4 text-2xl font-bold">Profile Settings</h1>
-        <form className="mt-6 space-y-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6">
-          <label className="block"><span className="mb-1 block text-xs text-slate-400">Full name</span><input defaultValue="Guest Customer" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-3 py-2.5 text-sm outline-none focus:border-cyan-400" /></label>
-          <label className="block"><span className="mb-1 block text-xs text-slate-400">Email</span><input type="email" defaultValue="guest@runfazone.com" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-3 py-2.5 text-sm outline-none focus:border-cyan-400" /></label>
-          <button type="button" className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-5 py-2.5 text-sm font-semibold">Save Changes</button>
-        </form>
+        <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-sm text-slate-400">
+          Profile editing is not available yet. Your account and order history remain protected by your verified customer session.
+        </div>
       </div>
       <SiteFooter />
     </main>

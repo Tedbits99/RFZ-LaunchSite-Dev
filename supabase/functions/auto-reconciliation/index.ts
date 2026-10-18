@@ -1,4 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  hasValidReconciliationSecret,
+  getReconciliationDecision,
+  isInFlightSupplierTransactionStatus,
+  isEnabledFazerCardsSupplier,
+} from "../../../lib/reconciliationSecurity.ts";
 
 /*
   Auto-reconciliation worker: polls FazerCards for supplier orders that are
@@ -33,13 +39,6 @@ const json = (body: unknown, status = 200) =>
 const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const POLL_BATCH_LIMIT = 25;
 
-function mapSupplierStatus(raw: string): "completed" | "failed" | "processing" {
-  const s = raw.toLowerCase();
-  if (s.includes("complet") || s.includes("success") || s.includes("done")) return "completed";
-  if (s.includes("fail") || s.includes("error") || s.includes("cancel")) return "failed";
-  return "processing";
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -53,14 +52,26 @@ Deno.serve(async (req: Request) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const API_KEY = Deno.env.get("SUPPLIER_FAZERCARDS_API_KEY") || "";
-    const CRON_SECRET = "rfz_recon_a8f3k2m9x7q1w4z6b5c8d0e2f3a1b4c7";
     if (!SUPABASE_URL || !SERVICE_KEY) {
       return json({ error: "Service unavailable." }, 503);
     }
-    if (req.headers.get("X-Cron-Secret") !== CRON_SECRET) {
+
+    const db = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { data: secretRow, error: secretError } = await db
+      .from("_cron_secrets")
+      .select("value")
+      .eq("key", "auto_recon_secret")
+      .maybeSingle();
+    const configuredSecret = typeof secretRow?.value === "string" ? secretRow.value : null;
+    if (secretError || !configuredSecret) {
+      return json({ error: "Service unavailable." }, 503);
+    }
+    if (!hasValidReconciliationSecret(req.headers.get("X-Cron-Secret"), configuredSecret)) {
       return json({ error: "Unauthorized." }, 401);
     }
-    const db = createClient(SUPABASE_URL, SERVICE_KEY);
+    if (!API_KEY) {
+      return json({ error: "Service unavailable." }, 503);
+    }
 
     // Orders with an in-flight supplier transaction.
     const { data: txs } = await db
@@ -81,6 +92,7 @@ Deno.serve(async (req: Request) => {
 
     for (const tx of txs as Record<string, any>[]) {
       if (!tx.supplier_reference || !tx.supplier_id) continue;
+      if (!isInFlightSupplierTransactionStatus(tx.status)) continue;
 
       const { data: supplier } = await db
         .from("suppliers")
@@ -88,6 +100,7 @@ Deno.serve(async (req: Request) => {
         .eq("id", tx.supplier_id)
         .maybeSingle();
       if (!supplier) continue;
+      if (!isEnabledFazerCardsSupplier(supplier)) continue;
 
       polled++;
       try {
@@ -100,78 +113,47 @@ Deno.serve(async (req: Request) => {
           await db
             .from("supplier_transactions")
             .update({ error_message: `Poll HTTP ${res.status}` })
-            .eq("id", tx.id);
+            .eq("id", tx.id)
+            .in("status", ["submitted", "pending"]);
           errors++;
           continue;
         }
 
         const order = (data as Record<string, any>)?.order ?? data;
         const rawStatus = String(order?.status ?? "");
-        const mapped = mapSupplierStatus(rawStatus);
+        const mapped = getReconciliationDecision(rawStatus, order?.fail_reason);
 
         if (mapped === "completed") {
-          // Genuine supplier success — the only path to COMPLETED.
-          await db.from("supplier_transactions")
-            .update({ status: "success", error_message: null })
-            .eq("id", tx.id);
-          // Transition rules mirror complete_fulfillment: only PROCESSING ->
-          // COMPLETED is allowed here. Orders already terminal are untouched.
-          const { data: ord } = await db
-            .from("orders")
-            .select("id, fulfillment_status, payment_status")
-            .eq("id", tx.order_id)
-            .maybeSingle();
-          const o = (ord as Record<string, any>) || null;
-          if (o && o.payment_status === "VERIFIED" && o.fulfillment_status === "PROCESSING") {
-            const { error: updError } = await db
-              .from("orders")
-              .update({ fulfillment_status: "COMPLETED", status: "COMPLETED", updated_at: new Date().toISOString() })
-              .eq("id", tx.order_id)
-              .eq("fulfillment_status", "PROCESSING");
-            if (updError) {
-              errors++;
-            } else {
-              await db.from("order_timeline").insert({
-                order_id: tx.order_id,
-                status: "COMPLETED",
-                actor_email: "auto-reconciliation",
-                note: `Supplier confirmed completion: ${tx.supplier_reference}`,
-              });
-              reconciled++;
-            }
+          const { data: finalization, error: finalizationError } = await db.rpc(
+            "finalize_supplier_reconciliation",
+            {
+              p_supplier_transaction_id: tx.id,
+              p_outcome: "completed",
+              p_actor: "auto-reconciliation",
+              p_fail_reason: null,
+            },
+          );
+          const result = Array.isArray(finalization) ? finalization[0] : finalization;
+          if (finalizationError || !result || !["applied", "already-finalized"].includes(result.out_outcome)) {
+            errors++;
           } else {
-            reconciled++; // tx confirmed success; order already terminal — no-op
+            reconciled++;
           }
         } else if (mapped === "failed" && order?.fail_reason) {
-          // Explicit supplier failure with a reason — safe to mark FAILED.
-          await db.from("supplier_transactions")
-            .update({ status: "failed", error_message: String(order.fail_reason) })
-            .eq("id", tx.id);
-          const { data: ord } = await db
-            .from("orders")
-            .select("id, fulfillment_status, payment_status")
-            .eq("id", tx.order_id)
-            .maybeSingle();
-          const o = (ord as Record<string, any>) || null;
-          if (o && o.payment_status === "VERIFIED" && o.fulfillment_status === "PROCESSING") {
-            const { error: updError } = await db
-              .from("orders")
-              .update({ fulfillment_status: "FAILED", status: "FULFILLMENT_FAILED", updated_at: new Date().toISOString() })
-              .eq("id", tx.order_id)
-              .eq("fulfillment_status", "PROCESSING");
-            if (updError) {
-              errors++;
-            } else {
-              await db.from("order_timeline").insert({
-                order_id: tx.order_id,
-                status: "FAILED",
-                actor_email: "auto-reconciliation",
-                note: `Supplier reported failure (${tx.supplier_reference}): ${order.fail_reason}`,
-              });
-              reconciled++;
-            }
+          const { data: finalization, error: finalizationError } = await db.rpc(
+            "finalize_supplier_reconciliation",
+            {
+              p_supplier_transaction_id: tx.id,
+              p_outcome: "failed",
+              p_actor: "auto-reconciliation",
+              p_fail_reason: String(order.fail_reason),
+            },
+          );
+          const result = Array.isArray(finalization) ? finalization[0] : finalization;
+          if (finalizationError || !result || !["applied", "already-finalized"].includes(result.out_outcome)) {
+            errors++;
           } else {
-            reconciled++; // tx confirmed failed; order already terminal — no-op
+            reconciled++;
           }
         } else {
           // Still processing, or ambiguous failure without a reason — stay in flight.

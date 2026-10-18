@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, Package, CheckCircle2, Clock, XCircle, Circle, RefreshCw } from 'lucide-react';
 import SiteFooter from '@/components/SiteFooter';
 
-type TimelineEntry = { id: string; status: string; actor_email: string; note: string; created_at: string };
+type TimelineEntry = { id: string; status: string; note: string; created_at: string };
 type Order = { id: string; reference: string; status: string; total_cents: number; created_at: string; updated_at: string; payment_method: string; games?: { name: string } | null; packages?: { name: string } | null };
 
 const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
@@ -60,11 +60,23 @@ export default function TrackOrder() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [accessCode, setAccessCode] = useState('');
+  const [accessRequested, setAccessRequested] = useState(false);
+
+  useEffect(() => {
+    const initialReference = new URLSearchParams(window.location.search).get('ref');
+    if (initialReference) setRef(initialReference.toUpperCase());
+  }, []);
 
   const search = async () => {
     setError(''); setOrder(null); setTimeline([]); setLoading(true);
     try {
-      const res = await fetch(`/api/orders/lookup?ref=${encodeURIComponent(ref.toUpperCase())}&email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+      const res = await fetch('/api/orders/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: ref.toUpperCase(), email }),
+        cache: 'no-store',
+      });
       const data = await res.json();
       if (!res.ok || !data.order) { setError(data.error || 'No order found. Check your reference and email.'); setLoading(false); return; }
       setOrder(data.order);
@@ -75,11 +87,49 @@ export default function TrackOrder() {
     setLoading(false);
   };
 
+  const requestAccessCode = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/orders/access/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: ref, email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Order recovery is unavailable.');
+      setAccessRequested(true);
+      setError(data.message || 'If the order details match, an access code will be sent to the checkout email.');
+    } catch {
+      setError('If the order details match, an access code will be sent to the checkout email.');
+    }
+    setLoading(false);
+  };
+
+  const verifyAccessCode = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/orders/access/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: ref, email, code: accessCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'The recovery code is invalid or expired.');
+      setAccessCode('');
+      await search();
+    } catch (verifyError) {
+      setError(verifyError instanceof Error ? verifyError.message : 'The recovery code is invalid or expired.');
+      setLoading(false);
+    }
+  };
+
   // Poll for status updates every 5 seconds once an order is found
   const poll = useCallback(async () => {
     if (!order) return;
     try {
-      const res = await fetch(`/api/orders/${order.id}/status-check?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+      const res = await fetch(`/api/orders/${order.id}/status-check`, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       if (data.status && data.status !== order.status) {
@@ -110,6 +160,11 @@ export default function TrackOrder() {
           <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Order reference (e.g. RF-20260928-000001)" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-3 text-sm outline-none focus:border-cyan-400" />
           <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email used at checkout" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-3 text-sm outline-none focus:border-cyan-400" />
           <button onClick={search} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 py-3 text-sm font-semibold disabled:opacity-50"><Search size={15} /> {loading ? 'Searching...' : 'Track Order'}</button>
+          <button onClick={requestAccessCode} disabled={loading || !ref || !email} className="w-full rounded-lg border border-[#22314d] py-3 text-sm text-slate-300 disabled:opacity-50">Email me a one-time access code</button>
+          {accessRequested && <div className="space-y-2">
+            <input value={accessCode} onChange={(e) => setAccessCode(e.target.value)} placeholder="One-time code from your email" autoComplete="one-time-code" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-3 text-sm outline-none focus:border-cyan-400" />
+            <button onClick={verifyAccessCode} disabled={loading || !accessCode} className="w-full rounded-lg bg-slate-800 py-3 text-sm font-semibold disabled:opacity-50">{loading ? 'Verifying...' : 'Verify and track order'}</button>
+          </div>}
           {error && <p className="text-sm text-rose-400">{error}</p>}
         </div>
 
@@ -132,6 +187,12 @@ export default function TrackOrder() {
                 <div className="flex justify-between border-t border-[#1b2a45] pt-3"><span className="text-slate-400">Total</span><span className="font-display font-bold text-cyan-300">{fmtP(order.total_cents)}</span></div>
               </div>
             </div>
+
+            {order.status === 'WAITING_PAYMENT' && (
+              <a href={`/checkout?ref=${encodeURIComponent(order.reference)}`} className="block rounded-lg border border-cyan-400/30 bg-cyan-400/5 px-4 py-3 text-center text-sm font-semibold text-cyan-200 hover:border-cyan-300">
+                View payment instructions and submit proof
+              </a>
+            )}
 
             {/* Status progress */}
             {!isCancelled && !isRefundFlow && !isFailed && (

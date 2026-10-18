@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdmin } from '@/lib/adminGuard';
 
 function csvField(value: unknown): string {
   if (value === null || value === undefined) return '""';
@@ -7,7 +8,10 @@ function csvField(value: unknown): string {
 }
 
 export async function GET(req: NextRequest) {
-  if (!adminSupabase) return new NextResponse('Database not configured', { status: 503 });
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+  const db = adminSupabase || auth.client;
+  if (!db) return new NextResponse('Database not configured', { status: 503 });
 
   const type = req.nextUrl.pathname.endsWith('/games') ? 'games' : 'orders';
 
@@ -21,7 +25,7 @@ export async function GET(req: NextRequest) {
     const date = searchParams.get('date')?.trim() || '';
 
     if (detailed) {
-      let query = adminSupabase
+      let query = db
         .from('orders')
         .select('reference,email,customer_name,status,payment_status,fulfillment_status,payment_method,payment_reference,total_cents,created_at,updated_at,games(name),packages(name),supplier_transactions(supplier_reference)')
         .order('created_at', { ascending: false })
@@ -67,7 +71,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const { data } = await adminSupabase
+    const { data } = await db
       .from('orders')
       .select('reference,email,status,total_cents,payment_method,created_at,games(name),packages(name)')
       .order('created_at', { ascending: false })
@@ -79,8 +83,8 @@ export async function GET(req: NextRequest) {
     return new NextResponse(`${header}\n${body}`, { headers: { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="orders.csv"' } });
   }
 
-  const { data: games } = await adminSupabase.from('games').select('*').order('sort_order');
-  const { data: packages } = await adminSupabase.from('packages').select('name,sku,price_cents,original_price_cents,is_active,games(name)').order('sort_order');
+  const { data: games } = await db.from('games').select('*').order('sort_order');
+  const { data: packages } = await db.from('packages').select('name,sku,price_cents,original_price_cents,is_active,games(name)').order('sort_order');
   const header = 'Type,Name,Slug/SKU,Price,OriginalPrice,Active';
   const gameRows = ((games || []) as Array<Record<string, unknown>>).map((g) => `Game,"${g.name}","${g.slug}",,,,${g.is_active}`);
   const pkgRows = ((packages || []) as unknown as Array<Record<string, unknown>>).map((p) => `Package,"${p.name}","${p.sku}",${p.price_cents},${p.original_price_cents || ''},${p.is_active}`);

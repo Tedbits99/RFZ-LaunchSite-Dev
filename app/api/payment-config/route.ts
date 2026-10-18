@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { requireAdmin } from '@/lib/adminGuard';
 import { getPaymentAdapter, buildProviderConfig, listAvailableProviders } from '@/lib/paymentProviderAdapters';
 
 export async function GET(req: NextRequest) {
-  const db = adminSupabase || supabase;
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth.response;
+
+  const db = adminSupabase || auth.client;
   if (!db) {
     return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
   }
@@ -32,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) {
     return auth.response;
   }
-  const db = adminSupabase || supabase;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   try {
@@ -82,7 +84,7 @@ export async function PATCH(req: NextRequest) {
   if (!auth.ok) {
     return auth.response;
   }
-  const db = adminSupabase || supabase;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   try {
@@ -141,7 +143,7 @@ export async function DELETE(req: NextRequest) {
   if (!auth.ok) {
     return auth.response;
   }
-  const db = adminSupabase || supabase;
+  const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   const { searchParams } = new URL(req.url);

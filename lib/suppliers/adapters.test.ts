@@ -293,7 +293,7 @@ describe('FazerCardsAdapter.createOrder', () => {
     expect(result.supplierReference).not.toBe('internal_order_123');
   });
 
-  it('returns failed on 400', async () => {
+  it('keeps HTTP 400 pending when no explicit terminal supplier status is present', async () => {
     fetchSpy.mockResolvedValue(mockResponse({ error: 'bad' }, { status: 400 }));
     const adapter = new FazerCardsAdapter();
     const result = await adapter.createOrder(makeConfig(), {
@@ -304,8 +304,22 @@ describe('FazerCardsAdapter.createOrder', () => {
       metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
     });
     expect(result.success).toBe(false);
-    expect(result.status).toBe('failed');
+    expect(result.status).toBe('pending');
     expect(result.error).toContain('validation error');
+  });
+
+  it('returns failed only when the response explicitly reports a terminal failure', async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ status: 'failed', error: 'invalid player' }, { status: 400 }));
+    const adapter = new FazerCardsAdapter();
+    const result = await adapter.createOrder(makeConfig(), {
+      idempotencyKey: 'k-explicit-failure',
+      supplierProductId: 'o1',
+      playerId: 'p1',
+      quantity: 1,
+      metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
+    });
+    expect(result.success).toBe(false);
+    expect(result.status).toBe('failed');
   });
 
   it('returns pending on 429 with Retry-After', async () => {
@@ -327,7 +341,7 @@ describe('FazerCardsAdapter.createOrder', () => {
     expect(result.error).toContain('30');
   });
 
-  it('returns failed on 401', async () => {
+  it('returns pending on 401 because acceptance is unknown', async () => {
     fetchSpy.mockResolvedValue(mockResponse({}, { status: 401 }));
     const adapter = new FazerCardsAdapter();
     const result = await adapter.createOrder(makeConfig(), {
@@ -338,10 +352,11 @@ describe('FazerCardsAdapter.createOrder', () => {
       metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
     });
     expect(result.success).toBe(false);
+    expect(result.status).toBe('pending');
     expect(result.error).toContain('API key');
   });
 
-  it('returns failed on 403', async () => {
+  it('returns pending on 403 because acceptance is unknown', async () => {
     fetchSpy.mockResolvedValue(mockResponse({}, { status: 403 }));
     const adapter = new FazerCardsAdapter();
     const result = await adapter.createOrder(makeConfig(), {
@@ -352,10 +367,11 @@ describe('FazerCardsAdapter.createOrder', () => {
       metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
     });
     expect(result.success).toBe(false);
+    expect(result.status).toBe('pending');
     expect(result.error).toContain('access disabled');
   });
 
-  it('returns failed on 404', async () => {
+  it('returns pending on 404 because acceptance is unknown', async () => {
     fetchSpy.mockResolvedValue(mockResponse({}, { status: 404 }));
     const adapter = new FazerCardsAdapter();
     const result = await adapter.createOrder(makeConfig(), {
@@ -366,10 +382,11 @@ describe('FazerCardsAdapter.createOrder', () => {
       metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
     });
     expect(result.success).toBe(false);
+    expect(result.status).toBe('pending');
     expect(result.error).toContain('unknown resource');
   });
 
-  it('returns failed on 409', async () => {
+  it('returns pending on 409 because it may be an idempotent replay', async () => {
     fetchSpy.mockResolvedValue(mockResponse({ error: 'dup' }, { status: 409 }));
     const adapter = new FazerCardsAdapter();
     const result = await adapter.createOrder(makeConfig(), {
@@ -380,10 +397,11 @@ describe('FazerCardsAdapter.createOrder', () => {
       metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
     });
     expect(result.success).toBe(false);
+    expect(result.status).toBe('pending');
     expect(result.error).toContain('conflict');
   });
 
-  it('returns failed on 500', async () => {
+  it('returns pending on 500 because acceptance is unknown', async () => {
     fetchSpy.mockResolvedValue(mockResponse({}, { status: 500 }));
     const adapter = new FazerCardsAdapter();
     const result = await adapter.createOrder(makeConfig(), {
@@ -394,6 +412,7 @@ describe('FazerCardsAdapter.createOrder', () => {
       metadata: { category_id: 'c1', offer_id: 'o1', fields: {} },
     });
     expect(result.success).toBe(false);
+    expect(result.status).toBe('pending');
     expect(result.error).toContain('upstream error');
   });
 });
@@ -1594,8 +1613,8 @@ describe('Pre-persisted idempotency — crash recovery with same key', () => {
 });
 
 describe('Pre-persisted idempotency — confirmed failure vs ambiguous outcome', () => {
-  it('confirmed supplier rejection (HTTP 400) → tx=failed → new key on retry', () => {
-    const result = { success: false, error: 'FazerCards validation error: bad request' };
+  it('explicit supplier rejection → tx=failed → new key on retry', () => {
+    const result = { success: false, status: 'failed', error: 'FazerCards validation error: invalid player' };
     const txStatus = 'failed';
     const priorFailures = 1; // counts the failed tx
     const newKey = `order_ord-1_supplier_sup-A_retry_${priorFailures + 1}`;
@@ -1603,10 +1622,9 @@ describe('Pre-persisted idempotency — confirmed failure vs ambiguous outcome',
     expect(newKey).toContain('retry_2');
   });
 
-  it('confirmed supplier failure (HTTP 500) → tx=failed → new key on retry', () => {
-    const result = { success: false, error: 'FazerCards upstream error: HTTP 500' };
-    const txStatus = 'failed';
-    expect(txStatus).toBe('failed');
+  it('upstream 500 remains pending because acceptance is unknown', () => {
+    const result = { success: false, status: 'pending', error: 'FazerCards upstream error: HTTP 500' };
+    expect(result.status).toBe('pending');
   });
 
   it('network timeout before supplier receives → tx stays pending → same key reused on retry', () => {
@@ -1772,7 +1790,7 @@ describe('FazerCards idempotency guarantee (verified from API docs)', () => {
     expect(canFailover).toBe(false);
   });
 
-  it('confirmed failure (HTTP 4xx/5xx response received) → tx=failed → new key on next attempt', () => {
+  it('confirmed validation rejection (HTTP 400) → tx=failed → new key on next attempt', () => {
     const result = { success: false, error: 'FazerCards validation error: bad request' };
     const txStatus = 'failed';
     const newKeyNeeded = txStatus === 'failed';
@@ -1884,24 +1902,24 @@ describe('Immediate polling — supplier completion propagates to order status',
   });
 
   it('supplier reports processing → order stays PROCESSING', () => {
-    const supplierStatus = 'processing';
+    const supplierStatus: string = 'processing';
     const orderBefore = 'PROCESSING';
     const orderAfter = supplierStatus === 'completed' ? 'COMPLETED' : supplierStatus === 'failed' ? 'FAILED' : orderBefore;
     expect(orderAfter).toBe('PROCESSING');
   });
 
   it('COMPLETED transition only happens if payment is VERIFIED', () => {
-    const supplierStatus = 'completed';
-    const paymentStatus = 'VERIFIED';
-    const fulfillmentStatus = 'PROCESSING';
+    const supplierStatus: string = 'completed';
+    const paymentStatus: string = 'VERIFIED';
+    const fulfillmentStatus: string = 'PROCESSING';
     const canTransition = supplierStatus === 'completed' && paymentStatus === 'VERIFIED' && fulfillmentStatus === 'PROCESSING';
     expect(canTransition).toBe(true);
   });
 
   it('COMPLETED transition is blocked if payment is NOT verified', () => {
-    const supplierStatus = 'completed';
-    const paymentStatus = 'UNPAID';
-    const fulfillmentStatus = 'PROCESSING';
+    const supplierStatus: string = 'completed';
+    const paymentStatus: string = 'UNPAID';
+    const fulfillmentStatus: string = 'PROCESSING';
     const canTransition = supplierStatus === 'completed' && paymentStatus === 'VERIFIED' && fulfillmentStatus === 'PROCESSING';
     expect(canTransition).toBe(false);
   });
@@ -1909,7 +1927,7 @@ describe('Immediate polling — supplier completion propagates to order status',
   it('COMPLETED transition is blocked if order is already COMPLETED', () => {
     const supplierStatus = 'completed';
     const paymentStatus = 'VERIFIED';
-    const fulfillmentStatus = 'COMPLETED';
+    const fulfillmentStatus: string = 'COMPLETED';
     const canTransition = fulfillmentStatus === 'PROCESSING';
     expect(canTransition).toBe(false);
   });
@@ -1949,7 +1967,7 @@ describe('Immediate polling — no duplicate fulfillment', () => {
     // The first update sets COMPLETED; the second's WHERE clause no longer
     // matches (fulfillment_status is now COMPLETED), so it's a no-op.
     const firstUpdateMatched = true;
-    const statusAfterFirst = 'COMPLETED';
+    const statusAfterFirst: string = 'COMPLETED';
     const secondUpdateMatched = statusAfterFirst === 'PROCESSING';
     expect(firstUpdateMatched).toBe(true);
     expect(secondUpdateMatched).toBe(false);

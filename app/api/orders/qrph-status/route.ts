@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { authorizeOrderRequest } from '@/lib/orderCapability';
 
 /*
   Check the status of a QR Ph payment for an order.
@@ -22,17 +23,19 @@ export async function GET(req: NextRequest) {
     const orderReference = searchParams.get('orderReference');
     const email = searchParams.get('email');
 
-    if (!orderReference || !email) {
-      return NextResponse.json({ error: 'Order reference and email are required.' }, { status: 400 });
+    if (!orderReference) {
+      return NextResponse.json({ error: 'Order reference is required.' }, { status: 400 });
     }
 
     const { data: order } = await adminSupabase
       .from('orders')
-      .select('id, email, status')
+      .select('id, reference, customer_user_id, email, status')
       .eq('reference', String(orderReference).toUpperCase().trim())
       .maybeSingle();
 
-    if (!order || order.email.trim().toLowerCase() !== String(email).trim().toLowerCase()) {
+    if (!order
+      || (email && order.email.trim().toLowerCase() !== String(email).trim().toLowerCase())
+      || !await authorizeOrderRequest(req, order)) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     }
 

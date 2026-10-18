@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import GamesVisibilityPanel from './GamesVisibilityPanel';
 import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, Package, ShoppingCart, Users, XCircle } from 'lucide-react';
 
@@ -16,14 +16,21 @@ async function getMetrics(): Promise<{
   error: string | null;
 }> {
   const empty = { orders: [], games: [], packages: [], customerEmails: [], error: null as string | null };
-  if (!supabase) return { ...empty, error: 'Database not configured' };
+  let db: ReturnType<typeof createSupabaseServerClient>;
+  try {
+    db = createSupabaseServerClient();
+    const { data: { user } } = await db.auth.getUser();
+    if (!user) return { ...empty, error: 'Not authenticated' };
+  } catch {
+    return { ...empty, error: 'Database not configured' };
+  }
 
   try {
     const [orders, games, packages, customers] = await Promise.all([
-      supabase.from('orders').select('id, reference, email, status, total_cents, created_at, games(name), packages(name)').order('created_at', { ascending: false }).limit(100),
-      supabase.rpc('admin_get_all_games'),
-      supabase.from('packages').select('id, name, price_cents, games(name)').order('created_at'),
-      supabase.from('orders').select('email'),
+      db.from('orders').select('id, reference, email, status, total_cents, created_at, games(name), packages(name)').order('created_at', { ascending: false }).limit(100),
+      db.rpc('admin_get_all_games'),
+      db.from('packages').select('id, name, price_cents, games(name)').order('created_at'),
+      db.from('orders').select('email'),
     ]);
 
     return {

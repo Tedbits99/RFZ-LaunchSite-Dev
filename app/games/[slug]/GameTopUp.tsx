@@ -98,12 +98,17 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     const pollStatus = async () => {
       setStatusUpdating(true);
       try {
-        const lookupResponse = await fetch(`/api/orders/lookup?ref=${encodeURIComponent(qrModal.reference)}&email=${encodeURIComponent(email.trim())}`, { cache: 'no-store' });
+        const lookupResponse = await fetch('/api/orders/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref: qrModal.reference, email: email.trim() }),
+          cache: 'no-store',
+        });
         const lookupData = await lookupResponse.json().catch(() => null) as { order?: { id?: string; status?: string; updated_at?: string }; error?: string } | null;
         const orderId = lookupData?.order?.id;
         if (!lookupResponse.ok || !orderId) throw new Error(lookupData?.error || 'Could not load order status.');
 
-        const statusResponse = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status-check?email=${encodeURIComponent(email.trim())}`, { cache: 'no-store' });
+        const statusResponse = await fetch(`/api/orders/${encodeURIComponent(orderId)}/status-check`, { cache: 'no-store' });
         const statusData = await statusResponse.json().catch(() => null) as { status?: string; updated_at?: string; error?: string } | null;
         if (!statusResponse.ok || !statusData?.status) throw new Error(statusData?.error || 'Could not load order status.');
         if (cancelled) return;

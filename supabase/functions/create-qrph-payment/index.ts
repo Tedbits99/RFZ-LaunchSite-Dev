@@ -7,10 +7,10 @@ import { createClient } from "npm:@supabase/supabase-js@2";
   SUPABASE_SERVICE_ROLE_KEY and PAYMENT_PAYMONGO_SECRET_KEY. Secrets are only
   read into memory — never logged or returned.
 
-  POST body: { orderReference, email }
+  POST body: { orderReference, email, orderAccessToken }
 
   Flow:
-  1. Find order by reference + email, must be WAITING_PAYMENT
+  1. Find order by reference and verify its private order capability
   2. Find the paymongo_qrph payment config
   3. PayMongo: Payment Intent -> QR Ph Method -> Attach -> extract QR image URL
   4. Record the payment transaction and stamp the order
@@ -32,6 +32,7 @@ const json = (body: unknown, status: number) =>
 interface QrPhRequest {
   orderReference?: unknown;
   email?: unknown;
+  orderAccessToken?: unknown;
 }
 
 interface QrPhResult {
@@ -224,24 +225,39 @@ Deno.serve(async (req: Request) => {
     const orderReference =
       typeof body?.orderReference === "string" ? body.orderReference.toUpperCase().trim() : "";
     const email = typeof body?.email === "string" ? body.email.trim() : "";
-    if (!orderReference || !email) {
+    const orderAccessToken = typeof body?.orderAccessToken === "string" ? body.orderAccessToken : "";
+    if (!orderReference || !email || !/^[A-Za-z0-9_-]{40,64}$/.test(orderAccessToken)) {
       return json({ error: "Order reference and email are required." }, 400);
     }
 
-    // Ownership check: the caller must know both the reference AND the email
-    // on the order. Email is compared in code (not ILIKE) so wildcard
-    // characters in the input cannot broaden the match to other orders.
     const { data: order } = await supabase
       .from("orders")
-      .select("id, reference, email, status, total_cents")
+      .select("id, reference, email, status, total_cents, customer_user_id")
       .eq("reference", orderReference)
       .maybeSingle();
     if (!order || order.email.trim().toLowerCase() !== email.toLowerCase()) {
       return json({ error: "Order not found." }, 404);
     }
+
+    const capabilityDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(orderAccessToken),
+    );
+    const capabilityHash = Array.from(new Uint8Array(capabilityDigest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    const { data: capability } = await supabase
+      .from("guest_order_access")
+      .select("order_id")
+      .eq("order_id", order.id)
+      .eq("token_hash", capabilityHash)
+      .is("revoked_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    if (!capability) return json({ error: "Order not found." }, 404);
     if (order.status !== "WAITING_PAYMENT") {
       if (["PAID", "PROCESSING", "COMPLETED"].includes(order.status)) {
-        return json({ success: true, alreadyPaid: true });
+        return json({ success: true, alreadyPaid: true }, 200);
       }
       return json({ error: "Order is not awaiting payment." }, 400);
     }
@@ -255,7 +271,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (existingTx?.status === "paid") {
-      return json({ success: true, alreadyPaid: true });
+      return json({ success: true, alreadyPaid: true }, 200);
     }
 
     if (existingTx?.qr_image_url && ["pending", "processing"].includes(existingTx.status)) {
@@ -268,7 +284,7 @@ Deno.serve(async (req: Request) => {
           expiresAt: existingTx.expires_at,
           amountCents: order.total_cents,
           message: "Existing QR Ph payment session found.",
-        });
+        }, 200);
       }
     }
 
@@ -339,7 +355,7 @@ Deno.serve(async (req: Request) => {
       paymentIntentId: result.paymentIntentId,
       expiresAt: result.expiresAt,
       amountCents: order.total_cents,
-    });
+    }, 200);
   } catch {
     return json({ error: "Something went wrong." }, 500);
   }
