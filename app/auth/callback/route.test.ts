@@ -106,3 +106,75 @@ describe('email confirmation callback', () => {
     expect(mocks.exchangeCodeForSession).not.toHaveBeenCalled();
   });
 });
+
+describe('password recovery callback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
+    mocks.exchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
+    mocks.getUser.mockResolvedValue({
+      data: { user: { id: 'customer-1', email_confirmed_at: '2026-10-17T12:00:00Z' } },
+      error: null,
+    });
+    mocks.rpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
+  });
+
+  it('exchanges a recovery code and redirects to the reset page without activating a profile', async () => {
+    const response = await GET(request('?code=recovery-code&type=recovery&next=https%3A%2F%2Fevil.example'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(mocks.exchangeCodeForSession).toHaveBeenCalledWith('recovery-code');
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(location(response)).not.toContain('recovery-code');
+    expect(location(response)).not.toContain('evil.example');
+  });
+
+  it.each([
+    ['missing code', '?type=recovery'],
+    ['provider error', '?type=recovery&error=access_denied&error_description=expired'],
+  ])('redirects a recovery callback with a %s to the reset page', async (_label, query) => {
+    const response = await GET(request(query));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(mocks.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(await response.text()).not.toContain('expired');
+  });
+
+  it.each(['expired', 'reused', 'invalid'])('redirects a recovery callback with an %s code to the reset page', async (kind) => {
+    mocks.exchangeCodeForSession.mockResolvedValue({ data: null, error: { message: `${kind} provider detail` } });
+
+    const response = await GET(request('?code=secret-code&type=recovery'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(location(response)).not.toContain('secret-code');
+    expect(await response.text()).not.toContain('provider detail');
+  });
+
+  it('never exposes recovery codes or tokens in the redirect or body', async () => {
+    const response = await GET(request('?code=super-secret-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(location(response)).not.toContain('super-secret-code');
+    expect(await response.text()).not.toContain('super-secret-code');
+  });
+
+  it('keeps an unknown type on the confirmation path', async () => {
+    const response = await GET(request('?code=valid-code&type=unknown'));
+
+    expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
+    expect(mocks.rpc).toHaveBeenCalledWith('activate_customer_profile');
+  });
+
+  it('fails closed when the trusted application origin is unavailable during recovery', async () => {
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    const response = await GET(request('?code=valid-code&type=recovery'));
+    expect(response.status).toBe(503);
+    expect(mocks.exchangeCodeForSession).not.toHaveBeenCalled();
+  });
+});

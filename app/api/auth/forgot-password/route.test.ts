@@ -50,7 +50,7 @@ describe('POST /api/auth/forgot-password', () => {
     expect(await response.json()).toEqual({ message: GENERIC_OK });
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
       'customer@example.com',
-      { redirectTo: `${origin}/auth/reset-password` },
+      { redirectTo: `${origin}/auth/callback?type=recovery` },
     );
   });
 

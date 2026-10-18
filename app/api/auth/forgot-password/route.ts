@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const redirectTo = `${getConfiguredAppOrigin()}/auth/reset-password`;
+    const redirectTo = `${getConfiguredAppOrigin()}/auth/callback?type=recovery`;
     const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
       // Never reveal whether the address exists. The Auth provider's own

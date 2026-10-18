@@ -10,6 +10,10 @@ function redirectToConfirmation(status: ConfirmationStatus) {
   return NextResponse.redirect(url);
 }
 
+function redirectToResetPassword(origin: string) {
+  return NextResponse.redirect(`${origin}/auth/reset-password`);
+}
+
 function activationResult(data: unknown): { status?: string; error?: string | null } | null {
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row !== 'object') return null;
@@ -21,26 +25,37 @@ function activationResult(data: unknown): { status?: string; error?: string | nu
 }
 
 export async function GET(request: NextRequest) {
-  if (!getConfiguredAppOrigin()) return new NextResponse('Authentication is temporarily unavailable.', { status: 503 });
+  const origin = getConfiguredAppOrigin();
+  if (!origin) return new NextResponse('Authentication is temporarily unavailable.', { status: 503 });
 
   const params = request.nextUrl.searchParams;
   const code = params.get('code');
+  const isRecovery = params.get('type') === 'recovery';
 
   // This route intentionally accepts the authorization-code callback emitted
-  // by signUp(emailRedirectTo). It does not accept token_hash, next, or any
-  // caller-supplied account identifier.
-  if (!code || params.has('error')) return redirectToConfirmation('invalid');
+  // by Supabase Auth email links. type=recovery is an internal marker set by
+  // the forgot-password redirect target, not a caller-controlled destination;
+  // all redirects from this route stay on the configured application origin.
+  if (!code || params.has('error')) {
+    return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
+  }
 
   let supabase: ReturnType<typeof createSupabaseServerClient>;
   try {
     supabase = createSupabaseServerClient();
   } catch {
-    return redirectToConfirmation('error');
+    return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('error');
   }
 
   try {
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-    if (exchangeError) return redirectToConfirmation('invalid');
+    if (exchangeError) {
+      return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
+    }
+
+    // Password recovery only needs the exchanged session; profile activation
+    // remains exclusive to the signup confirmation path below.
+    if (isRecovery) return redirectToResetPassword(origin);
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
     if (userError || !userData.user) return redirectToConfirmation('error');

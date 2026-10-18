@@ -28,8 +28,8 @@ export default function ResetPasswordPage() {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       );
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) {
         setError(GENERIC_INVALID);
         setState('error');
         return;
