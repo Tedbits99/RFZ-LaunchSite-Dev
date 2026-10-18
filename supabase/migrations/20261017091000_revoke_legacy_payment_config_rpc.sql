@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018151856_20261017091000_revoke_legacy_payment_config_rpc.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Retire execution access to the superseded 20-argument payment-config RPC.
 -- Keep the function definition for compatibility investigation; the current
 -- application uses the hardened 21-argument overload with p_logo_url.

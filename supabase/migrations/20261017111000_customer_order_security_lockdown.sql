@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152151_20261017111000_customer_order_security_lockdown.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Second stage of the customer/order security rollout.
 -- Apply only after the web application and QR-payment Edge Function support
 -- the per-order HttpOnly capability and the historical email-code recovery.

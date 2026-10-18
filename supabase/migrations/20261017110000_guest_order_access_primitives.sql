@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152054_20261017110000_guest_order_access_primitives.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Additive first stage for order capabilities and checkout policy.
 -- This migration deliberately leaves the existing public order policies and
 -- direct INSERT grants intact. The lock-down migration is applied only after

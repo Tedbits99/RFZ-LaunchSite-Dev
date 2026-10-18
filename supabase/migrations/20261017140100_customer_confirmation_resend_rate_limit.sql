@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152348_20261017140100_customer_confirmation_resend_rate_limit.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Durable, service-only reservation primitive for customer confirmation resend.
 -- Keys are expected to be HMAC-derived lowercase SHA-256 hex strings. Raw
 -- email addresses, network identifiers, tokens, and PKCE verifiers are never

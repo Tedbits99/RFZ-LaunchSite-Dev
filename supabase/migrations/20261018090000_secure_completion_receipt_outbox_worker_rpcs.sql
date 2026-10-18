@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152627_20261018090000_secure_completion_receipt_outbox_worker_rpcs.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Secure completion-receipt outbox worker boundary.
 --
 -- This migration adds database-only claim/acknowledgement primitives. It does

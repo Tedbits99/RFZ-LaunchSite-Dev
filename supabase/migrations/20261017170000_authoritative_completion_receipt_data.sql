@@ -1,3 +1,7 @@
+-- ALREADY APPLIED to live database as: 20261018152530_20261017170000_authoritative_completion_receipt_data.sql
+-- Do not re-execute this original file. Kept for history only.
+-- NOTE: the set_new_order_quantity/populate_completion_receipt_snapshot functions and triggers defined below were NOT applied to live (the applied copy omitted them).
+
 -- Authoritative receipt data contract for future completion receipts.
 --
 -- Existing orders intentionally remain quantity-unknown (NULL).  The current

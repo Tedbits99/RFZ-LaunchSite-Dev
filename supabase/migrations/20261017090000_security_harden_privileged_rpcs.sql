@@ -1,3 +1,7 @@
+-- ALREADY APPLIED to live database as: 20261018151838_20261017090000_security_harden_privileged_rpcs.sql
+-- Do not re-execute this original file. Kept for history only.
+-- NOTE: differs from the applied copy (package-count FILTER). The filter was re-applied separately on 20261018160000_restore_mlbb_package_count_filter.
+
 /*
   Forward-only security hardening for privileged RPCs.
 

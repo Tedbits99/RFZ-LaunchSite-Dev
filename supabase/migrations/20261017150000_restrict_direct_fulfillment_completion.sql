@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152423_20261017150000_restrict_direct_fulfillment_completion.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Prevent direct completion through the generic fulfillment transition RPC.
 -- Supplier-confirmed completion remains exclusively in
 -- finalize_supplier_reconciliation().

@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152244_20261017120000_atomic_supplier_reconciliation.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Atomic supplier reconciliation finalization.
 --
 -- This function is intentionally narrower than the existing fulfillment RPCs:

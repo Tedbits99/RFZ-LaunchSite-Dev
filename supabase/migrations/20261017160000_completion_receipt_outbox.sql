@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152514_20261017160000_completion_receipt_outbox.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Durable completion-receipt outbox.
 --
 -- Rows are created only by the trusted supplier reconciliation boundary below.

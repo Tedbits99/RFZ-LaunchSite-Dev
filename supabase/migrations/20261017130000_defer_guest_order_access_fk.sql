@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018152301_20261017130000_defer_guest_order_access_fk.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- The order-ownership trigger must create the private capability row before
 -- the parent order row is written. Defer only this existing foreign key so
 -- PostgreSQL validates the pair at transaction commit, while retaining the

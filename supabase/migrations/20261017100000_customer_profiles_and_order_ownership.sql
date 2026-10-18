@@ -1,3 +1,6 @@
+-- ALREADY APPLIED to live database as: 20261018151959_20261017100000_customer_profiles_and_order_ownership.sql
+-- Do not re-execute this original file. Kept for history only.
+
 -- Phase 1A customer-account foundation.
 -- This migration is forward-only and deliberately does not backfill existing
 -- guest orders or infer ownership from email addresses.
