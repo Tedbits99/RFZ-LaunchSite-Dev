@@ -270,8 +270,16 @@ ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS rf_coin_topup_id
 CREATE INDEX IF NOT EXISTS idx_payment_tx_rf_coin_topup
   ON payment_transactions (rf_coin_topup_id);
 
--- Top-ups may only be created/updated server-side; no client writes.
-ALTER TABLE rf_coin_topups ENABLE ROW LEVEL SECURITY;
+-- Register the RF Coins wallet as a payment method, DISABLED. create_order
+-- only accepts payment methods present in payment_config with is_enabled =
+-- true, so the method stays invisible/unusable until a Super Admin enables
+-- it deliberately (together with the RF Coins spending flag).
+INSERT INTO public.payment_config
+  (method_key, display_name, provider, is_enabled, provider_name, provider_type, instructions, sort_order)
+VALUES
+  ('rf_coin_wallet', 'RF Coins Wallet', 'rf_coin_wallet', false, 'rf_coin_wallet', 'rf_coins',
+   'Pay the full order total with your RF Coins wallet balance.', 50)
+ON CONFLICT (method_key) DO NOTHING;
 
 -- ============ RLS ============
 ALTER TABLE rf_coin_settings ENABLE ROW LEVEL SECURITY;

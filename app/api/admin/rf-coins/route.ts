@@ -9,14 +9,15 @@ import { rfCoinErrorMessage } from '@/lib/rfCoins';
   RPCs on the admin's own authenticated client, so rf_coin_assert_super_admin()
   and the audit log are enforced by the database, not the UI.
 */
-const db = () => adminSupabase || supabase;
+  // Settings and audit have NO client policies (fail closed): read them with
+  // the service-role client; everything else stays RLS-scoped.
+  const db = () => adminSupabase || supabase;
 
 export async function GET(req: NextRequest) {
   const session = await requireAdmin(req);
   if (!session.ok) return session.response;
   const client = db();
   if (!client) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
-
   try {
     const [settingsRes, walletsRes, topupsRes, packagesRes, requestsRes, auditRes, ledgerStatsRes, ledgerRes] = await Promise.all([
       client.from('rf_coin_settings').select('*').eq('id', 1).maybeSingle(),
@@ -66,15 +67,21 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await requireAdmin(req);
   if (!session.ok) return session.response;
-  const client = db();
-  if (!client) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
+  // rf_coin_* mutation RPCs verify the SUPER_ADMIN role inside Postgres via
+  // rf_coin_assert_super_admin(), which needs the CALLER's JWT — the
+  // service-role client has no auth.uid(). requireAdmin's client carries the
+  // admin's own session cookies, so run every mutation through it.
+  if (session.session.role !== 'SUPER_ADMIN') {
+    return NextResponse.json({ error: 'Super admin role required.' }, { status: 403 });
+  }
+  const adminClient = session.client;
 
   try {
     const body = await req.json();
     const action = body.action;
 
     if (action === 'settings') {
-      const { error } = await client.rpc('rf_coin_set_settings', {
+      const { error } = await adminClient.rpc('rf_coin_set_settings', {
         p_enabled: body.enabled ?? null,
         p_topups_enabled: body.topups_enabled ?? null,
         p_spending_enabled: body.spending_enabled ?? null,
@@ -87,7 +94,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'adjustment') {
-      const { data, error } = await client.rpc('rf_coin_request_adjustment', {
+      const { data, error } = await adminClient.rpc('rf_coin_request_adjustment', {
         p_target_user_id: body.target_user_id,
         p_direction: body.direction,
         p_amount_coins: Number(body.amount_coins),
@@ -102,7 +109,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'decide') {
-      const { data, error } = await client.rpc('rf_coin_decide_adjustment', {
+      const { data, error } = await adminClient.rpc('rf_coin_decide_adjustment', {
         p_request_id: body.request_id,
         p_approve: Boolean(body.approve),
         p_note: body.note || null,
@@ -114,7 +121,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'package') {
-      const { data, error } = await client.rpc('rf_coin_upsert_package', {
+      const { data, error } = await adminClient.rpc('rf_coin_upsert_package', {
         p_package_id: body.package_id || null,
         p_name: body.name ?? null,
         p_coins: body.coins ?? null,

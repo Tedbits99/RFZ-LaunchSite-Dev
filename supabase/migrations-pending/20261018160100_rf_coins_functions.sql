@@ -25,16 +25,26 @@
      Never credits for non-PENDING/failed/expired top-ups.
    - rf_coin_mark_topup_status(p_topup_id, p_status) — terminal status moves
      (FAILED/EXPIRED/CANCELLED/REFUND_PENDING/REFUNDED). REFUNDED additionally
-     reverses previously credited coins once (ledger idem 'topup-reversal:<id>').
+     reverses previously credited coins+bonus exactly once via a bounded DEBIT
+     (ledger idem 'topup-reversal:<id>'). When the wallet no longer holds the
+     full credited amount (coins already spent), only the available balance is
+     reversed and the top-up moves to REFUND_PENDING for manual reconciliation
+     instead of silently crediting or failing the reversal.
    - rf_coin_settle_order_payment(p_order_id, p_user_id) — atomic full-wallet
      payment for a product order. Computes coins from the order's own
      total_cents and the CURRENT centavos_per_coin (never browser input),
-     checks master+spending flags, locks the wallet row (row lock prevents
-     concurrent overspend), debits once (ledger idem 'order:<order_id>') and
-     returns out_coins/out_balance_after/out_error.
+     checks master+spending flags, verifies the order is WAITING_PAYMENT with
+     matching customer ownership, locks the wallet row (row lock prevents
+     concurrent overspend), debits once (ledger idem 'order:<order_id>'), and
+     IN THE SAME ATOMIC BLOCK transitions the order to PAYMENT_VERIFIED
+     (payment_status VERIFIED, method 'RF_COIN_WALLET') exactly like
+     verify_payment. Post-settlement payment verification or fulfillment can
+     never see a debited-but-unpaid order; any failure rolls back everything.
    - rf_coin_release_order_payment(p_order_id, p_reason) — reverses an order
-     payment exactly once (ledger idem 'order-reversal:<order_id>') for
-     failed/cancelled orders; credited back to the wallet, never below zero.
+     payment exactly once (ledger idem 'order-reversal:<order_id>') but ONLY
+     when the order's payment was wallet-settled (payment_status VERIFIED)
+     and the order is not yet supplier-fulfilled; also marks the order
+     payment REFUNDED so fulfillment can never pick it up afterwards.
    - rf_coin_request_adjustment(p_target_user_id, p_direction, p_amount_coins,
      p_reason, p_category, p_idempotency_key) — SUPER ADMIN only. Rate-limited
      per admin per day. Low-value requests are applied atomically in the same
@@ -218,6 +228,8 @@ DECLARE
   t rf_coin_topups;
   v_wallet rf_coin_wallets;
   v_balance bigint;
+  v_total bigint;
+  v_reversed bigint;
 BEGIN
   IF p_status NOT IN ('FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED') THEN
     RETURN QUERY SELECT false, 'RF_COIN_INVALID_STATUS'::text; RETURN;
@@ -229,6 +241,14 @@ BEGIN
   IF t.status = p_status THEN
     RETURN QUERY SELECT true, NULL::text; RETURN; -- idempotent
   END IF;
+  -- Legal transitions only: a PENDING top-up can be failed/expired/cancelled,
+  -- but refunds are only meaningful for a PAID (credited) top-up.
+  IF p_status IN ('REFUND_PENDING','REFUNDED') AND t.status NOT IN ('PENDING','PAID','REFUND_PENDING') THEN
+    RETURN QUERY SELECT false, 'RF_COIN_INVALID_STATUS'::text; RETURN;
+  END IF;
+  IF p_status IN ('FAILED','EXPIRED','CANCELLED') AND t.status <> 'PENDING' THEN
+    RETURN QUERY SELECT false, 'RF_COIN_INVALID_STATUS'::text; RETURN;
+  END IF;
   IF p_status = 'REFUNDED' AND t.credited_at IS NULL THEN
     -- Coins were never credited; nothing to reverse.
     UPDATE rf_coin_topups SET status = 'REFUNDED', updated_at = now() WHERE id = t.id;
@@ -236,20 +256,40 @@ BEGIN
   END IF;
 
   IF p_status = 'REFUNDED' THEN
+    -- Correct accounting: reverse the originally credited amount (coins +
+    -- bonus) with a DEBIT, bounded by what the wallet still holds. Coins
+    -- already spent are never clawed back into a negative balance; a partial
+    -- reversal parks the top-up in REFUND_PENDING for manual reconciliation.
     SELECT * INTO v_wallet FROM rf_coin_wallets WHERE user_id = t.user_id FOR UPDATE;
-    v_balance := v_wallet.balance_coins + t.coins::bigint;
+    IF v_wallet IS NULL THEN
+      UPDATE rf_coin_topups SET status = 'REFUND_PENDING', updated_at = now() WHERE id = t.id;
+      RETURN QUERY SELECT false, 'RF_COIN_REVERSAL_INCOMPLETE'::text; RETURN;
+    END IF;
+    v_total := t.coins::bigint + t.bonus_coins::bigint;
+    v_reversed := least(v_total, v_wallet.balance_coins);
+    IF v_reversed <= 0 THEN
+      UPDATE rf_coin_topups SET status = 'REFUND_PENDING', updated_at = now() WHERE id = t.id;
+      RETURN QUERY SELECT false, 'RF_COIN_REVERSAL_INCOMPLETE'::text; RETURN;
+    END IF;
+    v_balance := v_wallet.balance_coins - v_reversed;
     UPDATE rf_coin_wallets
       SET balance_coins = v_balance,
-          total_reversed_coins = total_reversed_coins + t.coins,
+          total_reversed_coins = total_reversed_coins + v_reversed,
           updated_at = now()
       WHERE user_id = t.user_id;
     INSERT INTO rf_coin_ledger (
       wallet_user_id, direction, amount_coins, kind, balance_after,
       reason, reference_type, reference_id, actor_type, idempotency_key)
     VALUES (
-      t.user_id, 'credit', t.coins::bigint, 'chargeback_reversal', v_balance,
+      t.user_id, 'debit', v_reversed, 'chargeback_reversal', v_balance,
       'RF Coins purchase refund reversal', 'rf_coin_topup', t.id::text, 'system',
       'topup-reversal:' || t.id::text);
+    IF v_reversed < v_total THEN
+      -- Could not reverse in full: leave in REFUND_PENDING for an admin to
+      -- reconcile manually. Never credit the customer for a refund.
+      UPDATE rf_coin_topups SET status = 'REFUND_PENDING', updated_at = now() WHERE id = t.id;
+      RETURN QUERY SELECT false, 'RF_COIN_REVERSAL_INCOMPLETE'::text; RETURN;
+    END IF;
   END IF;
 
   UPDATE rf_coin_topups
@@ -275,6 +315,7 @@ DECLARE
   v_coins integer;
   v_wallet rf_coin_wallets;
   v_balance bigint;
+  v_order_status text;
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_FORBIDDEN'::text; RETURN;
@@ -321,6 +362,13 @@ BEGIN
   END IF;
   v_balance := v_wallet.balance_coins - v_coins;
 
+  -- Lock the order row and settle + verify in one atomic block. Re-check
+  -- status under lock so a concurrent payment attempt cannot slip through.
+  SELECT status INTO v_order_status FROM orders WHERE id = ord.id FOR UPDATE;
+  IF v_order_status <> 'WAITING_PAYMENT' THEN
+    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_ORDER_NOT_WAITING'::text; RETURN;
+  END IF;
+
   UPDATE rf_coin_wallets
     SET balance_coins = v_balance,
         total_spent_coins = total_spent_coins + v_coins,
@@ -334,6 +382,22 @@ BEGIN
     p_user_id, 'debit', v_coins::bigint, 'order_payment', v_balance,
     'Order payment with RF Coins', 'order', ord.id::text, 'customer', p_user_id,
     'order:' || ord.id::text);
+
+  -- Mark the order as paid in the SAME transaction as the debit: a wallet
+  -- debit must never result in an unpaid order, and verify-payment/fulfillment
+  -- paths only accept orders whose payment_status is VERIFIED.
+  UPDATE orders SET
+    payment_status = 'VERIFIED',
+    payment_verification_method = 'RF_COIN_WALLET',
+    payment_verified_at = now(),
+    payment_verified_by = 'rf_coin_wallet:' || p_user_id::text,
+    status = 'PAYMENT_VERIFIED',
+    updated_at = now()
+  WHERE id = ord.id;
+
+  INSERT INTO order_timeline (order_id, status, actor_email, note)
+  VALUES (ord.id, 'PAYMENT_VERIFIED', 'rf_coin_wallet:' || p_user_id::text,
+    'Payment verified with RF Coins wallet (' || v_coins::text || ' coins)');
 
   RETURN QUERY SELECT v_coins, v_balance, NULL::text;
 END;
@@ -350,7 +414,23 @@ DECLARE
   v_ledger rf_coin_ledger;
   v_wallet rf_coin_wallets;
   v_balance bigint;
+  v_order_status text;
+  v_payment_status text;
 BEGIN
+  -- Reversals are allowed only for orders whose payment was settled via the
+  -- wallet and which are NOT yet in a terminal/supplier-fulfilled state.
+  SELECT status, payment_status INTO v_order_status, v_payment_status
+    FROM orders WHERE id = p_order_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, 'RF_COIN_ORDER_NOT_FOUND'::text; RETURN;
+  END IF;
+  IF v_payment_status <> 'VERIFIED' OR v_order_status NOT IN ('PAYMENT_VERIFIED','CANCELLED','FAILED') THEN
+    RETURN QUERY SELECT false, 'RF_COIN_RELEASE_NOT_ELIGIBLE'::text; RETURN;
+  END IF;
+  IF v_order_status IN ('PROCESSING','COMPLETED','DELIVERED') THEN
+    RETURN QUERY SELECT false, 'RF_COIN_RELEASE_NOT_ELIGIBLE'::text; RETURN;
+  END IF;
+
   SELECT * INTO v_ledger FROM rf_coin_ledger
     WHERE reference_type = 'order' AND reference_id = p_order_id::text
       AND kind = 'order_payment'
@@ -381,6 +461,14 @@ BEGIN
     v_wallet.user_id, 'credit', v_ledger.amount_coins, 'order_reversal', v_balance,
     COALESCE(p_reason, 'Order payment released'), 'order', p_order_id::text, 'system',
     'order-reversal:' || p_order_id::text);
+
+  -- Exactly one reversal per settled order: also flip the order's payment
+  -- state so no fulfillment or verification path can pick it up afterwards.
+  UPDATE orders SET
+    payment_status = 'REFUNDED',
+    status = CASE WHEN status IN ('CANCELLED','FAILED') THEN status ELSE 'REFUNDED' END,
+    updated_at = now()
+  WHERE id = p_order_id;
 
   RETURN QUERY SELECT true, NULL::text;
 END;
@@ -465,12 +553,19 @@ BEGIN
       'high_value', v_is_high_value));
 
   IF NOT v_is_high_value THEN
-    -- Low value: apply immediately and atomically.
+    -- Low value: apply immediately and atomically. Credits must work for
+    -- zero-balance and brand-new wallets; balance checks apply to debits only.
     SELECT * INTO v_wallet FROM rf_coin_wallets WHERE user_id = p_target_user_id FOR UPDATE;
-    IF v_wallet.balance_coins < p_amount_coins THEN
-      UPDATE rf_coin_adjustment_requests SET status = 'PENDING', updated_at = now()
-        WHERE id = v_id;
-      RETURN QUERY SELECT v_id, 'PENDING'::text, 'RF_COIN_INSUFFICIENT_BALANCE'::text; RETURN;
+    IF NOT FOUND THEN
+      IF p_direction = 'debit' THEN
+        RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_INSUFFICIENT_BALANCE'::text; RETURN;
+      END IF;
+      INSERT INTO rf_coin_wallets (user_id) VALUES (p_target_user_id)
+        ON CONFLICT (user_id) DO NOTHING;
+      SELECT * INTO v_wallet FROM rf_coin_wallets WHERE user_id = p_target_user_id FOR UPDATE;
+    END IF;
+    IF p_direction = 'debit' AND v_wallet.balance_coins < p_amount_coins THEN
+      RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_INSUFFICIENT_BALANCE'::text; RETURN;
     END IF;
     v_balance := v_wallet.balance_coins
       + CASE WHEN p_direction = 'credit' THEN p_amount_coins ELSE -p_amount_coins END;
@@ -572,8 +667,11 @@ BEGIN
 
   SELECT * INTO v_wallet FROM rf_coin_wallets WHERE user_id = req.target_user_id FOR UPDATE;
   IF NOT FOUND THEN
+    IF req.direction = 'debit' THEN
+      RETURN QUERY SELECT NULL::text, 'RF_COIN_INSUFFICIENT_BALANCE'::text; RETURN;
+    END IF;
     INSERT INTO rf_coin_wallets (user_id) VALUES (req.target_user_id)
-    ON CONFLICT (user_id) DO NOTHING;
+      ON CONFLICT (user_id) DO NOTHING;
     SELECT * INTO v_wallet FROM rf_coin_wallets WHERE user_id = req.target_user_id FOR UPDATE;
   END IF;
   IF req.direction = 'debit' AND v_wallet.balance_coins < req.amount_coins THEN

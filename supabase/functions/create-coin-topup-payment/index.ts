@@ -12,9 +12,15 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
   Flow:
   1. Verify the caller's JWT resolves to the requested user (fail closed)
-  2. rf_coin_create_topup RPC (validates settings + package, snapshots price)
+  2. rf_coin_create_topup RPC — run on a client built from the CALLER's JWT
+     (anon key + Bearer), NOT the service role: the SQL function verifies
+     p_user_id against auth.uid(), which is only present for the real
+     customer. The service role has no auth.uid() and would be rejected.
   3. PayMongo: Payment Intent -> QR Ph Method -> Attach -> extract QR image URL
-  4. Return QR image URL + expiry to the wallet frontend
+  4. Log the payment transaction with the payment_transactions schema
+     (provider_name, action, status) and treat log-write failures as errors:
+     a payment the database cannot resolve later must never be handed out.
+  5. Return QR image URL + expiry to the wallet frontend
 
   Crediting happens ONLY via rf_coin_credit_paid_topup, called by the payment
   webhook after signature-verified provider confirmation.
@@ -90,6 +96,7 @@ Deno.serve(async (req: Request) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || SERVICE_KEY;
     const PAYMONGO_SECRET = Deno.env.get("PAYMENT_PAYMONGO_SECRET_KEY");
     if (!SUPABASE_URL || !SERVICE_KEY || !PAYMONGO_SECRET) {
       return json({ error: "Service unavailable." }, 503);
@@ -109,6 +116,12 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Sign in required." }, 401);
     }
 
+    // JWT-scoped client: rpc rf_coin_create_topup runs with the customer as
+    // auth.uid() so its internal p_user_id <> auth.uid() check passes.
+    const jwtClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${bearer}` } },
+    });
+
     const body = (await req.json().catch(() => null)) as TopupRequest | null;
     const packageId = typeof body?.packageId === "string" ? body.packageId.trim() : "";
     const userId = typeof body?.userId === "string" ? body.userId.trim() : "";
@@ -127,7 +140,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // --- Create the top-up (validates RF Coins settings + active package) ---
-    const { data: rpcData, error: rpcError } = await supabase.rpc("rf_coin_create_topup", {
+    const { data: rpcData, error: rpcError } = await jwtClient.rpc("rf_coin_create_topup", {
       p_user_id: caller.id,
       p_package_id: packageId,
     });
@@ -236,16 +249,23 @@ Deno.serve(async (req: Request) => {
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
     // --- Record the payment transaction (service role; no QR image reuse) ---
-    await supabase.from("payment_transactions").insert({
+    // A payment the database cannot resolve later must never be handed to the
+    // customer, so a log-write failure is a hard error, not a silent success.
+    const { error: txInsertError } = await supabase.from("payment_transactions").insert({
       rf_coin_topup_id: topupId,
       idempotency_key: idempotencyKey,
-      provider: "paymongo",
+      provider_name: "paymongo",
+      action: "create",
       method_key: "paymongo_qrph",
       amount_cents: priceCents,
       status: "pending",
       provider_reference: intentId,
       expires_at: expiresAt,
     });
+    if (txInsertError) {
+      console.error("payment_transactions insert failed", txInsertError);
+      return json({ error: "Could not record the payment session. Please try again." }, 500);
+    }
 
     // Stamp the top-up with the provider reference.
     await supabase

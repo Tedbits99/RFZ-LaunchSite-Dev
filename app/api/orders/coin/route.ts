@@ -32,6 +32,9 @@ export async function POST(req: NextRequest) {
   if (!hasCustomerAuthCookie) {
     return NextResponse.json({ error: 'Paying with RF Coins requires a signed-in account.' }, { status: 401 });
   }
+  if (!adminSupabase) {
+    return NextResponse.json({ error: 'Checkout is not configured. Please contact support.' }, { status: 503 });
+  }
 
   try {
     const body = await req.json();
@@ -61,12 +64,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Gate the whole flow on the RF Coins master switch (fail closed).
-    const { data: settings, error: settingsError } = await customerClient
+    // rf_coin_settings has NO client policy (fail-closed RLS), so the
+    // customer-JWT read would be denied; the authoritative read is server-side
+    // via the service-role client. Spending additionally requires the
+    // rf_coin_wallet payment method to be enabled in payment_config, which
+    // create_order validates independently.
+    const { data: settings, error: settingsError } = await adminSupabase!
       .from('rf_coin_settings')
       .select('enabled, spending_enabled')
       .eq('id', 1)
       .maybeSingle();
-    if (settingsError || !settings || !settings.enabled || !settings.spending_enabled) {
+    if (settingsError || !adminSupabase || !settings || !settings.enabled || !settings.spending_enabled) {
       return NextResponse.json({ error: 'Paying with RF Coins is not available.' }, { status: 403 });
     }
 
