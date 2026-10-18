@@ -10,11 +10,13 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setAwaitingConfirmation(false);
     setSubmitting(true);
 
     try {
@@ -26,6 +28,7 @@ export default function Login() {
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
+        if (response.status === 403) setAwaitingConfirmation(true);
         setError(body.error || 'Unable to sign in.');
         return;
       }
@@ -62,6 +65,12 @@ export default function Login() {
           </button>
         </form>
         {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-center text-sm text-rose-200">{error}</p>}
+        {awaitingConfirmation && (
+          <p className="mt-3 text-center text-xs text-slate-400">
+            Didn&apos;t get the email or the link expired?{' '}
+            <a href={`/auth/confirmation?status=pending&email=${encodeURIComponent(email)}`} className="text-cyan-300">Resend the confirmation email</a>
+          </p>
+        )}
         <p className="mt-4 text-center text-xs text-slate-500">New to RunFazone? <Link href="/register" className="text-cyan-300">Create Account</Link></p>
       </div>
     </main>

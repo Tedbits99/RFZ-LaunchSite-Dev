@@ -57,7 +57,9 @@ export async function requestConfirmationResend(
 
 type FormState = 'idle' | 'pending' | 'done' | 'error';
 
-export default function ResendConfirmationForm() {
+type FormProps = { initialEmail?: string };
+
+export default function ResendConfirmationForm({ initialEmail }: FormProps = {}) {
   const [state, setState] = useState<FormState>('idle');
   const [feedback, setFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
@@ -110,7 +112,7 @@ export default function ResendConfirmationForm() {
           <span className="mb-1 block text-xs text-slate-400">Email</span>
           <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
             <Mail size={15} className="text-slate-500" />
-            <input name="email" type="email" autoComplete="email" className="w-full bg-transparent py-2.5 text-sm outline-none" />
+            <input name="email" type="email" autoComplete="email" defaultValue={initialEmail ?? ''} className="w-full bg-transparent py-2.5 text-sm outline-none" />
           </div>
         </label>
         {feedback ? (

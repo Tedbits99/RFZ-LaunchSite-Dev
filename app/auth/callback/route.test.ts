@@ -63,7 +63,7 @@ describe('email confirmation callback (default namespace)', () => {
 
     expect(response.status).toBe(307);
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
-    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalledWith('one-time-code');
+    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalledWith('one-time-code', undefined);
     expect(mocks.defaultGetUser).toHaveBeenCalledOnce();
     expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
     expect(location(response)).not.toContain('one-time-code');
@@ -156,7 +156,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
 
     expect(response.status).toBe(307);
     expect(location(response)).toBe('https://example.test/auth/reset-password');
-    expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('recovery-code');
+    expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('recovery-code', undefined);
     expect(mocks.recoveryGetUser).toHaveBeenCalledOnce();
     expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.defaultRpc).not.toHaveBeenCalled();
@@ -223,7 +223,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
 
     const response = await GET(request('?code=signup-code&type=recovery'));
 
-    expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('signup-code');
+    expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('signup-code', undefined);
     expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.defaultRpc).not.toHaveBeenCalled();
     expect(proofCookie(response)).toBeUndefined();
@@ -236,7 +236,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
 
     const response = await GET(request('?code=recovery-code&type=signup'));
 
-    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalledWith('recovery-code');
+    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalledWith('recovery-code', undefined);
     expect(mocks.recoveryExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.defaultRpc).not.toHaveBeenCalled();
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');

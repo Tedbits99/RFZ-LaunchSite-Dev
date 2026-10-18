@@ -37,6 +37,11 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const code = params.get('code');
   const isRecovery = params.get('type') === 'recovery';
+  // The SDK appends sb_flow_id to the email link when the PKCE flow starts so
+  // the exchange reads the matching verifier slot. A tampered value simply
+  // fails the exchange; it can never select another flow's verifier.
+  const flowId = params.get('sb_flow_id');
+  const exchangeOptions = flowId ? { flowId } : undefined;
 
   // This route intentionally accepts the authorization-code callback emitted
   // by Supabase Auth email links. type=recovery is an internal marker set by
@@ -68,7 +73,7 @@ export async function GET(request: NextRequest) {
     // recovery code has none in the default namespace, so editing type= in
     // the URL can never cross the flows.
     if (recovery) {
-      const { error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code);
+      const { error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
       if (recoveryExchangeError) return redirectToResetPassword(origin);
 
       const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
@@ -80,7 +85,7 @@ export async function GET(request: NextRequest) {
       return res;
     }
 
-    const { error: exchangeError } = await supabase!.auth.exchangeCodeForSession(code);
+    const { error: exchangeError } = await supabase!.auth.exchangeCodeForSession(code, exchangeOptions);
     if (exchangeError) return redirectToConfirmation('invalid');
 
     const { data: userData, error: userError } = await supabase!.auth.getUser();
