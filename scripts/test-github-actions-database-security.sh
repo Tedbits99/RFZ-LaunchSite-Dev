@@ -15,8 +15,19 @@ fi
 
 tmp_parent="${RUNNER_TEMP:-${TMPDIR:-$project_root}}"
 test_root="$(mktemp -d "$tmp_parent/runfazone-supabase.XXXXXX")"
+outbox_barrier_in=""
+outbox_barrier_out=""
+outbox_barrier_pid=""
+outbox_worker_a_pid=""
+outbox_worker_b_pid=""
 
 cleanup() {
+  if [ -n "$outbox_barrier_in" ]; then
+    printf 'COMMIT;\n\\q\n' >&"$outbox_barrier_in" 2>/dev/null || true
+  fi
+  if [ -n "$outbox_worker_a_pid" ]; then wait "$outbox_worker_a_pid" 2>/dev/null || true; fi
+  if [ -n "$outbox_worker_b_pid" ]; then wait "$outbox_worker_b_pid" 2>/dev/null || true; fi
+  if [ -n "$outbox_barrier_pid" ]; then wait "$outbox_barrier_pid" 2>/dev/null || true; fi
   if [ -d "$test_root" ]; then
     (cd "$test_root" && supabase stop --no-backup >/dev/null 2>&1) || true
     rm -rf -- "$test_root"
@@ -102,6 +113,8 @@ cp "$project_root/supabase/tests/completion-receipt-outbox.sql" \
   "$test_root/supabase/tests/completion-receipt-outbox.sql"
 cp "$project_root/supabase/tests/completion-receipt-data-contract.sql" \
   "$test_root/supabase/tests/completion-receipt-data-contract.sql"
+cp "$project_root/supabase/tests/completion-receipt-outbox-worker.sql" \
+  "$test_root/supabase/tests/completion-receipt-outbox-worker.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
   "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
@@ -161,6 +174,76 @@ echo "Executing completion receipt data contract assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/completion-receipt-data-contract.sql
+
+echo "Executing completion receipt outbox worker assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/completion-receipt-outbox-worker.sql
+
+worker_race_a="$test_root/completion-receipt-outbox-worker-a.out"
+worker_race_b="$test_root/completion-receipt-outbox-worker-b.out"
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "UPDATE public.order_email_outbox SET next_attempt_at = clock_timestamp() WHERE id = '00000000-0000-0000-0000-000000000611';"
+coproc OUTBOX_BARRIER { PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1; }
+outbox_barrier_in="${OUTBOX_BARRIER[1]}"
+outbox_barrier_out="${OUTBOX_BARRIER[0]}"
+outbox_barrier_pid="$OUTBOX_BARRIER_PID"
+printf "BEGIN; SELECT 'OUTBOX_BARRIER_LOCKED' FROM (SELECT pg_advisory_xact_lock(180018, 2)) AS lock_ready;\n" >&"$outbox_barrier_in"
+if ! IFS= read -r -t 15 barrier_ready <&"$outbox_barrier_out" || [ "$barrier_ready" != "OUTBOX_BARRIER_LOCKED" ]; then
+  echo "ERROR: Could not acquire the deterministic outbox race barrier." >&2
+  exit 7
+fi
+
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "SELECT * FROM public.claim_completion_receipt_outbox(1, 300);" \
+  >"$worker_race_a" 2>&1 &
+outbox_worker_a_pid=$!
+
+overlap_confirmed=false
+for _ in $(seq 1 200); do
+  waiting_sessions="$(PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 --tuples-only --no-align --quiet \
+    --command "SELECT count(*) FROM pg_stat_activity a JOIN pg_locks waiting_lock ON waiting_lock.pid = a.pid WHERE a.wait_event_type = 'Lock' AND a.wait_event = 'advisory' AND waiting_lock.locktype = 'advisory' AND waiting_lock.classid = 180018::oid AND waiting_lock.objid = 2::oid AND NOT waiting_lock.granted AND a.query LIKE '%claim_completion_receipt_outbox%' AND EXISTS (SELECT 1 FROM pg_locks signal_lock WHERE signal_lock.pid = a.pid AND signal_lock.locktype = 'advisory' AND signal_lock.classid = 180018::oid AND signal_lock.objid = 1::oid AND signal_lock.granted);")"
+  if [ "$waiting_sessions" = "1" ]; then overlap_confirmed=true; break; fi
+  sleep 0.1
+done
+if [ "$overlap_confirmed" != true ]; then
+  echo "ERROR: Worker A never reached the database barrier while holding the target row lock; no concurrency result is claimed." >&2
+  exit 8
+fi
+
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "SELECT * FROM public.claim_completion_receipt_outbox(1, 300);" \
+  >"$worker_race_b" 2>&1 &
+outbox_worker_b_pid=$!
+wait "$outbox_worker_b_pid"
+outbox_worker_b_pid=""
+if grep -Fq '00000000-0000-0000-0000-000000000611' "$worker_race_b"; then
+  cat "$worker_race_b" >&2
+  echo "ERROR: Worker B claimed the row held by Worker A." >&2
+  exit 9
+fi
+
+printf "COMMIT; SELECT 'OUTBOX_BARRIER_RELEASED';\n" >&"$outbox_barrier_in"
+if ! IFS= read -r -t 15 barrier_released <&"$outbox_barrier_out" || [ "$barrier_released" != "OUTBOX_BARRIER_RELEASED" ]; then
+  echo "ERROR: Could not release the deterministic outbox race barrier." >&2
+  exit 10
+fi
+printf '\\q\n' >&"$outbox_barrier_in"
+wait "$outbox_barrier_pid"
+outbox_barrier_pid=""
+outbox_barrier_in=""
+outbox_barrier_out=""
+wait "$outbox_worker_a_pid"
+outbox_worker_a_pid=""
+if ! grep -Fq '00000000-0000-0000-0000-000000000611' "$worker_race_a"; then
+  cat "$worker_race_a" "$worker_race_b" >&2
+  echo "ERROR: Worker A did not claim the synchronized race fixture." >&2
+  exit 11
+fi
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "DO \$\$ DECLARE v_count integer; BEGIN SELECT count(*) INTO v_count FROM public.order_email_outbox WHERE id = '00000000-0000-0000-0000-000000000611' AND status = 'processing' AND attempt_count = 1 AND lease_token IS NOT NULL AND lease_until > clock_timestamp(); IF v_count <> 1 THEN RAISE EXCEPTION 'OUTBOX_WORKER_RACE_INVALID'; END IF; END \$\$;"
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+  --command "DROP TRIGGER IF EXISTS outbox_worker_race_barrier ON public.order_email_outbox; DROP FUNCTION IF EXISTS public.test_outbox_worker_race_barrier(); DELETE FROM public.order_email_outbox WHERE id IN ('00000000-0000-0000-0000-000000000608','00000000-0000-0000-0000-000000000609','00000000-0000-0000-0000-000000000610','00000000-0000-0000-0000-000000000611'); DELETE FROM public.supplier_transactions WHERE id IN ('00000000-0000-0000-0000-000000000614','00000000-0000-0000-0000-000000000615','00000000-0000-0000-0000-000000000616','00000000-0000-0000-0000-000000000617'); DELETE FROM public.orders WHERE id IN ('00000000-0000-0000-0000-000000000604','00000000-0000-0000-0000-000000000605','00000000-0000-0000-0000-000000000606','00000000-0000-0000-0000-000000000607'); DELETE FROM public.suppliers WHERE id = '00000000-0000-0000-0000-000000000613'; DELETE FROM public.packages WHERE id = '00000000-0000-0000-0000-000000000603'; DELETE FROM public.games WHERE id = '00000000-0000-0000-0000-000000000602';"
 
 echo "Preparing concurrent reconciliation assertion..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \

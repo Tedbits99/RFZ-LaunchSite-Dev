@@ -330,8 +330,8 @@ BEGIN
      OR has_table_privilege('authenticated', 'public.order_email_outbox', 'INSERT')
      OR NOT has_table_privilege('service_role', 'public.order_email_outbox', 'SELECT')
      OR has_table_privilege('service_role', 'public.order_email_outbox', 'INSERT')
-     OR NOT has_column_privilege('service_role', 'public.order_email_outbox', 'status', 'UPDATE')
-     OR NOT has_column_privilege('service_role', 'public.order_email_outbox', 'attempt_count', 'UPDATE')
+     OR has_column_privilege('service_role', 'public.order_email_outbox', 'status', 'UPDATE')
+     OR has_column_privilege('service_role', 'public.order_email_outbox', 'attempt_count', 'UPDATE')
      OR has_column_privilege('service_role', 'public.order_email_outbox', 'recipient_email', 'UPDATE') THEN
     RAISE EXCEPTION 'COMPLETION_RECEIPT_OUTBOX_PRIVILEGES_INVALID';
   END IF;
@@ -368,6 +368,16 @@ BEGIN
     INSERT INTO public.order_email_outbox (order_id, template, recipient_email)
     VALUES ('00000000-0000-0000-0000-000000000404', 'completion_receipt', 'forbidden@example.invalid');
     RAISE EXCEPTION 'COMPLETION_RECEIPT_SERVICE_ROLE_INSERT_ALLOWED';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE public.order_email_outbox
+    SET status = 'sent'
+    WHERE order_id = '00000000-0000-0000-0000-000000000404'
+      AND template = 'completion_receipt';
+    RAISE EXCEPTION 'COMPLETION_RECEIPT_SERVICE_ROLE_DIRECT_UPDATE_ALLOWED';
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
   END;
