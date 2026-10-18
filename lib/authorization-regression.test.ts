@@ -34,15 +34,15 @@ describe('privileged route authorization contracts', () => {
 });
 
 describe('customer order ownership contracts', () => {
-  it('uses verified request auth and profile status before checkout', () => {
+  it('uses verified customer-namespace auth and profile status before checkout', () => {
     const code = source('app/api/orders/route.ts');
 
-    expect(code).toContain('createSupabaseServerClient');
+    expect(code).toContain('createCustomerServerClient');
     expect(code).toContain('auth.getUser()');
     expect(code).toContain("from('customer_profiles')");
     expect(code).toContain("profile.status !== 'active'");
-    expect(code).toContain('if (error && hasAuthCookie)');
-    expect(code).toContain('const rpcClient = requestClient || supabase;');
+    expect(code).toContain('hasCustomerAuthCookie');
+    expect(code).toContain('const rpcClient = customerClient || supabase;');
     expect(code).toContain('__rfz_order_access_hash');
   });
 

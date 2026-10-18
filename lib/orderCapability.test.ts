@@ -3,10 +3,14 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
+  customerGetUser: vi.fn(),
   capabilityMaybeSingle: vi.fn(),
   adminMaybeSingle: vi.fn(),
 }));
 
+vi.mock('@/lib/authSessionClients', () => ({
+  createCustomerServerClient: () => ({ auth: { getUser: mocks.customerGetUser } }),
+}));
 vi.mock('@/lib/supabaseServer', () => ({
   createSupabaseServerClient: () => ({ auth: { getUser: mocks.getUser } }),
 }));
@@ -31,6 +35,7 @@ describe('private order capability authorization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
+    mocks.customerGetUser.mockResolvedValue({ data: { user: null }, error: null });
     mocks.capabilityMaybeSingle.mockResolvedValue({ data: { order_id: order.id }, error: null });
     mocks.adminMaybeSingle.mockResolvedValue({ data: null, error: null });
   });
@@ -69,5 +74,44 @@ describe('private order capability authorization', () => {
     });
     expect(await authorizeOrderRequest(req, order)).toBe(false);
     expect(await authorizeOrderRequest(new NextRequest('http://localhost/api/order'), order)).toBe(false);
+  });
+
+  it('recognizes the customer namespace session as the order owner', async () => {
+    mocks.customerGetUser.mockResolvedValue({ data: { user: { id: 'customer-1' } }, error: null });
+    const req = new NextRequest('http://localhost/api/order', {
+      headers: { cookie: 'rfz-customer-auth=valid' },
+    });
+    expect(await authorizeOrderRequest(req, { ...order, customer_user_id: 'customer-1' })).toBe(true);
+    expect(mocks.capabilityMaybeSingle).not.toHaveBeenCalled();
+  });
+
+  it('never grants a customer session access to another customer’s order', async () => {
+    mocks.customerGetUser.mockResolvedValue({ data: { user: { id: 'customer-1' } }, error: null });
+    const req = new NextRequest('http://localhost/api/order', {
+      headers: { cookie: 'rfz-customer-auth=valid' },
+    });
+    expect(await authorizeOrderRequest(req, { ...order, customer_user_id: 'customer-2' })).toBe(false);
+    expect(mocks.capabilityMaybeSingle).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to guest capability when a customer session is invalid', async () => {
+    mocks.customerGetUser.mockResolvedValue({ data: { user: null }, error: new Error('invalid') });
+    const req = new NextRequest('http://localhost/api/order', {
+      headers: { cookie: `rfz-customer-auth=invalid; ${orderCapabilityCookieName(order.reference)}=${token}` },
+    });
+    expect(await authorizeOrderRequest(req, order)).toBe(false);
+    expect(mocks.capabilityMaybeSingle).not.toHaveBeenCalled();
+  });
+
+  it('does not grant customer access merely because an email matches', async () => {
+    mocks.customerGetUser.mockResolvedValue({
+      data: { user: { id: 'customer-1', email: 'owner@example.invalid' } },
+      error: null,
+    });
+    const req = new NextRequest('http://localhost/api/order', {
+      headers: { cookie: 'rfz-customer-auth=valid' },
+    });
+    // Same email, different UUID owner: email matching grants nothing.
+    expect(await authorizeOrderRequest(req, { ...order, customer_user_id: 'customer-2' })).toBe(false);
   });
 });

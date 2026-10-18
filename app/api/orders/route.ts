@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
 import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { hashOrderCapability, orderCapabilityCookieName } from '@/lib/orderCapability';
 import { validateVoucher } from '@/lib/voucher';
 import { paymentMethodLabel } from '@/lib/paymentMethods';
@@ -20,23 +20,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Please select a valid payment method.' }, { status: 400 });
     }
 
-    // Read the verified Auth identity from the request cookies. The existing
-    // global anon/service clients cannot distinguish an authenticated
-    // suspended customer from a guest checkout.
-    let requestClient: ReturnType<typeof createSupabaseServerClient> | null = null;
-    const hasAuthCookie = req.cookies.getAll().some(({ name }) => /^sb-.+-auth-token(?:\.\d+)?$/.test(name));
-    try {
-      requestClient = createSupabaseServerClient();
-      const { data, error } = await requestClient.auth.getUser();
-      if (error && hasAuthCookie) {
-        return NextResponse.json({ error: 'Your session could not be verified.' }, { status: 401 });
-      }
-      if (!error && data.user) {
+    // Read the verified Auth identity from the customer session namespace
+    // (rfz-customer-auth, set by /api/auth/login). A recognized but invalid,
+    // unverified, or restricted customer session fails closed and never
+    // degrades to guest checkout.
+    let customerClient: ReturnType<typeof createCustomerServerClient> | null = null;
+    const hasCustomerAuthCookie = req.cookies.getAll().some(({ name }) => /^rfz-customer-auth(?:\.\d+)?$/.test(name));
+    if (hasCustomerAuthCookie) {
+      try {
+        customerClient = createCustomerServerClient();
+        const { data, error } = await customerClient.auth.getUser();
+        if (error || !data.user) {
+          return NextResponse.json({ error: 'Your session could not be verified.' }, { status: 401 });
+        }
         if (!data.user.email_confirmed_at) {
           return NextResponse.json({ error: 'Please verify your email before checking out.' }, { status: 403 });
         }
 
-        const { data: profile, error: profileError } = await requestClient
+        const { data: profile, error: profileError } = await customerClient
           .from('customer_profiles')
           .select('status')
           .eq('user_id', data.user.id)
@@ -47,19 +48,17 @@ export async function POST(req: NextRequest) {
         // Authenticated orders use the independently verified Auth email, not
         // a browser-supplied address that could misroute receipts/history.
         email = data.user.email || '';
-      }
-    } catch {
-      if (hasAuthCookie) {
+      } catch {
         return NextResponse.json({ error: 'Your session could not be verified.' }, { status: 401 });
       }
-      requestClient = null;
     }
 
-    // Service role is retained only for catalog/supplier reads. The RPC must
-    // always run with the request's anon/authenticated JWT so auth.uid() and
-    // the database guest policy cannot be bypassed by a service-role fallback.
-    const client = adminSupabase || requestClient || supabase;
-    const rpcClient = requestClient || supabase;
+    // Service role is retained only for catalog/supplier/payment-config reads.
+    // The create_order RPC must always run with the request's own JWT (customer
+    // session or anon) so auth.uid() and the database ownership trigger and
+    // guest policy cannot be bypassed by a service-role fallback.
+    const client = adminSupabase || customerClient || supabase;
+    const rpcClient = customerClient || supabase;
     if (!client || !rpcClient) {
       return NextResponse.json({ error: 'Checkout is not configured. Please contact support.' }, { status: 503 });
     }
