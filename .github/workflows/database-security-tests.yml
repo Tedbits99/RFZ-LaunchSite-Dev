@@ -68,6 +68,7 @@ jobs:
           deno check supabase/functions/create-qrph-payment/index.ts
           deno check supabase/functions/payment-webhook/index.ts
           deno check supabase/functions/send-transactional-email/index.ts
+          deno check supabase/functions/completion-receipt-email-worker/index.ts
 
       - name: Run isolated database security tests
         run: bash scripts/test-github-actions-database-security.sh

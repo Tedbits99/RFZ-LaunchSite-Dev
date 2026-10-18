@@ -59,6 +59,19 @@ describe('completion receipt renderer', () => {
     }
   });
 
+  it('preserves legacy trim-before-mask behavior for raw identifiers', () => {
+    const normalized = renderCompletionReceipt(fixture);
+    const padded = renderCompletionReceipt({
+      ...fixture,
+      playerIdentifier: '  108570999  ',
+    });
+
+    expect(padded.html).toBe(normalized.html);
+    expect(padded.text).toBe(normalized.text);
+    expect(padded.html).toContain('*****0999');
+    expect(padded.html).not.toContain('108570999');
+  });
+
   it('renders a consistent branded transactional footer in HTML and text', () => {
     const receipt = renderCompletionReceipt(fixture);
     const footerLines = [
