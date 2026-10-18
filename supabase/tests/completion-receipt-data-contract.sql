@@ -58,7 +58,7 @@ BEGIN
       '00000000-0000-0000-0000-000000000508', 'RECEIPT-CONTRACT-INVALID-QUANTITY',
       'receipt-invalid-quantity@example.invalid', 'Receipt Contract Test',
       '00000000-0000-0000-0000-000000000502', '00000000-0000-0000-0000-000000000503',
-      '{}'::jsonb, 23456, 0, 0, 23456, 'manual',
+      jsonb_build_object('__rfz_order_access_hash', repeat('c', 64)), 23456, 0, 0, 23456, 'manual',
       'PROCESSING', 'VERIFIED', 'PROCESSING', 2
     );
     RAISE EXCEPTION 'RECEIPT_CONTRACT_INVALID_QUANTITY_ACCEPTED';
@@ -142,9 +142,16 @@ VALUES (
   '00000000-0000-0000-0000-000000000506', 'RECEIPT-CONTRACT-LEGACY',
   'receipt-legacy@example.invalid', 'Receipt Legacy Test',
   '00000000-0000-0000-0000-000000000502', '00000000-0000-0000-0000-000000000503',
-  jsonb_build_object('user_id', '987654321'),
+  jsonb_build_object('user_id', '987654321', '__rfz_order_access_hash', repeat('b', 64)),
   23456, 0, 0, 23456, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', NULL
 );
+-- The insert above follows the supported guest fixture path.  Only the
+-- quantity is then cleared to model a pre-contract historical row; ownership
+-- capability validation remains active and the trigger-stripped capability is
+-- preserved in guest_order_access rather than player_inputs.
+UPDATE public.orders
+SET quantity = NULL
+WHERE id = '00000000-0000-0000-0000-000000000506';
 INSERT INTO public.supplier_transactions (
   id, order_id, supplier_id, idempotency_key, action, status, supplier_reference
 )
@@ -198,7 +205,7 @@ VALUES (
   '00000000-0000-0000-0000-000000000509', 'RECEIPT-CONTRACT-NO-EMAIL',
   'receipt-no-email@example.invalid', 'Receipt Recipient Test',
   '00000000-0000-0000-0000-000000000502', '00000000-0000-0000-0000-000000000503',
-  jsonb_build_object('user_id', '123456789'),
+  jsonb_build_object('__rfz_order_access_hash', repeat('d', 64)),
   23456, 0, 0, 23456, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
 );
 UPDATE public.orders SET email = ''
