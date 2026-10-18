@@ -134,15 +134,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: friendly }, { status: 400 });
     }
 
-    // Fire-and-forget: push the paid order into the existing idempotent
-    // fulfillment pipeline (atomic complete_fulfillment claim prevents
-    // duplicate supplier orders even if this or a later retry runs again).
-    // Mirrors the webhook's triggerFulfillment for PayMongo-paid orders; a
-    // coin-paid order must never sit in PAYMENT_VERIFIED waiting for a worker.
-    const { startFulfillment } = await import('@/lib/suppliers/fulfillment');
-    startFulfillment(row.out_order_id).catch((fulfillError) => {
-      console.error('coin checkout: fulfillment scheduling failed (order stays recoverable via admin retry)', fulfillError);
-    });
+    // Durable handoff: enqueue exactly one fulfillment handoff row (idempotent,
+    // service-role RPC) so the scheduled fulfillment-handoff worker drives the
+    // existing pipeline (atomic complete_fulfillment claim + supplier
+    // transaction idempotency keys). The checkout request no longer carries
+    // fulfillment: an enqueued-but-uncleaned order is retried by the worker
+    // until DONE, and the order also stays recoverable via admin start/retry.
+    const { data: handoff, error: handoffError } = await adminSupabase!.rpc(
+      'rf_coin_enqueue_fulfillment',
+      { p_order_id: row.out_order_id },
+    );
+    const handoffRow = Array.isArray(handoff) ? handoff[0] : handoff;
+    if (handoffError || !handoffRow || handoffRow.out_error) {
+      console.error('coin checkout: fulfillment handoff enqueue failed (order stays recoverable via admin retry)',
+        handoffError || handoffRow?.out_error);
+    }
 
     const response = NextResponse.json({
       reference: row.out_reference,

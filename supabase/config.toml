@@ -24,3 +24,6 @@ verify_jwt = false
 
 [functions.create-coin-topup-payment]
 verify_jwt = false
+
+[functions.fulfillment-handoff]
+verify_jwt = false

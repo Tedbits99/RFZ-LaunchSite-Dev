@@ -82,6 +82,17 @@
        details jsonb, created_at
      Insert-only enforced by trigger raising RF_COIN_AUDIT_IMMUTABLE.
 
+   - rf_coin_fulfillment_handoffs (durable fulfillment queue for coin orders)
+     - id uuid PK, order_id UNIQUE -> orders ON DELETE CASCADE,
+       idempotency_key text UNIQUE ('rf-coin-fulfillment:<order_id>')
+     - status CHECK ('PENDING','PROCESSING','DONE','DEAD_LETTER')
+     - attempt_count / max_attempts (bounded retries, default 5)
+     - next_attempt_at, lease_until, lease_token (lease-based worker claims)
+     - last_error (bounded 1000 chars), created_at, updated_at
+     Replaces fire-and-forget fulfillment triggering for coin-paid orders:
+     the checkout inserts one row and a scheduled worker claims rows with a
+     lease, so order fulfillment survives request termination.
+
 3. Security
    - RLS ENABLED on every table.
    - Wallets/ledger/topups: customer SELECT scoped to own rows via auth.uid();
@@ -349,3 +360,101 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON rf_coin_settings,
   rf_coin_wallets, rf_coin_ledger, rf_coin_packages, rf_coin_topups,
   rf_coin_adjustment_requests, rf_coin_admin_audit
   FROM anon, authenticated;
+
+-- ============ FULFILLMENT HANDOFF QUEUE (durable, worker-claimed) ============
+-- Durable handoff for coin-paid orders: the checkout enqueues exactly one row
+-- per order (idempotent), and the scheduled fulfillment-handoff Edge Function
+-- claims rows under a lease and drives the SAME fulfillment pipeline used by
+-- the webhook and admin paths (atomic complete_fulfillment claim + supplier
+-- transaction idempotency keys). Fulfillment therefore survives checkout
+-- request termination without any direct supplier call from the checkout.
+-- Mirrors the order_email_outbox worker pattern (lease + bounded retries).
+CREATE TABLE IF NOT EXISTS rf_coin_fulfillment_handoffs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL UNIQUE REFERENCES public.orders(id) ON DELETE CASCADE,
+  idempotency_key text NOT NULL UNIQUE,
+  status text NOT NULL DEFAULT 'PENDING' CHECK (status IN (
+    'PENDING','PROCESSING','DONE','DEAD_LETTER')),
+  attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  max_attempts integer NOT NULL DEFAULT 5 CHECK (max_attempts > 0),
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  lease_until timestamptz,
+  lease_token uuid,
+  last_error text CHECK (last_error IS NULL OR char_length(last_error) <= 1000),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS rf_coin_handoffs_ready_idx
+  ON rf_coin_fulfillment_handoffs (next_attempt_at, created_at)
+  WHERE status IN ('PENDING','PROCESSING');
+
+ALTER TABLE rf_coin_fulfillment_handoffs ENABLE ROW LEVEL SECURITY;
+
+-- No client policies and no table grants at all (fail closed): the queue is
+-- touched only by the SECURITY DEFINER enqueue/claim/ack/fail functions in
+-- 20261018160100_rf_coins_functions.sql, granted to service_role only.
+REVOKE ALL ON TABLE rf_coin_fulfillment_handoffs
+  FROM PUBLIC, anon, authenticated, service_role;
+
+-- ============ FULFILLMENT HANDOFF CRON SCHEDULING ============
+-- Same pg_cron pattern as the canonical auto-reconciliation schedule
+-- (20261008142813): the cron trigger reads its secret from _cron_secrets
+-- (RLS deny-by-default) and posts to the fulfillment-handoff Edge Function,
+-- which validates the X-Cron-Secret header with a constant-time comparison.
+CREATE TABLE IF NOT EXISTS public._cron_secrets (
+  key text PRIMARY KEY,
+  value text NOT NULL
+);
+
+ALTER TABLE public._cron_secrets ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "_cron_secrets_select" ON public._cron_secrets;
+DROP POLICY IF EXISTS "_cron_secrets_insert" ON public._cron_secrets;
+DROP POLICY IF EXISTS "_cron_secrets_update" ON public._cron_secrets;
+DROP POLICY IF EXISTS "_cron_secrets_delete" ON public._cron_secrets;
+
+INSERT INTO public._cron_secrets (key, value)
+VALUES ('fulfillment_handoff_secret', 'rfz_fhnd_k4m8w2x6q9b3c5d7e1f0a8s4g6h2j4l6')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+
+CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'extensions'
+AS $function$
+DECLARE
+  v_url text;
+  v_secret text;
+  v_request_id bigint;
+BEGIN
+  v_url := 'https://ftbvxkxxzotwkdcdgaot.supabase.co/functions/v1/fulfillment-handoff';
+
+  SELECT value INTO v_secret FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret';
+  IF v_secret IS NULL THEN
+    RAISE NOTICE 'No fulfillment_handoff_secret found in _cron_secrets';
+    RETURN;
+  END IF;
+
+  v_request_id := net.http_post(
+    url := v_url,
+    body := '{}'::jsonb,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'X-Cron-Secret', v_secret
+    ),
+    timeout_milliseconds := 30000
+  );
+
+  RAISE NOTICE 'Fulfillment handoff request sent (id=%)', v_request_id;
+END;
+$function$;
+
+GRANT EXECUTE ON FUNCTION public.trigger_fulfillment_handoff() TO postgres;
+
+SELECT cron.schedule(
+  'fulfillment-handoff',
+  '*/3 * * * *',
+  $$SELECT public.trigger_fulfillment_handoff()$$
+);

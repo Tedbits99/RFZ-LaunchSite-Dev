@@ -210,6 +210,32 @@ beforeAll(async () => {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE TABLE supplier_transactions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
+      supplier_id uuid NOT NULL,
+      mapping_id uuid,
+      idempotency_key text UNIQUE,
+      action text NOT NULL DEFAULT 'create_order',
+      status text NOT NULL DEFAULT 'pending',
+      supplier_reference text,
+      request_payload jsonb,
+      response_payload jsonb,
+      error_message text,
+      attempt int NOT NULL DEFAULT 1,
+      duration_ms int,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    -- cron/net stubs so the staged cron-scheduling SQL can execute in PGlite.
+    CREATE SCHEMA IF NOT EXISTS cron;
+    CREATE FUNCTION cron.schedule(name text, schedule text, command text)
+      RETURNS bigint LANGUAGE sql AS $stub$ SELECT 1::bigint $stub$;
+    CREATE SCHEMA IF NOT EXISTS net;
+    CREATE SCHEMA IF NOT EXISTS extensions;
+    CREATE FUNCTION net.http_post(url text, body jsonb, headers jsonb, timeout_milliseconds int)
+      RETURNS bigint LANGUAGE sql AS $stub$ SELECT 1::bigint $stub$;
   `);
   await db.exec(schemaSql);
   await db.exec(functionsSql);
@@ -271,6 +297,36 @@ describe('rf coins real SQL behavior', () => {
       $1, 'credit', 5, 'not allowed here', 'promotion', 'test-adj-3')`, [CUSTOMER]))
       .rejects.toThrow(/permission denied|rf_coin_request_adjustment/i);
     await resetRole();
+  });
+
+  it('suspended or inactive super admins are denied admin RPCs', async () => {
+    const SUSPENDED_ADMIN = '55555555-5555-5555-5555-555555555551';
+    await sql(`INSERT INTO auth.users (id, email) VALUES ($1, 'suspended@example.invalid')`,
+      [SUSPENDED_ADMIN]);
+    await sql(`INSERT INTO admins (id, email, name, role, is_active) VALUES
+      ($1, 'suspended@example.invalid', 'Suspended', 'SUPER_ADMIN', false)`,
+      [SUSPENDED_ADMIN]);
+
+    // Suspended super admin: identity matches, role matches, is_active=false.
+    await asRole('authenticated', SUSPENDED_ADMIN);
+    const res = await sql(`SELECT * FROM rf_coin_request_adjustment(
+      $1, 'credit', 5, 'suspended admin denied', 'promotion', 'test-adj-suspended')`, [CUSTOMER]);
+    expect(res[0].out_error).toBe('RF_COIN_FORBIDDEN');
+
+    // set_settings is a void RPC: the guard raises instead of returning an
+    // error column, so the denial surfaces as an exception.
+    await expect(sql(`SELECT rf_coin_set_settings(true, null, null, null, null, null)`))
+      .rejects.toThrow(/RF_COIN_FORBIDDEN/);
+    await resetRole();
+
+    const settings = await sql<{ enabled: boolean }>(`SELECT enabled FROM rf_coin_settings WHERE id = 1`);
+    expect(settings[0].enabled).toBe(true); // unchanged by the inactive admin
+
+    // No audit row was written by either denied admin.
+    const audit = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_admin_audit WHERE actor_admin_id = ANY($1::uuid[])`,
+      [[SUSPENDED_ADMIN]]);
+    expect(Number(audit[0].n)).toBe(0);
   });
 
   it('settlement debits once, verifies payment atomically, and rejects double payment', async () => {
@@ -471,5 +527,146 @@ describe('rf coins real SQL behavior', () => {
     await expect(sql(`UPDATE rf_coin_ledger SET amount_coins = 1`))
       .rejects.toThrow(/RF_COIN_LEDGER_IMMUTABLE|permission denied/i);
     await resetRole();
+  });
+
+  it('fulfillment handoff: enqueue is idempotent, client-denied, and lease-claimed exactly once', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-000000000001'; // settled earlier (VERIFIED)
+
+    // Client identities are denied the queue RPCs (service role only).
+    await asRole('authenticated', CUSTOMER);
+    await expect(sql(`SELECT * FROM rf_coin_enqueue_fulfillment($1)`, [orderId]))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+
+    // Service-role enqueue succeeds; a second enqueue is idempotent.
+    await asRole('service_role');
+    const e1 = await sql<{ out_handoff_id: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_enqueue_fulfillment($1)`, [orderId]);
+    expect(e1[0].out_error).toBeNull();
+    expect(e1[0].out_handoff_id).toBeTruthy();
+    const e2 = await sql<{ out_handoff_id: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_enqueue_fulfillment($1)`, [orderId]);
+    await resetRole();
+    expect(e2[0].out_error).toBeNull();
+    expect(e2[0].out_handoff_id).toBe(e1[0].out_handoff_id);
+    const count = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    expect(Number(count[0].n)).toBe(1);
+
+    // Enqueue rejects ineligible orders (wrong method, unpaid, unknown id).
+    const wrongMethod = 'aaaaaaaa-0000-0000-0000-000000000002'; // paymongo order
+    const enqWrong = await sql<{ out_error: string | null }>(
+      `SELECT out_error FROM rf_coin_enqueue_fulfillment($1)`, [wrongMethod]);
+    expect(enqWrong[0].out_error).toBe('RF_COIN_ORDER_NOT_ELIGIBLE');
+    const enqMissing = await sql<{ out_error: string | null }>(
+      `SELECT out_error FROM rf_coin_enqueue_fulfillment($1)`,
+      ['eeeeeeee-0000-0000-0000-000000000001']);
+    expect(enqMissing[0].out_error).toBe('RF_COIN_ORDER_NOT_FOUND');
+
+    // Claim: worker lease-claims the row exactly once with attempt bump.
+    await asRole('service_role');
+    const c1 = await sql<{ out_id: string; out_order_id: string; out_attempt_count: number; out_lease_token: string }>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    const mine = c1.find((r) => r.out_order_id === orderId);
+    expect(mine).toBeTruthy();
+    expect(Number(mine!.out_attempt_count)).toBe(1);
+    const c2 = await sql<{ out_id: string }>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    await resetRole();
+    expect(c2.find((r) => r.out_id === mine!.out_id)).toBeUndefined(); // no double claim while leased
+
+    // Ack failure schedules a bounded retry; the row returns PENDING.
+    await asRole('service_role');
+    const f1 = await sql<{ out_status: string; out_next_attempt_at: string | null }>(
+      `SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, 'supplier timeout')`,
+      [mine!.out_id, mine!.out_lease_token]);
+    await resetRole();
+    expect(f1[0].out_status).toBe('PENDING');
+    expect(f1[0].out_next_attempt_at).toBeTruthy();
+
+    // The row is claimable again after the ack (next_attempt_at passed via
+    // direct fixture update to avoid sleeping the test).
+    await sql(`UPDATE rf_coin_fulfillment_handoffs SET next_attempt_at = now() - interval '1 second'
+               WHERE id = $1`, [mine!.out_id]);
+    await asRole('service_role');
+    const c3 = await sql<{ out_id: string; out_attempt_count: number }>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    const reclaim = c3.find((r) => r.out_id === mine!.out_id);
+    expect(reclaim).toBeTruthy();
+    expect(Number(reclaim!.out_attempt_count)).toBe(2);
+
+    // Wrong lease token is rejected (lease guard).
+    const badAck = await sql<{ out_status: string }>(
+      `SELECT out_status FROM rf_coin_ack_fulfillment_handoff($1, $2, 'nope')`,
+      [mine!.out_id, '00000000-0000-0000-0000-000000000000']);
+    expect(badAck[0].out_status).toBe('rejected');
+
+    // Success ack marks DONE.
+    const ack = await sql<{ out_status: string; out_next_attempt_at: string | null }>(
+      `SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, NULL)`,
+      [mine!.out_id, reclaim!.out_lease_token]);
+    await resetRole();
+    expect(ack[0].out_status).toBe('DONE');
+    const done = await sql<{ status: string }>(
+      `SELECT status FROM rf_coin_fulfillment_handoffs WHERE id = $1`, [mine!.out_id]);
+    expect(done[0].status).toBe('DONE');
+
+    // DONE rows are never re-claimed.
+    await asRole('service_role');
+    const c4 = await sql<{ out_id: string }>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    await resetRole();
+    expect(c4.find((r) => r.out_id === mine!.out_id)).toBeUndefined();
+  });
+
+  it('fulfillment handoff: dead-letters after max attempts and skips unverified orders', async () => {
+    // Unverified order is rejected at enqueue time (fail closed).
+    const unpaid = 'aaaaaaaa-0000-0000-0000-000000000004';
+    await insertOrder({ id: unpaid, userId: CUSTOMER, totalCents: 50000, paymentStatus: 'UNPAID' });
+    await sql(`UPDATE orders SET status = 'PAYMENT_VERIFIED' WHERE id = $1`, [unpaid]);
+    const enqRejected = await sql<{ out_error: string | null }>(
+      `SELECT out_error FROM rf_coin_enqueue_fulfillment($1)`, [unpaid]);
+    expect(enqRejected[0].out_error).toBe('RF_COIN_ORDER_NOT_ELIGIBLE');
+
+    // Claim-time precondition: a handoff enqueued while VERIFIED whose order
+    // later loses verification is never claimed.
+    const preEnqueued = 'aaaaaaaa-0000-0000-0000-000000000006';
+    await insertOrder({ id: preEnqueued, userId: CUSTOMER, totalCents: 50000 });
+    await sql(`UPDATE orders SET status = 'PAYMENT_VERIFIED', payment_status = 'VERIFIED' WHERE id = $1`, [preEnqueued]);
+    const enqPre = await sql<{ out_handoff_id: string }>(
+      `SELECT out_handoff_id FROM rf_coin_enqueue_fulfillment($1)`, [preEnqueued]);
+    await sql(`UPDATE orders SET payment_status = 'UNPAID' WHERE id = $1`, [preEnqueued]);
+    const claimedSkipped = await sql<{ out_id: string }>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(100, 300)`);
+    expect(claimedSkipped.find((r) => r.out_id === enqPre[0].out_handoff_id)).toBeUndefined();
+
+    // Bounded retries: exhaust attempts -> DEAD_LETTER, never re-claimed.
+    const orderId = 'aaaaaaaa-0000-0000-0000-000000000005';
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });
+    await sql(`UPDATE orders SET status = 'PAYMENT_VERIFIED', payment_status = 'VERIFIED' WHERE id = $1`, [orderId]);
+    const enq2 = await sql<{ out_handoff_id: string }>(
+      `SELECT out_handoff_id FROM rf_coin_enqueue_fulfillment($1)`, [orderId]);
+    const handoffId = enq2[0].out_handoff_id;
+
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const c = await sql<{ out_id: string; out_lease_token: string; out_status: string }>(
+        `SELECT out_id, out_lease_token, out_status FROM rf_coin_claim_fulfillment_handoffs(100, 300)
+         WHERE out_id = $1`, [handoffId]);
+      if (c.length === 0) break;
+      await sql(`SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, 'still failing')`,
+        [handoffId, c[0].out_lease_token]);
+      // Backdate so the next attempt is immediately claimable.
+      await sql(`UPDATE rf_coin_fulfillment_handoffs SET next_attempt_at = now() - interval '1 second'
+                 WHERE id = $1 AND status = 'PENDING'`, [handoffId]);
+    }
+    const final = await sql<{ status: string; attempt_count: number; max_attempts: number }>(
+      `SELECT status, attempt_count, max_attempts FROM rf_coin_fulfillment_handoffs WHERE id = $1`,
+      [handoffId]);
+    expect(final[0].status).toBe('DEAD_LETTER');
+    expect(Number(final[0].attempt_count)).toBe(5);
+
+    const reclaimed = await sql<{ out_id: string }>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(100, 300)`);
+    expect(reclaimed.find((r) => r.out_id === handoffId)).toBeUndefined();
   });
 });

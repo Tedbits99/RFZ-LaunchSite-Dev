@@ -134,6 +134,12 @@ describe('rf_coin_release_order_payment', () => {
 });
 
 describe('grants and schema', () => {
+  it('super admin guard denies inactive or suspended admins', () => {
+    const guard = extractFunction(functionsSql, 'rf_coin_assert_super_admin');
+    expect(guard).toMatch(/admins\.role = 'SUPER_ADMIN'/);
+    expect(guard).toMatch(/admins\.is_active = true/);
+  });
+
   it('revokes PUBLIC execute on every RF Coins function', () => {
     const grants = functionsSql.slice(functionsSql.indexOf('REVOKE ALL ON FUNCTION'));
     for (const fnName of [
@@ -178,5 +184,60 @@ describe('grants and schema', () => {
   it('marks both files as pending and feature disabled', () => {
     expect(schemaSql).toMatch(/STATUS: PENDING/);
     expect(functionsSql).toMatch(/STATUS: PENDING/);
+  });
+});
+
+describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
+  const enqueue = extractFunction(functionsSql, 'rf_coin_enqueue_fulfillment');
+  const claim = extractFunction(functionsSql, 'rf_coin_claim_fulfillment_handoffs');
+  const ack = extractFunction(functionsSql, 'rf_coin_ack_fulfillment_handoff');
+
+  it('enqueue is idempotent per order and only accepts verified wallet-paid orders', () => {
+    expect(enqueue).toMatch(/'rf-coin-fulfillment:' \|\| p_order_id::text/);
+    expect(enqueue).toMatch(/ON CONFLICT \(order_id\) DO NOTHING/);
+    expect(enqueue).toMatch(/v_method <> 'rf_coin_wallet' OR v_payment_status <> 'VERIFIED'/);
+    expect(enqueue).toMatch(/v_order_status NOT IN \('PAYMENT_VERIFIED','PROCESSING'\)/);
+  });
+
+  it('claim re-checks fulfillment preconditions at claim time', () => {
+    expect(claim).toMatch(/o\.payment_status = 'VERIFIED'/);
+    expect(claim).toMatch(/o\.fulfillment_status NOT IN \('PROCESSING','COMPLETED'\)/);
+    expect(claim).toMatch(/st\.status IN \('submitted','success','pending'\)/);
+  });
+
+  it('claim uses FOR UPDATE SKIP LOCKED with a bounded lease', () => {
+    expect(claim).toMatch(/FOR UPDATE OF h SKIP LOCKED/);
+    expect(claim).toMatch(/lease_until = clock_timestamp\(\) \+ make_interval\(secs => v_lease_seconds\)/);
+    expect(claim).toMatch(/attempt_count = h\.attempt_count \+ 1/);
+    expect(claim).toMatch(/LEAST\(GREATEST\(COALESCE\(p_lease_seconds, 300\), 30\), 900\)/);
+  });
+
+  it('ack is lease-guarded and dead-letters after bounded attempts', () => {
+    expect(ack).toMatch(/lease_token = p_lease_token/);
+    expect(ack).toMatch(/lease_until > clock_timestamp\(\)/);
+    expect(ack).toMatch(/attempt_count >= v_row\.max_attempts/);
+    expect(ack).toMatch(/'DEAD_LETTER'::text/);
+    expect(ack).toMatch(/left\(btrim\(p_error\), 1000\)/);
+  });
+
+  it('handoff functions are service-role only with no PUBLIC grants', () => {
+    expect(functionsSql).toMatch(/REVOKE ALL ON FUNCTION rf_coin_enqueue_fulfillment\(uuid\) FROM PUBLIC/);
+    expect(functionsSql).toMatch(/REVOKE ALL ON FUNCTION rf_coin_claim_fulfillment_handoffs\(integer, integer\) FROM PUBLIC/);
+    expect(functionsSql).toMatch(/REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff\(uuid, uuid, text\) FROM PUBLIC/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_enqueue_fulfillment\(uuid\) TO service_role/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_claim_fulfillment_handoffs\(integer, integer\) TO service_role/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_ack_fulfillment_handoff\(uuid, uuid, text\) TO service_role/);
+  });
+
+  it('handoff table is fail-closed: RLS enabled, no grants, no client policies', () => {
+    expect(schemaSql).toMatch(/ALTER TABLE rf_coin_fulfillment_handoffs ENABLE ROW LEVEL SECURITY/);
+    expect(schemaSql).toMatch(/REVOKE ALL ON TABLE rf_coin_fulfillment_handoffs\s*\n\s*FROM PUBLIC, anon, authenticated, service_role/);
+    expect(schemaSql).not.toMatch(/POLICY .* ON rf_coin_fulfillment_handoffs/);
+  });
+
+  it('schedules the fulfillment-handoff worker via pg_cron with a cron secret', () => {
+    expect(schemaSql).toMatch(/'fulfillment_handoff_secret'/);
+    expect(schemaSql).toMatch(/trigger_fulfillment_handoff\(\)/);
+    expect(schemaSql).toMatch(/cron\.schedule\(\s*\n?\s*'fulfillment-handoff',\s*\n?\s*'\*\/3 \* \* \* \*'/);
   });
 });
