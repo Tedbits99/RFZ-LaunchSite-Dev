@@ -28,7 +28,11 @@ export default function Login() {
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
-        if (response.status === 403) setAwaitingConfirmation(true);
+        // A 403 is also returned when the request origin is rejected; only the
+        // unconfirmed-email message should offer the resend path.
+        if (response.status === 403 && body.error === 'Please confirm your email address to activate your account.') {
+          setAwaitingConfirmation(true);
+        }
         setError(body.error || 'Unable to sign in.');
         return;
       }
