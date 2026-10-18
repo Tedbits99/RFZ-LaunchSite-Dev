@@ -49,6 +49,10 @@ DECLARE
   v_claim_count integer;
   v_old_token uuid;
   v_status text;
+  v_legacy_status text;
+  v_legacy_attempt_count integer;
+  v_legacy_lease_token uuid;
+  v_legacy_lease_until timestamptz;
   v_next timestamptz;
   v_fn text;
   v_valid_snapshot jsonb;
@@ -330,15 +334,25 @@ BEGIN
   SET status = 'pending', attempt_count = 7, lease_token = NULL,
       lease_until = NULL, next_attempt_at = clock_timestamp()
   WHERE id = '00000000-0000-0000-0000-000000000610';
-  IF EXISTS (
-    SELECT 1 FROM public.claim_completion_receipt_outbox(100, 30)
-    WHERE out_id = '00000000-0000-0000-0000-000000000610'
-  ) OR NOT EXISTS (
-    SELECT 1 FROM public.order_email_outbox
-    WHERE id = '00000000-0000-0000-0000-000000000610'
-      AND status = 'dead_letter' AND attempt_count = 7
-  ) THEN
-    RAISE EXCEPTION 'OUTBOX_WORKER_LEGACY_ATTEMPT_COMPATIBILITY_INVALID';
+  SELECT count(*) INTO v_claim_count
+  FROM public.claim_completion_receipt_outbox(100, 30)
+  WHERE out_id = '00000000-0000-0000-0000-000000000610';
+  IF v_claim_count > 0 THEN
+    RAISE EXCEPTION 'OUTBOX_WORKER_EXHAUSTED_RECEIPT_CLAIMED';
+  END IF;
+
+  SELECT status, attempt_count, lease_token, lease_until
+  INTO v_legacy_status, v_legacy_attempt_count, v_legacy_lease_token, v_legacy_lease_until
+  FROM public.order_email_outbox
+  WHERE id = '00000000-0000-0000-0000-000000000610';
+  IF v_legacy_status IS DISTINCT FROM 'dead_letter' THEN
+    RAISE EXCEPTION 'OUTBOX_WORKER_EXHAUSTED_RECEIPT_NOT_QUARANTINED';
+  END IF;
+  IF v_legacy_attempt_count IS DISTINCT FROM 7 THEN
+    RAISE EXCEPTION 'OUTBOX_WORKER_HISTORICAL_ATTEMPT_COUNT_REWRITTEN';
+  END IF;
+  IF v_legacy_lease_token IS NOT NULL OR v_legacy_lease_until IS NOT NULL THEN
+    RAISE EXCEPTION 'OUTBOX_WORKER_EXHAUSTED_RECEIPT_LEASE_NOT_CLEARED';
   END IF;
 
   -- Invalid snapshots and recipients are excluded from claims.
