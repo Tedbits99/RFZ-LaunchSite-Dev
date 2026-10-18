@@ -1,46 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { getAuthCallbackUrl } from '@/lib/authRedirect';
+import { getAuthCallbackUrl, getConfiguredAppOrigin } from '@/lib/authRedirect';
+import { validateEmailInput } from '@/lib/authValidation';
 import {
   deriveCustomerConfirmationResendKey,
 } from '@/lib/customerConfirmationResendKey';
 
 const GENERIC_OK = 'If the address can receive mail, confirmation instructions will be sent.';
+const GENERIC_503 = 'Confirmation resend is temporarily unavailable.';
 
 function json(body: Record<string, unknown>, status: number) {
   return NextResponse.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
+function hasTrustedOrigin(request: NextRequest): boolean {
+  const origin = getConfiguredAppOrigin();
+  return Boolean(origin && request.headers.get('origin') === origin);
+}
+
 export async function POST(req: NextRequest) {
-  let email = '';
+  if (!hasTrustedOrigin(req)) return json({ error: 'Request origin is not allowed.' }, 403);
+
+  let body: unknown;
   try {
-    const body = await req.json();
-    if (body && typeof body === 'object' && typeof (body as { email?: unknown }).email === 'string') {
-      email = ((body as { email: string }).email).trim().toLowerCase();
-    }
+    body = await req.json();
   } catch {
-    return json({ error: 'Please provide a valid email address.' }, 400);
+    return json({ error: 'Invalid request.' }, 400);
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) {
-    return json({ error: 'Please provide a valid email address.' }, 400);
-  }
+  const values = body && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+  const validation = validateEmailInput(values.email);
+  if (!validation.ok) return json({ error: 'Please provide a valid email address.' }, 400);
 
   const emailRedirectTo = getAuthCallbackUrl();
-  if (!emailRedirectTo) return json({ error: 'Confirmation resend is temporarily unavailable.' }, 503);
+  if (!emailRedirectTo) return json({ error: GENERIC_503 }, 503);
 
   let emailKey: string;
   let networkKey: string;
   try {
-    emailKey = deriveCustomerConfirmationResendKey('email', email);
+    emailKey = deriveCustomerConfirmationResendKey('email', validation.value);
     const remoteAddress = (req.headers.get('x-forwarded-for') || 'unknown').split(',')[0].trim().slice(0, 128);
     networkKey = deriveCustomerConfirmationResendKey('network', remoteAddress);
   } catch {
-    return json({ error: 'Confirmation resend is temporarily unavailable.' }, 503);
+    return json({ error: GENERIC_503 }, 503);
   }
 
-  if (!adminSupabase) return json({ error: 'Confirmation resend is temporarily unavailable.' }, 503);
+  if (!adminSupabase) return json({ error: GENERIC_503 }, 503);
 
   try {
     const { data: reservation, error: rpcError } = await adminSupabase
@@ -50,7 +58,7 @@ export async function POST(req: NextRequest) {
       })
       .maybeSingle();
 
-    if (rpcError) return json({ error: 'Confirmation resend is temporarily unavailable.' }, 503);
+    if (rpcError) return json({ error: GENERIC_503 }, 503);
 
     const allowed = (reservation as { allowed?: boolean } | null)?.allowed === true;
     if (!allowed) {
@@ -64,13 +72,13 @@ export async function POST(req: NextRequest) {
     // reveals whether the address has an account.
     await supabase.auth.resend({
       type: 'signup',
-      email,
+      email: validation.value,
       options: { emailRedirectTo },
     });
 
     return json({ message: GENERIC_OK }, 202);
   } catch {
-    return json({ error: 'Confirmation resend is temporarily unavailable.' }, 503);
+    return json({ error: GENERIC_503 }, 503);
   }
 }
 
