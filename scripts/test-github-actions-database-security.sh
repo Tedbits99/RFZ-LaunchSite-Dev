@@ -472,7 +472,43 @@ if [ -z "$disposable_service_role_key" ]; then
   exit 12
 fi
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
-  --command "UPDATE public.orders SET reference = 'RF-OUTBOX-WORKER-2' WHERE id = '00000000-0000-0000-0000-000000000605'; UPDATE public.order_email_outbox SET receipt_snapshot = jsonb_set(receipt_snapshot, '{reference}', to_jsonb('RF-OUTBOX-WORKER-2'::text)), status = 'pending', attempt_count = 0, lease_token = NULL, lease_until = NULL, next_attempt_at = clock_timestamp() WHERE id = '00000000-0000-0000-0000-000000000609'; UPDATE public.orders SET reference = 'RF-OUTBOX-WORKER-3' WHERE id = '00000000-0000-0000-0000-000000000606'; UPDATE public.order_email_outbox SET receipt_snapshot = jsonb_set(receipt_snapshot, '{reference}', to_jsonb('RF-OUTBOX-WORKER-3'::text)), status = 'pending', attempt_count = 0, lease_token = NULL, lease_until = NULL, next_attempt_at = clock_timestamp() WHERE id = '00000000-0000-0000-0000-000000000610';"
+  --command "UPDATE public.orders SET reference = CASE id WHEN '00000000-0000-0000-0000-000000000605' THEN 'RF-OUTBOX-WORKER-2' WHEN '00000000-0000-0000-0000-000000000606' THEN 'RF-OUTBOX-WORKER-3' END WHERE id IN ('00000000-0000-0000-0000-000000000605', '00000000-0000-0000-0000-000000000606');
+UPDATE public.order_email_outbox AS outbox
+SET receipt_snapshot = jsonb_build_object(
+      'reference', ord.reference,
+      'total_cents', ord.total_cents,
+      'payment_method', ord.payment_method,
+      'game_name', game.name,
+      'package_name', package.name,
+      'quantity', ord.quantity,
+      'masked_player_identifier', CASE
+        WHEN length(NULLIF(btrim(COALESCE(ord.player_inputs->>'user_id', ord.player_inputs->>'player_id', ord.player_inputs->>'uid', ord.player_inputs->>'riot_id')), '')) <= 4
+          THEN repeat('*', length(NULLIF(btrim(COALESCE(ord.player_inputs->>'user_id', ord.player_inputs->>'player_id', ord.player_inputs->>'uid', ord.player_inputs->>'riot_id')), '')))
+        ELSE repeat('*', length(NULLIF(btrim(COALESCE(ord.player_inputs->>'user_id', ord.player_inputs->>'player_id', ord.player_inputs->>'uid', ord.player_inputs->>'riot_id')), '')) - 4)
+          || right(NULLIF(btrim(COALESCE(ord.player_inputs->>'user_id', ord.player_inputs->>'player_id', ord.player_inputs->>'uid', ord.player_inputs->>'riot_id')), ''), 4)
+      END,
+      'completed_at', outbox.completed_at
+    ),
+    status = 'pending', attempt_count = 0, lease_token = NULL,
+    lease_until = NULL, next_attempt_at = clock_timestamp()
+FROM public.orders AS ord
+JOIN public.games AS game ON game.id = ord.game_id
+JOIN public.packages AS package ON package.id = ord.package_id
+WHERE outbox.order_id = ord.id
+  AND outbox.id IN ('00000000-0000-0000-0000-000000000609', '00000000-0000-0000-0000-000000000610');
+DO \$\$ BEGIN
+  IF (SELECT count(*) FROM public.order_email_outbox
+      WHERE id IN ('00000000-0000-0000-0000-000000000609', '00000000-0000-0000-0000-000000000610')) <> 2 THEN
+    RAISE EXCEPTION 'OUTBOX_WORKER_INTEGRATION_FIXTURE_MISSING';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.order_email_outbox
+    WHERE id IN ('00000000-0000-0000-0000-000000000609', '00000000-0000-0000-0000-000000000610')
+      AND CASE WHEN jsonb_typeof(receipt_snapshot) = 'object'
+        THEN (SELECT count(*) FROM jsonb_object_keys(receipt_snapshot)) <> 8
+        ELSE true END
+  ) THEN RAISE EXCEPTION 'OUTBOX_WORKER_INTEGRATION_FIXTURE_SNAPSHOT_INVALID'; END IF;
+END \$\$;"
 (cd "$project_root" && \
   env -i PATH="$PATH" RFZ_COMPLETION_RECEIPT_INTEGRATION_MODE=disposable \
   RFZ_DISPOSABLE_SUPABASE_API_URL="$api_url" \

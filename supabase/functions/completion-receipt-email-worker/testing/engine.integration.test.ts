@@ -107,6 +107,53 @@ function isDisposableServiceRoleJwt(value: string | undefined): value is string 
   }
 }
 
+const EXPECTED_FIXTURE_RECIPIENTS = new Map([
+  ['00000000-0000-0000-0000-000000000609', 'worker-2@example.invalid'],
+  ['00000000-0000-0000-0000-000000000610', 'worker-3@example.invalid'],
+]);
+
+/** Fixture boundary is order-independent and rejects any unexpected claim set. */
+export function isExpectedDisposableFixtureClaim(rows: unknown): rows is ClaimedCompletionReceipt[] {
+  if (!Array.isArray(rows) || rows.length !== EXPECTED_FIXTURE_RECIPIENTS.size) return false;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object'
+      || typeof row.out_id !== 'string'
+      || typeof row.out_recipient_email !== 'string'
+      || EXPECTED_FIXTURE_RECIPIENTS.get(row.out_id) !== row.out_recipient_email
+      || seen.has(row.out_id)) return false;
+    seen.add(row.out_id);
+  }
+  return seen.size === EXPECTED_FIXTURE_RECIPIENTS.size;
+}
+
+describe('disposable claim fixture identity guard', () => {
+  it('accepts the intended fixture rows independent of order', () => {
+    const fixtures = [
+      { out_id: '00000000-0000-0000-0000-000000000609', out_recipient_email: 'worker-2@example.invalid' },
+      { out_id: '00000000-0000-0000-0000-000000000610', out_recipient_email: 'worker-3@example.invalid' },
+    ];
+    expect(isExpectedDisposableFixtureClaim(fixtures)).toBe(true);
+    expect(isExpectedDisposableFixtureClaim([...fixtures].reverse())).toBe(true);
+  });
+
+  it.each([
+    [],
+    [{ out_id: '00000000-0000-0000-0000-000000000609', out_recipient_email: 'worker-2@example.invalid' }],
+    [
+      { out_id: '00000000-0000-0000-0000-000000000609', out_recipient_email: 'worker-2@example.invalid' },
+      { out_id: '00000000-0000-0000-0000-000000000610', out_recipient_email: 'worker-3@example.invalid' },
+      { out_id: '00000000-0000-0000-0000-000000000611', out_recipient_email: 'worker-race@example.invalid' },
+    ],
+    [
+      { out_id: '00000000-0000-0000-0000-000000000609', out_recipient_email: 'worker-3@example.invalid' },
+      { out_id: '00000000-0000-0000-0000-000000000610', out_recipient_email: 'worker-2@example.invalid' },
+    ],
+  ])('rejects missing, extra, or mismatched fixtures', (fixtures) => {
+    expect(isExpectedDisposableFixtureClaim(fixtures)).toBe(false);
+  });
+});
+
 describe.skipIf(!integrationRequested)('disposable PostgreSQL worker-engine integration', () => {
   it('uses real local E5.2 claim/ack RPCs with deterministic fake delivery only', async () => {
     expect(mode).toBe('disposable');
@@ -130,7 +177,9 @@ describe.skipIf(!integrationRequested)('disposable PostgreSQL worker-engine inte
           p_lease_seconds: leaseSeconds,
         });
         if (error) throw new Error('Disposable claim RPC failed.');
-        return (data ?? []) as ClaimedCompletionReceipt[];
+        // Preserve the raw shape for the engine's schema validator. PostgREST
+        // returns [] for a valid empty set; null is not silently reinterpreted.
+        return data as unknown as ClaimedCompletionReceipt[];
       },
       async acknowledge(id, leaseToken, providerMessageId) {
         const { data, error } = await client.rpc('ack_completion_receipt_sent', {
@@ -148,11 +197,10 @@ describe.skipIf(!integrationRequested)('disposable PostgreSQL worker-engine inte
           p_error: category,
         });
         if (error) throw new Error('Disposable failure RPC failed.');
-        const result = Array.isArray(data) ? data[0] : data;
-        if (!result || typeof result.out_status !== 'string') {
-          throw new Error('Disposable failure RPC returned an invalid result.');
-        }
-        return result as { out_status: string; out_next_attempt_at: string | null };
+        // RETURNS TABLE is represented as one PostgREST row. Preserve malformed
+        // shapes for the engine's non-sensitive response-schema diagnostic.
+        const result = Array.isArray(data) && data.length === 1 ? data[0] : data;
+        return result as unknown as { out_status: string; out_next_attempt_at: string | null };
       },
     };
 
@@ -161,6 +209,7 @@ describe.skipIf(!integrationRequested)('disposable PostgreSQL worker-engine inte
     const failedFixtureIds: string[] = [];
     const claimedLeaseTokens = new Map<string, string>();
     const claimIdentityByRecipient = new Map<string, string>();
+    const diagnosticCodes: string[] = [];
     const fakeTransport: CompletionReceiptTransport = {
       async send(message) {
         deliveries.push(message);
@@ -173,18 +222,22 @@ describe.skipIf(!integrationRequested)('disposable PostgreSQL worker-engine inte
     const observedRpc: CompletionReceiptWorkerRpc = {
       async claim(limit, leaseSeconds) {
         const rows = await rpc.claim(limit, leaseSeconds);
-        expect(rows.map((row) => row.out_id).sort()).toEqual([
-          '00000000-0000-0000-0000-000000000609',
-          '00000000-0000-0000-0000-000000000610',
-        ]);
+        if (!Array.isArray(rows)) return rows;
+        if (!isExpectedDisposableFixtureClaim(rows)) {
+          diagnosticCodes.push('fixture_identity_mismatch');
+          // Never let a fixture regression cause the engine to ack/fail an
+          // unexpected eligible row in this disposable database.
+          return [];
+        }
         for (const row of rows) {
           claimedLeaseTokens.set(row.out_id, row.out_lease_token);
           claimIdentityByRecipient.set(row.out_recipient_email, row.out_id);
         }
-        expect(claimIdentityByRecipient.get('worker-2@example.invalid'))
-          .toBe('00000000-0000-0000-0000-000000000609');
-        expect(claimIdentityByRecipient.get('worker-3@example.invalid'))
-          .toBe('00000000-0000-0000-0000-000000000610');
+        if (claimIdentityByRecipient.get('worker-2@example.invalid') !== '00000000-0000-0000-0000-000000000609'
+          || claimIdentityByRecipient.get('worker-3@example.invalid') !== '00000000-0000-0000-0000-000000000610') {
+          diagnosticCodes.push('fixture_recipient_mapping_mismatch');
+          return [];
+        }
         return rows;
       },
       async acknowledge(id, token, providerId) {
@@ -200,7 +253,16 @@ describe.skipIf(!integrationRequested)('disposable PostgreSQL worker-engine inte
         return rpc.fail(id, token, category);
       },
     };
-    const result = await runCompletionReceiptWorkerEngine({ rpc: observedRpc, transport: fakeTransport }, 'https://runfazone.example', 2);
+    const result = await runCompletionReceiptWorkerEngine({
+      rpc: observedRpc,
+      transport: fakeTransport,
+      onDiagnostic: (code) => diagnosticCodes.push(code),
+    }, 'https://runfazone.example', 2);
+
+    // Only safe stage codes are surfaced. In particular, exceptions otherwise
+    // sanitized by the engine cannot hide whether claim, mapping, rendering,
+    // fake transport, or an acknowledgment RPC was the failing stage.
+    expect(diagnosticCodes).toEqual(['fake_transport_rejected']);
 
     expect(result).toMatchObject({
       claimed: 2,
