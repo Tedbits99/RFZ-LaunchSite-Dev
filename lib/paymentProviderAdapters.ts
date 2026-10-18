@@ -193,15 +193,19 @@ export class HitPayAdapter implements PaymentProviderAdapter {
       const params = new URLSearchParams(body);
       const hmacReceived = params.get('hmac') || '';
       const salt = config.credentials.webhook_secret || config.credentials.api_salt || '';
-      if (salt) {
-        const toSign = Array.from(params.entries())
-          .filter(([k]) => k !== 'hmac')
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([k, v]) => `${k}${v}`)
-          .join('');
-        const computed = await hmacSha256(salt, toSign);
-        if (computed !== hmacReceived) return { valid: false, orderId: null, providerReference: null, status: '', amountCents: null, rawPayload: body, error: 'Invalid HMAC signature' };
+      // Fail closed: without a signing secret or a received signature the
+      // webhook cannot be verified and must be rejected, or the endpoint
+      // becomes a forgeable payment confirmation.
+      if (!salt || !hmacReceived) {
+        return { valid: false, orderId: null, providerReference: null, status: '', amountCents: null, rawPayload: body || null, error: 'Webhook signature missing or signing secret not configured' };
       }
+      const toSign = Array.from(params.entries())
+        .filter(([k]) => k !== 'hmac')
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}${v}`)
+        .join('');
+      const computed = await hmacSha256(salt, toSign);
+      if (computed !== hmacReceived) return { valid: false, orderId: null, providerReference: null, status: '', amountCents: null, rawPayload: body, error: 'Invalid HMAC signature' };
       const status = params.get('status') || '';
       return {
         valid: true,
