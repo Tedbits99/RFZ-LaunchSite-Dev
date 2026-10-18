@@ -1,9 +1,22 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter, Space_Grotesk } from 'next/font/google';
+import localFont from 'next/font/local';
 
-const inter = Inter({ subsets: ['latin'] });
-const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-display' });
+// Self-hosted latin subsets; avoids build-time Google Fonts fetches that fail
+// on network-restricted build machines (ETIMEDOUT in Netlify builds).
+const inter = localFont({
+  src: './fonts/inter-latin.woff2',
+  weight: '400 700',
+  style: 'normal',
+  display: 'swap',
+});
+const spaceGrotesk = localFont({
+  src: './fonts/space-grotesk-latin.woff2',
+  weight: '400 700',
+  style: 'normal',
+  display: 'swap',
+  variable: '--font-display',
+});
 
 export const metadata: Metadata = {
   title: 'RunFazone | Game Top-Up Made Easy',
