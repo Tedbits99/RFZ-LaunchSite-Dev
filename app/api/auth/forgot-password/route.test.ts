@@ -75,6 +75,7 @@ describe('POST /api/auth/forgot-password', () => {
     { email: 42 },
     { email: 'not-an-email' },
     { email: '' },
+    { email: `${'a'.repeat(311)}@example.com` },
     { email: 'user@', extra_role: 'ADMIN', user_id: 'x' },
   ])('rejects invalid or forged payloads with 400', async (body) => {
     const response = await POST(request(body));

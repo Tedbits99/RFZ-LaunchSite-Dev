@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin } from '@/lib/authRedirect';
-import { validateRegistrationInput } from '@/lib/authValidation';
+import { validateEmailInput } from '@/lib/authValidation';
 
 const GENERIC_OK = 'If the address can receive mail, reset instructions will be sent.';
 const GENERIC_503 = 'Password reset is temporarily unavailable.';
@@ -31,9 +31,7 @@ export async function POST(request: NextRequest) {
   const values = body && typeof body === 'object' && !Array.isArray(body)
     ? body as Record<string, unknown>
     : {};
-  const email = typeof values.email === 'string' ? values.email.trim().toLowerCase() : '';
-
-  const validation = validateRegistrationInput({ email, password: 'placeholder-pw', name: 'Customer' });
+  const validation = validateEmailInput(values.email);
   if (!validation.ok) return json({ error: 'Please provide a valid email address.' }, 400);
 
   let client: ReturnType<typeof createCustomerServerClient>;
@@ -45,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const redirectTo = `${getConfiguredAppOrigin()}/auth/callback?type=recovery`;
-    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
+    const { error } = await client.auth.resetPasswordForEmail(validation.value, { redirectTo });
     if (error) {
       // Never reveal whether the address exists. The Auth provider's own
       // enumeration protections may return errors that we swallow here.

@@ -9,9 +9,24 @@ export type RegistrationValidation =
   | { ok: false; error: string };
 
 const EMAIL_MAX_LENGTH = 320;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 128;
 const DISPLAY_NAME_MAX_LENGTH = 120;
+
+export type EmailValidation =
+  | { ok: true; value: string }
+  | { ok: false; error: string };
+
+export function validateEmailInput(input: unknown): EmailValidation {
+  if (typeof input !== 'string') return { ok: false, error: 'Please provide a valid email address.' };
+
+  const email = input.trim().toLowerCase();
+  if (!email || email.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(email)) {
+    return { ok: false, error: 'Please provide a valid email address.' };
+  }
+  return { ok: true, value: email };
+}
 
 export function validateRegistrationInput(input: unknown): RegistrationValidation {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -23,7 +38,7 @@ export function validateRegistrationInput(input: unknown): RegistrationValidatio
   const password = typeof values.password === 'string' ? values.password : '';
   const displayName = typeof values.name === 'string' ? values.name.trim() : '';
 
-  if (!email || email.length > EMAIL_MAX_LENGTH || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!email || email.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(email)) {
     return { ok: false, error: 'Please provide a valid email address.' };
   }
   if (password.length < PASSWORD_MIN_LENGTH || password.length > PASSWORD_MAX_LENGTH || !/\S/.test(password)) {
