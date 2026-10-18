@@ -47,6 +47,7 @@ interface CookieOptions {
   sameSite: 'lax';
   path: string;
   maxAge: number;
+  expires?: Date;
 }
 
 export function recoveryProofSecretAvailable(): boolean {
@@ -77,7 +78,7 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
-function proofCookie(maxAge: number): RecoveryProof {
+function proofCookie(maxAge: number, expires?: Date): RecoveryProof {
   return {
     name: RECOVERY_PROOF_COOKIE,
     value: '',
@@ -87,6 +88,7 @@ function proofCookie(maxAge: number): RecoveryProof {
       sameSite: 'lax',
       path: '/auth/reset-password',
       maxAge,
+      ...(expires ? { expires } : {}),
     },
   };
 }
@@ -108,7 +110,9 @@ export function newRecoveryProofCookie(binding: { userId: string; sessionFingerp
 }
 
 export function clearRecoveryProofCookie(): RecoveryProof {
-  return proofCookie(0);
+  // Runtime cookie serializers may drop maxAge: 0, so the clear must also
+  // carry an explicit past Expires date to guarantee genuine deletion.
+  return proofCookie(0, new Date(0));
 }
 
 export function verifyRecoveryProof(

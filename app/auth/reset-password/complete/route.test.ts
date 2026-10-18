@@ -118,6 +118,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     const cleared = setCookies(response).find((c) => c.startsWith('rfz-recovery-proof='));
     expect(cleared).toBeDefined();
     expect(cleared).toContain('Max-Age=0');
+    expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/);
     expect(cleared).toContain('Path=/auth/reset-password');
     expect(cleared).toContain('HttpOnly');
   });

@@ -220,10 +220,13 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     expect(completeRes.status).toBe(200);
     const completeCookies = getSetCookieHeaders(completeRes);
 
-    // The proof cookie is cleared as a real Set-Cookie header.
+    // The proof cookie is cleared as a real Set-Cookie header with genuine
+    // expiry attributes (Max-Age=0 AND an explicit past Expires date), not
+    // just an empty value.
     const proofCleared = completeCookies.find((c) => c.startsWith('rfz-recovery-proof='));
     expect(proofCleared).toBeDefined();
     expect(proofCleared!.startsWith('rfz-recovery-proof=;')).toBe(true);
+    expect(proofCleared!).toMatch(/Expires=Thu, 01 Jan 1970/);
     expect(proofCleared!).toContain('Path=/auth/reset-password');
 
     // The recovery session cookies are removed as real Set-Cookie headers by

@@ -149,6 +149,7 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
       const cleared = clearRecoveryProofCookie();
       expect(cleared.value).toBe('');
       expect(cleared.options.maxAge).toBe(0);
+      expect(cleared.options.expires?.getTime()).toBe(0);
       expect(cleared.options.path).toBe('/auth/reset-password');
     } finally {
       delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
