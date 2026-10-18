@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createCustomerServerClient } from '@/lib/authSessionClients';
+import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { getConfiguredAppOrigin } from '@/lib/authRedirect';
 import { validateEmailInput } from '@/lib/authValidation';
 
@@ -34,9 +34,9 @@ export async function POST(request: NextRequest) {
   const validation = validateEmailInput(values.email);
   if (!validation.ok) return json({ error: 'Please provide a valid email address.' }, 400);
 
-  let client: ReturnType<typeof createCustomerServerClient>;
+  let client: ReturnType<typeof createSupabaseServerClient>;
   try {
-    client = createCustomerServerClient();
+    client = createSupabaseServerClient();
   } catch {
     return json({ error: GENERIC_503 }, 503);
   }

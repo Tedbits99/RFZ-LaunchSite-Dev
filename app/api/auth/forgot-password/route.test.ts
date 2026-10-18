@@ -3,11 +3,11 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   resetPasswordForEmail: vi.fn(),
-  createCustomerServerClient: vi.fn(),
+  createSupabaseServerClient: vi.fn(),
 }));
 
-vi.mock('@/lib/authSessionClients', () => ({
-  createCustomerServerClient: mocks.createCustomerServerClient,
+vi.mock('@/lib/supabaseServer', () => ({
+  createSupabaseServerClient: mocks.createSupabaseServerClient,
 }));
 
 import { GET, POST } from './route';
@@ -26,7 +26,7 @@ function request(body: unknown, method = 'POST', includeOrigin = true) {
 }
 
 function installClient() {
-  mocks.createCustomerServerClient.mockReturnValue({
+  mocks.createSupabaseServerClient.mockReturnValue({
     auth: {
       resetPasswordForEmail: mocks.resetPasswordForEmail,
     },
@@ -43,15 +43,45 @@ describe('POST /api/auth/forgot-password', () => {
     mocks.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
   });
 
-  it('requests a reset for a valid email with the configured redirect', async () => {
+  it('requests a reset via the default-namespace server client with the configured recovery redirect', async () => {
     const response = await POST(request({ email: ' Customer@Example.COM ' }));
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ message: GENERIC_OK });
+    expect(mocks.createSupabaseServerClient).toHaveBeenCalledOnce();
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
       'customer@example.com',
       { redirectTo: `${origin}/auth/callback?type=recovery` },
     );
+  });
+
+  it('initiates recovery through the same default namespace the callback exchanges in (PKCE verifier match)', async () => {
+    // The PKCE verifier is stored under the initiating client's storage key
+    // and the callback's exchangeCodeForSession reads it from the default
+    // Supabase storage namespace (lib/supabaseServer.ts). Both sides must
+    // resolve to the same client factory for the exchange to find the verifier.
+    vi.doMock('@/lib/supabaseServer', () => ({
+      createSupabaseServerClient: mocks.createSupabaseServerClient,
+    }));
+    const { POST: freshPost } = await import('./route');
+    await freshPost(request({ email: 'customer@example.com' }));
+
+    // The route's initiating client is the exact factory the callback uses.
+    expect(mocks.createSupabaseServerClient).toHaveBeenCalled();
+    expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
+      'customer@example.com',
+      { redirectTo: `${origin}/auth/callback?type=recovery` },
+    );
+    vi.doUnmock('@/lib/supabaseServer');
+  });
+
+  it('does not touch customer or admin session clients or cookies', async () => {
+    const response = await POST(request({ email: 'customer@example.com' }));
+
+    expect(response.status).toBe(202);
+    // No cookie mutation happens in this route: it only triggers the email.
+    const setCookie = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
+    expect(setCookie).toHaveLength(0);
   });
 
   it.each([
@@ -96,6 +126,14 @@ describe('POST /api/auth/forgot-password', () => {
     expect((await POST(badJson)).status).toBe(400);
   });
 
+  it('normalizes email casing and whitespace', async () => {
+    await POST(request({ email: '  MiXeD@Case.COM ' }));
+    expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
+      'mixed@case.com',
+      { redirectTo: `${origin}/auth/callback?type=recovery` },
+    );
+  });
+
   it('never exposes passwords, tokens, roles, or provider details', async () => {
     const response = await POST(request({ email: 'customer@example.com', password: 'secret-pw', role: 'ADMIN' }));
     const body = await response.text();
@@ -106,8 +144,8 @@ describe('POST /api/auth/forgot-password', () => {
     expect(body).not.toContain('rate limited');
   });
 
-  it('returns 503 when the customer client cannot be created', async () => {
-    mocks.createCustomerServerClient.mockImplementationOnce(() => {
+  it('returns 503 when the server client cannot be created', async () => {
+    mocks.createSupabaseServerClient.mockImplementationOnce(() => {
       throw new Error('config missing');
     });
 
@@ -115,6 +153,15 @@ describe('POST /api/auth/forgot-password', () => {
 
     expect(response.status).toBe(503);
     expect(JSON.stringify(await response.json())).not.toContain('config missing');
+  });
+
+  it('returns 503 when the reset request itself throws', async () => {
+    mocks.resetPasswordForEmail.mockRejectedValueOnce(new Error('network down'));
+
+    const response = await POST(request({ email: 'a@b.co' }));
+
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain('network down');
   });
 
   it('supports POST only', async () => {
