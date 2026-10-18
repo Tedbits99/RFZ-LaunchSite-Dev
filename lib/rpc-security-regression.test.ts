@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const migrationPath = resolve(process.cwd(), 'supabase/migrations/20261017090000_security_harden_privileged_rpcs.sql');
+const migrationPath = resolve(process.cwd(), 'supabase/migrations/20261018151838_20261017090000_security_harden_privileged_rpcs.sql');
 const migration = readFileSync(migrationPath, 'utf8');
 
 describe('forward-only privileged RPC migration contract', () => {
