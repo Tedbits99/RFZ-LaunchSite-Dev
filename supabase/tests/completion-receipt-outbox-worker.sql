@@ -78,6 +78,7 @@ BEGIN
   v_old_token := v_claim.lease_token;
   IF v_old_token IS NULL OR v_claim.attempt_count <> 1 OR v_claim.lease_until <= clock_timestamp()
      OR jsonb_typeof(v_claim.receipt_snapshot) <> 'object'
+     OR (SELECT count(*) FROM jsonb_object_keys(v_claim.receipt_snapshot)) <> 8
      OR v_claim.receipt_snapshot->>'reference' <> 'OUTBOX-WORKER-1'
      OR (v_claim.receipt_snapshot->>'total_cents')::integer <> 1
      OR v_claim.receipt_snapshot->>'payment_method' <> 'manual'

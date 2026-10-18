@@ -71,7 +71,10 @@ BEGIN
       AND o.recipient_email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
       AND CASE
         WHEN jsonb_typeof(o.receipt_snapshot) = 'object'
-          THEN jsonb_object_length(o.receipt_snapshot) = 8
+          THEN (
+            SELECT count(*) = 8
+            FROM jsonb_object_keys(o.receipt_snapshot)
+          )
         ELSE false
       END
       AND jsonb_typeof(o.receipt_snapshot->'reference') = 'string'
