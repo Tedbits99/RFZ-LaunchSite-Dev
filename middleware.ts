@@ -1,5 +1,51 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { AUTH_SESSION_COOKIES } from '@/lib/authSessionConfig'
+
+type SessionCookie = { name: string; value: string; options: CookieOptions }
+
+function defaultStorageKeyFromUrl(url: string): string | null {
+  try {
+    return `sb-${new URL(url).hostname.split('.')[0]}-auth-token`
+  } catch {
+    return null
+  }
+}
+
+function hasAnyCookie(req: NextRequest, name: string): boolean {
+  return (
+    req.cookies.has(name) ||
+    req.cookies.has(`${name}.0`) ||
+    req.cookies.has(`${name}.1`) ||
+    req.cookies.has(`${name}.2`) ||
+    req.cookies.has(`${name}.3`) ||
+    req.cookies.has(`${name}.4`)
+  )
+}
+
+function createNamespaceClient(
+  url: string,
+  anonKey: string,
+  storageKey: string,
+  req: NextRequest,
+  requestCookieChanges: SessionCookie[],
+) {
+  return createServerClient(url, anonKey, {
+    cookieOptions: { name: storageKey },
+    cookieEncoding: 'base64url',
+    cookies: {
+      getAll() {
+        return req.cookies.getAll()
+      },
+      setAll(cookiesToSet: SessionCookie[]) {
+        // Record changes per namespace so a later namespace refresh can never
+        // overwrite an earlier one's cookies when the request store is replayed.
+        requestCookieChanges.push(...cookiesToSet)
+        cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
+      },
+    },
+  })
+}
 
 export async function middleware(req: NextRequest) {
   // Must pass { request } so refreshed auth cookies are visible to the
@@ -13,22 +59,30 @@ export async function middleware(req: NextRequest) {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !anonKey) return res
 
-  const supabase = createServerClient(url, anonKey, {
-    cookies: {
-      getAll() {
-        return req.cookies.getAll()
-      },
-      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-        cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
-        res = NextResponse.next({ request: req })
-        cookiesToSet.forEach(({ name, value, options }) => {
-          res.cookies.set(name, value, options)
-        })
-      },
-    },
-  })
+  const defaultKey = defaultStorageKeyFromUrl(url)
 
-  await supabase.auth.getUser()
+  // One namespace-specific client per known session cookie. Each only refreshes
+  // when its own session (including chunked cookies) is present, so unrelated
+  // sessions are never touched and no needless Auth calls are made.
+  const namespaces: string[] = [AUTH_SESSION_COOKIES.customer, AUTH_SESSION_COOKIES.admin]
+  if (defaultKey) namespaces.unshift(defaultKey)
+
+  const requestCookieChanges: SessionCookie[] = []
+  for (const storageKey of namespaces) {
+    if (!hasAnyCookie(req, storageKey)) continue
+    const supabase = createNamespaceClient(url, anonKey, storageKey, req, requestCookieChanges)
+    try {
+      await supabase.auth.getUser()
+    } catch {
+      // A failed refresh must never break the request or the other
+      // namespaces: the existing cookies are left untouched and each
+      // namespace's own client remains authoritative for its session.
+    }
+  }
+
+  for (const { name, value, options } of requestCookieChanges) {
+    res.cookies.set(name, value, options)
+  }
 
   return res
 }
