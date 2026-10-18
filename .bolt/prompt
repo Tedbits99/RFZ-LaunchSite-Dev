@@ -155,3 +155,75 @@ Every completed task must report:
 - Whether the assigned phase is PASS, FAIL, or BLOCKED
 
 STOP after completing the assigned task. Wait for the next phase.
+
+*********************************
+
+RUNFAZONE.COM — DIRECT IMPLEMENTATION AND DATABASE INTEGRATION WORKFLOW
+
+IMPORTANT OWNER INSTRUCTION:
+
+From now on, work directly in my EXISTING RunFazone.com Bolt project.
+
+Do not stop at inspection reports when the assigned phase explicitly authorizes implementation.
+
+FOR EACH AUTHORIZED DEVELOPMENT PHASE:
+
+1. Read the exact relevant code files.
+2. Confirm the actual defect or required integration.
+3. IMPLEMENT the required changes directly in the existing Bolt codebase.
+4. Add or update relevant tests.
+5. Run focused tests, npm test, npx tsc --noEmit, npm run lint, and npm run build.
+6. If failures are caused by the assigned changes, fix them within the authorized scope and rerun verification.
+7. Report PASS only when the required checks actually pass.
+8. If blocked, report the exact blocker rather than claiming completion.
+
+Do not merely describe proposed changes when implementation is authorized.
+
+DATABASE INTEGRATION:
+
+This existing project has a connected Bolt Cloud database containing real production orders, payments, and supplier records.
+
+When a phase requires database schema changes:
+
+- Inspect actual database schema and migration dependencies.
+- Prepare the exact migrations required.
+- Apply and verify them directly on an ISOLATED STAGING DATABASE after confirming its identity and isolation.
+- Verify application compatibility, RLS, triggers, RPCs and data preservation.
+- Do not substitute mocked tests for real staging verification.
+
+PRODUCTION DATABASE:
+
+Never assume that a successful build or passing unit tests alone authorizes production database writes.
+
+Before applying the pending 13 migrations to the live Bolt database:
+
+1. Complete a successful isolated staging rehearsal.
+2. Verify a restorable production backup.
+3. Verify backend checkout/order-creation maintenance protection.
+4. Preserve in-flight PayMongo payment callbacks and supplier reconciliation.
+5. Present the exact migration order, compatibility checks and coordinated publishing plan.
+6. Obtain my explicit final approval for that specific production migration operation.
+
+After final approval, execute only the approved production changes using the connected Bolt database migration tools, verify results and report actual status.
+
+PRESERVE:
+
+- PayMongo QRPh production payment integration
+- Manual wallets
+- FazerCards supplier integration
+- Existing Titan SMTP transactional email
+- Existing customer orders, payments and records
+- Existing Bolt development fixes
+- Disabled completion-receipt worker
+
+GitHub code synchronization may be automatic, but production publishing remains separately controlled. Verify that no connected deployment hook automatically deploys code before making changes.
+
+WORKFLOW:
+
+ONE PHASE → IMPLEMENT → TEST → FIX ERRORS → VERIFY → REPORT → NEXT PHASE.
+
+Do not begin another phase without my instruction.
+
+Never publish the website or execute an unapproved production migration.
+
+This instruction applies to all upcoming RunFazone development phases.
