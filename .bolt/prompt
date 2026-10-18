@@ -1,0 +1,157 @@
+# RUNFAZONE.COM — PERMANENT BOLT PROJECT INSTRUCTIONS
+
+## 1. PROJECT IDENTITY
+
+This existing project is RunFazone.com, a Philippine gaming top-up e-commerce platform.
+
+It is NOT a generic SaaS customer portal.
+
+Technology:
+- Next.js with App Router and TypeScript
+- React and Tailwind CSS
+- Supabase-compatible database and authentication
+- Bolt Cloud hosting and connected database
+- PayMongo QRPh API as the active production payment provider
+- Manual payment methods
+- FazerCards supplier integration
+- Existing Titan SMTP transactional email integration
+
+GitHub repository:
+Tedbits99/RFZ-LaunchSite
+
+The merged GitHub main branch contains the customer authentication, order security, supplier reconciliation, and completion-receipt development changes.
+
+The existing Bolt workspace also contains development fixes that may not yet be synchronized to GitHub.
+
+## 2. EXISTING CODEBASE — NEVER RECREATE
+
+Always work inside this EXISTING RunFazone project.
+
+Before implementing a task:
+- Read the exact existing files named in the user's instruction.
+- Follow the actual codebase architecture and existing utilities.
+- Reuse working integrations.
+- Do not invent modules, hooks, database tables, or file paths.
+- Do not replace existing functionality with mock data.
+- Do not create a new application or rebuild the project from scratch.
+- Do not overwrite files merely to simplify implementation.
+
+Important existing code areas include:
+- app/
+- app/api/
+- lib/
+- middleware.ts
+- supabase/
+- supabase/functions/
+- supabase/migrations/
+- package.json
+
+Read actual files before making assumptions.
+
+## 3. REQUIRED TASK EXECUTION
+
+The user is upgrading RunFazone.com in ORGANIZED PHASES.
+
+Work on ONE specifically assigned task at a time.
+
+For every task:
+1. Identify the exact target files.
+2. Read their existing implementation.
+3. Explain the confirmed issue.
+4. Make only authorized code changes.
+5. Preserve existing behavior.
+6. Add focused tests where appropriate.
+7. Run relevant validation commands.
+8. Report actual results and changed files.
+9. STOP and wait for the next user instruction.
+
+Do not automatically start another phase.
+
+Do not reply only with "I'll inspect" or "What would you like me to do?" when a specific task has already been supplied.
+
+If a file tool fails or project context is unavailable, report the exact blocker instead of guessing.
+
+## 4. PAYMENT AND SUPPLIER SAFETY
+
+PayMongo QRPh is the ACTIVE production payment provider.
+
+HitPay is NOT the active production payment provider.
+
+Preserve:
+- PayMongo API integration
+- Payment creation and webhook verification
+- Manual payment methods
+- Order status tracking
+- Supplier fulfillment and reconciliation
+- Duplicate payment/fulfillment protection
+
+Do not make live payment requests, supplier purchases, refunds, or webhook calls during development tests.
+
+Use mocks and isolated test fixtures.
+
+## 5. TRANSACTIONAL EMAIL
+
+The existing Titan SMTP transactional email integration must be preserved.
+
+Existing relevant files include:
+- lib/transactionalEmail.ts
+- supabase/functions/send-transactional-email/index.ts
+
+Do not change SMTP secrets, replace the working email integration, or send live customer emails without explicit authorization.
+
+The new completion-receipt worker must remain DISABLED until separately approved.
+
+## 6. DATABASE AND PRODUCTION SAFETY
+
+The connected Bolt database contains REAL PRODUCTION DATA.
+
+The GitHub main branch contains 13 new migrations dated 2026-10-17 and 2026-10-18 that have not yet been applied to production, according to the previous inspection.
+
+The website is already in maintenance mode.
+
+NEVER, without explicit approval for the specific production operation:
+- Apply production database migrations
+- Change production RLS policies or grants
+- Modify or delete real orders, payments, customers, or supplier records
+- Publish or deploy the website
+- Deploy production Edge Functions
+- Modify production payment or SMTP credentials
+- Activate completion-receipt background processing
+
+A staging migration rehearsal, verified backup/recovery plan, checkout protection, and coordinated application/database deployment plan are required before production cutover.
+
+Maintenance mode alone does not prove backend order creation is blocked. Preserve processing of already in-flight payments and webhooks.
+
+## 7. GITHUB AND CHANGE PRESERVATION
+
+Do not push directly to GitHub main.
+
+Preserve all existing Bolt-only development changes.
+
+Use reviewable development branches and pull requests where possible.
+
+Never reset, delete, restore an older version, or overwrite the existing project without specific owner approval.
+
+## 8. TESTING AND REPORTING
+
+For relevant development tasks, run:
+- Focused tests
+- npm test
+- npx tsc --noEmit
+- npm run lint
+- npm run build
+
+Report PASS, FAIL, or NOT RUN accurately.
+
+Do not claim that frontend tests prove production database integration works.
+
+Every completed task must report:
+- Exact files read
+- Exact files changed
+- What was fixed
+- Tests and actual results
+- Remaining blockers
+- Whether production was untouched
+- Whether the assigned phase is PASS, FAIL, or BLOCKED
+
+STOP after completing the assigned task. Wait for the next phase.
