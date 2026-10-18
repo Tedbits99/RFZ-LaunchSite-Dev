@@ -1,8 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
+
+const mocks = vi.hoisted(() => ({
+  getSession: vi.fn(),
+  getUser: vi.fn(),
+  updateUser: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+vi.mock('@/lib/authSessionBrowserClients', () => ({
+  createRecoveryBrowserClient: vi.fn(() => ({
+    auth: {
+      getSession: mocks.getSession,
+      getUser: mocks.getUser,
+      updateUser: mocks.updateUser,
+      signOut: mocks.signOut,
+    },
+  })),
+  // Other namespaces must never be importable here.
+  createCustomerBrowserClient: undefined,
+  createAdminBrowserClient: undefined,
+}));
+
 import ResetPasswordPage from './page';
 
 const sourcePath = join(__dirname, 'page.tsx');
@@ -16,20 +38,28 @@ describe('reset password page source invariants (automated static checks)', () =
     expect(source.trimStart().startsWith("'use client'")).toBe(true);
   });
 
-  it('requires a verified authenticated session via getUser before allowing a password change', () => {
-    expect(source).toContain('await supabase.auth.getUser()');
-    expect(source).toContain('if (!userData?.user)');
-    expect(source).not.toContain('auth.getSession()');
+  it('uses ONLY the recovery browser client, never the default browser client', () => {
+    expect(source).toContain('createRecoveryBrowserClient');
+    expect(source).not.toContain("from '@supabase/ssr'");
+    expect(source).not.toContain('createBrowserClient(');
+  });
+
+  it('requires a recovery-namespace session before allowing a password change', () => {
+    expect(source).toContain('supabase.auth.getSession()');
+    expect(source).toContain('supabase.auth.getUser()');
     expect(source).not.toContain('auth.signInWithPassword');
     expect(source).not.toContain('auth.signUp');
   });
 
-  it('updates the password through the authenticated recovery session', () => {
-    expect(source).toContain("supabase.auth.updateUser({ password })");
+  it('updates the password through the recovery session', () => {
+    expect(source).toContain('supabase.auth.updateUser({ password })');
   });
 
-  it('signs out after a successful password update', () => {
-    expect(source).toContain('await supabase.auth.signOut()');
+  it('signs out only the recovery namespace after success and clears the proof cookie', () => {
+    expect(source).toContain("signOut({ scope: 'local' })");
+    expect(source).toContain('rfz-recovery-proof=');
+    expect(source).toContain('Max-Age=0');
+    expect(source).toContain('Path=/auth/reset-password');
   });
 
   it('preserves the password length requirements in the form', () => {
@@ -42,7 +72,10 @@ describe('reset password page source invariants (automated static checks)', () =
     expect(source).toContain(`'${GENERIC_INVALID}'`);
     expect(source).toContain(`'${GENERIC_OK}'`);
     expect(source).not.toMatch(/console\.(log|error|warn|info|debug)/);
-    expect(source).not.toMatch(/localStorage|sessionStorage|document\.cookie/);
+    expect(source).not.toMatch(/localStorage|sessionStorage/);
+    // The only document.cookie write is the recovery-proof clear on success.
+    expect(source.match(/document\.cookie/g)?.length).toBe(1);
+    expect(source).toMatch(/rfz-recovery-proof=; Max-Age=0/);
     expect(source).not.toMatch(/access_token|refresh_token|token_hash/);
   });
 

@@ -26,3 +26,8 @@ export function createAdminBrowserClient(): SupabaseClient {
   const { url, anonKey } = supabaseConfig();
   return createBrowserClient(url, anonKey, browserOptions('admin'));
 }
+
+export function createRecoveryBrowserClient(): SupabaseClient {
+  const { url, anonKey } = supabaseConfig();
+  return createBrowserClient(url, anonKey, browserOptions('recovery'));
+}

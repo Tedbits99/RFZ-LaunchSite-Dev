@@ -2,7 +2,11 @@ import { cookies } from 'next/headers';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sessionCookieName, type AuthSessionContext } from '@/lib/authSessionConfig';
-export { createCustomerBrowserClient, createAdminBrowserClient } from '@/lib/authSessionBrowserClients';
+export {
+  createCustomerBrowserClient,
+  createAdminBrowserClient,
+  createRecoveryBrowserClient,
+} from '@/lib/authSessionBrowserClients';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -53,4 +57,8 @@ export function createCustomerServerClient() {
 
 export function createAdminServerClient() {
   return createServerClientForContext('admin');
+}
+
+export function createRecoveryServerClient() {
+  return createServerClientForContext('recovery');
 }

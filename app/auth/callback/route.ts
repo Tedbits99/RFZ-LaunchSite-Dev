@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createRecoveryServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin, getConfirmationUrl } from '@/lib/authRedirect';
+import { newRecoveryProofCookie } from '@/lib/recoveryProof';
 
 type ConfirmationStatus = 'success' | 'pending' | 'restricted' | 'invalid' | 'error';
 
@@ -12,6 +14,10 @@ function redirectToConfirmation(status: ConfirmationStatus) {
 
 function redirectToResetPassword(origin: string) {
   return NextResponse.redirect(`${origin}/auth/reset-password`);
+}
+
+function recoveryClientError(origin: string) {
+  return NextResponse.redirect(`${origin}/auth/reset-password?unavailable=1`);
 }
 
 function activationResult(data: unknown): { status?: string; error?: string | null } | null {
@@ -40,28 +46,48 @@ export async function GET(request: NextRequest) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
-  let supabase: ReturnType<typeof createSupabaseServerClient>;
-  try {
-    supabase = createSupabaseServerClient();
-  } catch {
-    return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('error');
+  let supabase: ReturnType<typeof createSupabaseServerClient> | null = null;
+  let recovery: ReturnType<typeof createRecoveryServerClient> | null = null;
+  if (isRecovery) {
+    try {
+      recovery = createRecoveryServerClient();
+    } catch {
+      return recoveryClientError(origin);
+    }
+  } else {
+    try {
+      supabase = createSupabaseServerClient();
+    } catch {
+      return redirectToConfirmation('error');
+    }
   }
 
   try {
-    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-    if (exchangeError) {
-      return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
+    // Recovery exchanges its code against the dedicated recovery namespace's
+    // PKCE verifier. A signup-confirmation code has no verifier there and a
+    // recovery code has none in the default namespace, so editing type= in
+    // the URL can never cross the flows.
+    if (recovery) {
+      const { error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code);
+      if (recoveryExchangeError) return redirectToResetPassword(origin);
+
+      const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
+      if (recoveryUserError || !recoveryUser.user) return redirectToResetPassword(origin);
+
+      const res = redirectToResetPassword(origin);
+      const proof = newRecoveryProofCookie();
+      res.cookies.set(proof.name, proof.value, proof.options);
+      return res;
     }
 
-    // Password recovery only needs the exchanged session; profile activation
-    // remains exclusive to the signup confirmation path below.
-    if (isRecovery) return redirectToResetPassword(origin);
+    const { error: exchangeError } = await supabase!.auth.exchangeCodeForSession(code);
+    if (exchangeError) return redirectToConfirmation('invalid');
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: userData, error: userError } = await supabase!.auth.getUser();
     if (userError || !userData.user) return redirectToConfirmation('error');
     if (!userData.user.email_confirmed_at) return redirectToConfirmation('pending');
 
-    const { data, error } = await supabase.rpc('activate_customer_profile');
+    const { data, error } = await supabase!.rpc('activate_customer_profile');
     if (error) return redirectToConfirmation('error');
 
     const result = activationResult(data);

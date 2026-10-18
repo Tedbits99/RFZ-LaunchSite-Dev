@@ -22,11 +22,20 @@ export default function ResetPasswordPage() {
     const password = String(new FormData(event.currentTarget).get('password') ?? '');
 
     try {
-      const { createBrowserClient } = await import('@supabase/ssr');
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      );
+      const { createRecoveryBrowserClient } = await import('@/lib/authSessionBrowserClients');
+      const supabase = createRecoveryBrowserClient();
+
+      // Only a session in the recovery namespace — established by a genuine
+      // email-link exchange in the callback — can authorize a password update.
+      // Default, customer and admin sessions live in separate cookies and are
+      // invisible to this client.
+      const { data: recoveryData, error: sessionError } = await supabase.auth.getSession();
+      const recoverySession = recoveryData?.session;
+      if (sessionError || !recoverySession) {
+        setError(GENERIC_INVALID);
+        setState('error');
+        return;
+      }
 
       const { data: userData } = await supabase.auth.getUser();
       if (!userData?.user) {
@@ -42,7 +51,10 @@ export default function ResetPasswordPage() {
         return;
       }
 
-      await supabase.auth.signOut();
+      // Sign out ONLY the recovery namespace; customer/admin/default sessions
+      // live in other cookies and remain untouched.
+      await supabase.auth.signOut({ scope: 'local' });
+      document.cookie = 'rfz-recovery-proof=; Max-Age=0; Path=/auth/reset-password; Secure; SameSite=Lax';
       setState('success');
     } catch {
       setError(GENERIC_503);
