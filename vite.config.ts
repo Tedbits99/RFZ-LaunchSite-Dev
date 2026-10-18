@@ -7,6 +7,9 @@ export default defineConfig({
   resolve: {
     alias: { '@': projectRoot },
   },
+  esbuild: {
+    jsx: 'automatic',
+  },
   test: {
     environment: 'node',
   },
