@@ -12,7 +12,7 @@ import {
   RECOVERY_PROOF_COOKIE,
   RECOVERY_PROOF_MAX_AGE_SECONDS,
 } from '@/lib/authSessionConfig';
-import { clearRecoveryProofCookie, isRecoveryProofPresent, newRecoveryProofCookie } from '@/lib/recoveryProof';
+import { clearRecoveryProofCookie, isRecoveryProofPresent, newRecoveryProofCookie, verifyRecoveryProof } from '@/lib/recoveryProof';
 
 const cookieJar = new Map<string, string>();
 const nextCookies = vi.hoisted(() => ({ getAll: vi.fn(), set: vi.fn() }));
@@ -123,37 +123,66 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
     expect(data.session).toBeNull();
   });
 
-  it('recovery proof cookie: issued after exchange, clears fully, and is bound to the reset path', () => {
-    const proof = newRecoveryProofCookie();
-    expect(proof.name).toBe(RECOVERY_PROOF_COOKIE);
-    expect(proof.value).toMatch(/^[0-9a-f]{48}$/);
-    expect(proof.options.httpOnly).toBe(true);
-    expect(proof.options.secure).toBe(true);
-    expect(proof.options.sameSite).toBe('lax');
-    expect(proof.options.path).toBe('/auth/reset-password');
-    expect(proof.options.maxAge).toBe(RECOVERY_PROOF_MAX_AGE_SECONDS);
+  it('recovery proof cookie: signed, expiring, bound to the reset path, clears fully', () => {
+    delete (globalThis as { window?: unknown }).window;
+    process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
+    try {
+      const binding = { userId: 'customer-1', sessionId: 'session-1' };
+      const proof = newRecoveryProofCookie(binding);
+      expect(proof.name).toBe(RECOVERY_PROOF_COOKIE);
+      expect(proof.value).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+      expect(proof.options.httpOnly).toBe(true);
+      expect(proof.options.secure).toBe(true);
+      expect(proof.options.sameSite).toBe('lax');
+      expect(proof.options.path).toBe('/auth/reset-password');
+      expect(proof.options.maxAge).toBe(RECOVERY_PROOF_MAX_AGE_SECONDS);
 
-    expect(isRecoveryProofPresent({ get: (n: string) => (n === RECOVERY_PROOF_COOKIE ? { value: proof.value } : undefined) })).toBe(true);
-    expect(isRecoveryProofPresent({ get: () => undefined })).toBe(false);
-    expect(isRecoveryProofPresent({ get: (n: string) => (n === RECOVERY_PROOF_COOKIE ? { value: 'short' } : undefined) })).toBe(false);
+      expect(isRecoveryProofPresent({ get: (n: string) => (n === RECOVERY_PROOF_COOKIE ? { value: proof.value } : undefined) })).toBe(true);
+      expect(isRecoveryProofPresent({ get: () => undefined })).toBe(false);
+      expect(isRecoveryProofPresent({ get: (n: string) => (n === RECOVERY_PROOF_COOKIE ? { value: 'short' } : undefined) })).toBe(false);
 
-    const cleared = clearRecoveryProofCookie();
-    expect(cleared.value).toBe('');
-    expect(cleared.options.maxAge).toBe(0);
-    expect(cleared.options.path).toBe('/auth/reset-password');
+      expect(verifyRecoveryProof(proof.value, binding)).toMatchObject({ ok: true, claims: { userId: 'customer-1', sessionId: 'session-1', purpose: 'password-reset' } });
+      expect(verifyRecoveryProof(proof.value, { userId: 'other', sessionId: 'session-1' }).ok).toBe(false);
+      expect(verifyRecoveryProof(proof.value, { userId: 'customer-1', sessionId: 'other' }).ok).toBe(false);
+      expect(verifyRecoveryProof('garbage', binding).ok).toBe(false);
+
+      const cleared = clearRecoveryProofCookie();
+      expect(cleared.value).toBe('');
+      expect(cleared.options.maxAge).toBe(0);
+      expect(cleared.options.path).toBe('/auth/reset-password');
+    } finally {
+      delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
+    }
+  });
+
+  it('recovery proof fails closed without a signing secret', () => {
+    delete (globalThis as { window?: unknown }).window;
+    delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
+    expect(() => newRecoveryProofCookie({ userId: 'u', sessionId: 's' })).toThrow();
+    expect(verifyRecoveryProof('anything', { userId: 'u', sessionId: 's' }).ok).toBe(false);
   });
 
   it('keeps the recovery flow wired end to end in application code', () => {
     const forgot = source('app/api/auth/forgot-password/route.ts');
     const callback = source('app/auth/callback/route.ts');
     const resetPage = source('app/auth/reset-password/page.tsx');
+    const completeRoute = source('app/auth/reset-password/complete/route.ts');
 
     // Initiation stores the verifier in the recovery namespace.
     expect(forgot).toContain('createRecoveryServerClient');
     expect(forgot).not.toContain('createCustomerServerClient');
     // The callback recovery branch uses the recovery client.
     expect(callback).toContain('createRecoveryServerClient');
-    // The reset page uses the recovery browser client.
-    expect(resetPage).toContain('createRecoveryBrowserClient');
+    // The password change is executed server-side via the completion route,
+    // which re-verifies the recovery user, session and signed proof.
+    expect(completeRoute).toContain('createRecoveryServerClient');
+    expect(completeRoute).toContain('verifyRecoveryProof');
+    expect(completeRoute).toContain('updateUser({ password })');
+    // The reset page only posts to the server endpoint; it never calls the
+    // Auth provider or touches cookies itself.
+    expect(resetPage).toContain("fetch('/auth/reset-password/complete'");
+    expect(resetPage).not.toContain('BrowserClient');
+    expect(resetPage).not.toContain('auth.updateUser');
+    expect(resetPage).not.toContain('document.cookie');
   });
 });

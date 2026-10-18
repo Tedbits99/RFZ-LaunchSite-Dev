@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { createHmac } from 'node:crypto';
+
+const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
+const USER_ID = 'customer-1';
+const SESSION_ID = 'recovery-session-1';
 
 const mocks = vi.hoisted(() => ({
   defaultExchangeCodeForSession: vi.fn(),
@@ -8,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   recoveryExchangeCodeForSession: vi.fn(),
   recoveryGetUser: vi.fn(),
 }));
+
 
 vi.mock('@/lib/supabaseServer', () => ({
   createSupabaseServerClient: vi.fn(() => ({
@@ -44,10 +50,33 @@ function proofCookie(response: Response): string | undefined {
   return cookies.find((c) => c.startsWith('rfz-recovery-proof='));
 }
 
+function recoveryGetUserResult(opts: { userId?: string; sessionId?: string | null } = {}) {
+  const userId = opts.userId ?? USER_ID;
+  const sessionId = opts.sessionId === null ? undefined : opts.sessionId ?? SESSION_ID;
+  return {
+    data: {
+      user: { id: userId, email_confirmed_at: '2026-10-17T12:00:00Z' },
+      session: sessionId ? { user: { id: userId }, session_id: sessionId } : null,
+    },
+    error: null,
+  };
+}
+
+function decodeProof(cookie: string) {
+  const value = cookie.split(';')[0].split('=')[1];
+  const [payload, sig] = value.split('.');
+  const expectedSig = createHmac('sha256', TEST_SECRET).update(payload, 'utf8').digest('base64url');
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+    token: string; userId: string; sessionId: string; purpose: string; exp: number;
+  };
+  return { payload, sig, expectedSig, claims, valid: sig === expectedSig };
+}
+
 describe('email confirmation callback (default namespace)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
+    process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = TEST_SECRET;
     mocks.defaultExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
     mocks.defaultGetUser.mockResolvedValue({
       data: { user: { id: 'customer-1', email_confirmed_at: '2026-10-17T12:00:00Z' } },
@@ -138,6 +167,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
+    process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = TEST_SECRET;
     mocks.defaultExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
     mocks.defaultGetUser.mockResolvedValue({
       data: { user: { id: 'customer-1', email_confirmed_at: '2026-10-17T12:00:00Z' } },
@@ -145,13 +175,10 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     });
     mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
-    mocks.recoveryGetUser.mockResolvedValue({
-      data: { user: { id: 'customer-1', email_confirmed_at: '2026-10-17T12:00:00Z' } },
-      error: null,
-    });
+    mocks.recoveryGetUser.mockResolvedValue(recoveryGetUserResult());
   });
 
-  it('exchanges a recovery code via the RECOVERY client and issues the proof cookie', async () => {
+  it('exchanges a recovery code via the RECOVERY client and issues a signed proof cookie', async () => {
     const response = await GET(request('?code=recovery-code&type=recovery&next=https%3A%2F%2Fevil.example'));
 
     expect(response.status).toBe(307);
@@ -168,6 +195,14 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(proof).toContain('HttpOnly');
     expect(proof).toContain('Max-Age=600');
     expect(proof).toContain('Path=/auth/reset-password');
+
+    const decoded = decodeProof(proof!);
+    expect(decoded.valid).toBe(true);
+    expect(decoded.claims.userId).toBe(USER_ID);
+    expect(decoded.claims.sessionId).toBe(SESSION_ID);
+    expect(decoded.claims.purpose).toBe('password-reset');
+    expect(decoded.claims.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    expect(decoded.claims.exp).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 600);
   });
 
   it('never activates a profile or calls activation RPC from the recovery branch', async () => {
@@ -196,6 +231,24 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: { message: 'no session' } });
 
     const response = await GET(request('?code=secret-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+  });
+
+  it('fails closed when the recovery session has no session_id to bind the proof to', async () => {
+    mocks.recoveryGetUser.mockResolvedValue(recoveryGetUserResult({ sessionId: null }));
+
+    const response = await GET(request('?code=secret-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+  });
+
+  it('fails closed when the proof signing secret is missing (no proof cookie)', async () => {
+    delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
+
+    const response = await GET(request('?code=recovery-code&type=recovery'));
 
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(proofCookie(response)).toBeUndefined();

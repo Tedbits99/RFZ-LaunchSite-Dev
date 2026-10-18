@@ -1,16 +1,68 @@
-import type { CookieOptions } from '@supabase/ssr';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+
 import { RECOVERY_PROOF_COOKIE, RECOVERY_PROOF_MAX_AGE_SECONDS } from '@/lib/authSessionConfig';
 
-// Non-cryptographic random is fine: the proof is an opaque, short-lived,
-// single-purpose marker whose security comes from the recovery-namespace
-// session the callback just established, not from the marker value itself.
-function randomProofToken(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
+export const RECOVERY_PROOF_HMAC_SECRET_ENV = 'RFZ_RECOVERY_PROOF_HMAC_SECRET';
+export const RECOVERY_PROOF_PURPOSE = 'password-reset';
+
+const MIN_SECRET_BYTES = 32;
+const MAX_AGE_SECONDS = Math.min(RECOVERY_PROOF_MAX_AGE_SECONDS, 600);
+
+/**
+ * HMAC-SHA256 signed recovery proof: an opaque random token plus a signature
+ * that binds the token to the verified recovery Auth user ID, the recovery
+ * session ID, the password-reset purpose and an absolute expiry. Only the
+ * signed statement travels in the HttpOnly cookie; it never contains
+ * passwords, bearer tokens, PKCE verifiers or the signing secret.
+ */
+export type RecoveryProofClaims = {
+  token: string;
+  userId: string;
+  sessionId: string;
+  purpose: string;
+  exp: number;
+};
 
 export type RecoveryProof = { name: string; value: string; options: CookieOptions };
+type RecoveryProofVerification =
+  | { ok: true; claims: RecoveryProofClaims }
+  | { ok: false };
+
+type ProofEnvelope = { token: string; sig: string };
+
+interface CookieOptions {
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'lax';
+  path: string;
+  maxAge: number;
+}
+
+export function recoveryProofSecretAvailable(): boolean {
+  return typeof window === 'undefined' && isUsableSecret(process.env[RECOVERY_PROOF_HMAC_SECRET_ENV]);
+}
+
+function isUsableSecret(secret: string | undefined): boolean {
+  return typeof secret === 'string' && Buffer.byteLength(secret, 'utf8') >= MIN_SECRET_BYTES;
+}
+
+function getSecret(): string {
+  if (typeof window !== 'undefined') throw new Error('Recovery proof signing is server-only.');
+  const secret = process.env[RECOVERY_PROOF_HMAC_SECRET_ENV];
+  if (!isUsableSecret(secret)) throw new Error('Recovery proof signing secret is unavailable.');
+  return secret;
+}
+
+function sign(payload: string, secret: string): string {
+  return createHmac('sha256', secret).update(payload, 'utf8').digest('base64url');
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 function proofCookie(maxAge: number): RecoveryProof {
   return {
@@ -26,15 +78,90 @@ function proofCookie(maxAge: number): RecoveryProof {
   };
 }
 
-export function newRecoveryProofCookie(): RecoveryProof {
-  return { ...proofCookie(RECOVERY_PROOF_MAX_AGE_SECONDS), value: randomProofToken() };
+export function newRecoveryProofCookie(binding: { userId: string; sessionId: string }): RecoveryProof {
+  const secret = getSecret();
+  const token = randomBytes(24).toString('hex');
+  const exp = Math.floor(Date.now() / 1000) + MAX_AGE_SECONDS;
+  const signedClaims: RecoveryProofClaims = {
+    token,
+    userId: binding.userId,
+    sessionId: binding.sessionId,
+    purpose: RECOVERY_PROOF_PURPOSE,
+    exp,
+  };
+  const payload = Buffer.from(JSON.stringify(signedClaims), 'utf8').toString('base64url');
+  const sig = sign(payload, secret);
+  return { ...proofCookie(MAX_AGE_SECONDS), value: `${payload}.${sig}` };
 }
 
 export function clearRecoveryProofCookie(): RecoveryProof {
   return proofCookie(0);
 }
 
-export function isRecoveryProofPresent(cookies: { get(name: string): { value: string } | undefined }): boolean {
+export function verifyRecoveryProof(
+  cookieValue: string | undefined,
+  expected: { userId: string; sessionId: string },
+): RecoveryProofVerification {
+  if (typeof cookieValue !== 'string' || cookieValue.length === 0 || cookieValue.length > 4096) {
+    return { ok: false };
+  }
+
+  let secret: string;
+  try {
+    secret = getSecret();
+  } catch {
+    return { ok: false };
+  }
+
+  const parts = cookieValue.split('.');
+  if (parts.length !== 2) return { ok: false };
+  const [payload, sig] = parts;
+
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return { ok: false };
+  }
+
+  if (!claims || typeof claims !== 'object') return { ok: false };
+  const record = claims as Partial<RecoveryProofClaims>;
+  if (
+    typeof record.token !== 'string' ||
+    !/^[0-9a-f]{48}$/.test(record.token) ||
+    typeof record.userId !== 'string' ||
+    !record.userId ||
+    record.userId.length > 128 ||
+    typeof record.sessionId !== 'string' ||
+    !record.sessionId ||
+    record.sessionId.length > 128 ||
+    typeof record.exp !== 'number' ||
+    !Number.isFinite(record.exp)
+  ) {
+    return { ok: false };
+  }
+
+  if (record.purpose !== RECOVERY_PROOF_PURPOSE) return { ok: false };
+  if (record.exp <= Math.floor(Date.now() / 1000)) return { ok: false };
+  if (!safeEqual(sig, sign(payload, secret))) return { ok: false };
+  if (!safeEqual(record.userId, expected.userId)) return { ok: false };
+  if (!safeEqual(record.sessionId, expected.sessionId)) return { ok: false };
+
+  return {
+    ok: true,
+    claims: {
+      token: record.token,
+      userId: record.userId,
+      sessionId: record.sessionId,
+      purpose: RECOVERY_PROOF_PURPOSE,
+      exp: record.exp,
+    },
+  };
+}
+
+export function isRecoveryProofPresent(cookies: {
+  get(name: string): { value: string } | undefined;
+}): boolean {
   const cookie = cookies.get(RECOVERY_PROOF_COOKIE);
-  return Boolean(cookie && cookie.value.length >= 32);
+  return Boolean(cookie && cookie.value.length > 0);
 }

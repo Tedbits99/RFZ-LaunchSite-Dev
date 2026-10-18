@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin, getConfirmationUrl } from '@/lib/authRedirect';
 import { newRecoveryProofCookie } from '@/lib/recoveryProof';
+import type { Session } from '@supabase/supabase-js';
 
 type ConfirmationStatus = 'success' | 'pending' | 'restricted' | 'invalid' | 'error';
 
@@ -79,10 +80,24 @@ export async function GET(request: NextRequest) {
       const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
       if (recoveryUserError || !recoveryUser.user) return redirectToResetPassword(origin);
 
-      const res = redirectToResetPassword(origin);
-      const proof = newRecoveryProofCookie();
-      res.cookies.set(proof.name, proof.value, proof.options);
-      return res;
+      // The proof is signed over the verified recovery user ID and the
+      // recovery session ID so the reset endpoint can re-verify both. If
+      // signing fails (e.g. the HMAC secret is missing) no proof is issued.
+      const session = (recoveryUser.data as { session?: Session | null } | null)?.session;
+      console.log('DEBUG-ROUTE session:', JSON.stringify(session), 'data:', JSON.stringify(recoveryUser.data).slice(0, 120));
+      if (!session?.session_id) return redirectToResetPassword(origin);
+
+      try {
+        const res = redirectToResetPassword(origin);
+        const proof = newRecoveryProofCookie({
+          userId: recoveryUser.user.id,
+          sessionId: session.session_id,
+        });
+        res.cookies.set(proof.name, proof.value, proof.options);
+        return res;
+      } catch {
+        return redirectToResetPassword(origin);
+      }
     }
 
     const { error: exchangeError } = await supabase!.auth.exchangeCodeForSession(code, exchangeOptions);
@@ -105,7 +120,8 @@ export async function GET(request: NextRequest) {
     }
     if (result.status === 'active' && result.error === null) return redirectToConfirmation('success');
     return redirectToConfirmation('error');
-  } catch {
+  } catch (e) {
+    console.log('DEBUG-CATCH:', String(e).slice(0, 400));
     return redirectToConfirmation('error');
   }
 }

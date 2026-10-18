@@ -22,40 +22,27 @@ export default function ResetPasswordPage() {
     const password = String(new FormData(event.currentTarget).get('password') ?? '');
 
     try {
-      const { createRecoveryBrowserClient } = await import('@/lib/authSessionBrowserClients');
-      const supabase = createRecoveryBrowserClient();
+      // The password change happens server-side: the endpoint re-verifies the
+      // recovery-namespace session and the signed HttpOnly proof cookie. The
+      // browser never calls the Auth provider directly and never touches the
+      // proof cookie itself.
+      const response = await fetch('/auth/reset-password/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+        credentials: 'same-origin',
+      });
 
-      // Only a session in the recovery namespace — established by a genuine
-      // email-link exchange in the callback — can authorize a password update.
-      // Default, customer and admin sessions live in separate cookies and are
-      // invisible to this client.
-      const { data: recoveryData, error: sessionError } = await supabase.auth.getSession();
-      const recoverySession = recoveryData?.session;
-      if (sessionError || !recoverySession) {
-        setError(GENERIC_INVALID);
-        setState('error');
+      if (response.ok) {
+        setState('success');
         return;
       }
-
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) {
+      if (response.status === 503) {
+        setError(GENERIC_503);
+      } else {
         setError(GENERIC_INVALID);
-        setState('error');
-        return;
       }
-
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) {
-        setError(GENERIC_INVALID);
-        setState('error');
-        return;
-      }
-
-      // Sign out ONLY the recovery namespace; customer/admin/default sessions
-      // live in other cookies and remain untouched.
-      await supabase.auth.signOut({ scope: 'local' });
-      document.cookie = 'rfz-recovery-proof=; Max-Age=0; Path=/auth/reset-password; Secure; SameSite=Lax';
-      setState('success');
+      setState('error');
     } catch {
       setError(GENERIC_503);
       setState('error');
