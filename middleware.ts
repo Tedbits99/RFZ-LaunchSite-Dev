@@ -48,18 +48,11 @@ function createNamespaceClient(
 }
 
 export async function middleware(req: NextRequest) {
-  // Must pass { request } so refreshed auth cookies are visible to the
-  // route handler / server component within the SAME request cycle.
-  // Without this, a token refreshed by middleware reaches the browser but
-  // the current request still carries the stale one, causing spurious
-  // 401 "Unauthorized." in requireAdmin().
-  let res = NextResponse.next({ request: req })
-
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !anonKey) return res
 
-  const defaultKey = defaultStorageKeyFromUrl(url)
+  const defaultKey = url ? defaultStorageKeyFromUrl(url) : null
+  if (!url || !anonKey) return NextResponse.next()
 
   // One namespace-specific client per known session cookie. Each only refreshes
   // when its own session (including chunked cookies) is present, so unrelated
@@ -79,6 +72,14 @@ export async function middleware(req: NextRequest) {
       // namespace's own client remains authoritative for its session.
     }
   }
+
+  if (requestCookieChanges.length === 0) return NextResponse.next()
+
+  // Build the response AFTER mutating req.cookies: NextResponse.next({ request })
+  // snapshots req.headers into x-middleware-request-* headers at creation time,
+  // so a response created before the refresh would forward the STALE cookie
+  // header to the downstream handler within the same request.
+  const res = NextResponse.next({ request: req })
 
   for (const { name, value, options } of requestCookieChanges) {
     res.cookies.set(name, value, options)

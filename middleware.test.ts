@@ -80,6 +80,13 @@ function makeRequest(cookieNames: string[]): NextRequest {
   return req;
 }
 
+// Reads the cookie header that the response forwards to the downstream
+// handler (x-middleware-request-cookie in Next.js 13.5) — the actual
+// framework contract for same-request cookie forwarding.
+function forwardedCookieHeader(res: NextResponse): string | null {
+  return res.headers.get('x-middleware-request-cookie');
+}
+
 describe('middleware session refresh', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -171,12 +178,79 @@ describe('middleware session refresh', () => {
     expect(res.cookies.get(`${CUSTOMER_KEY}.metadata`)?.value).toBe('m2');
   });
 
-  it('makes refreshed cookies visible to downstream request handling', async () => {
+  it('forwards the refreshed customer cookie to downstream request handling via the response headers', async () => {
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
     const req = makeRequest([`${CUSTOMER_KEY}.0`]);
-    await middleware(req);
+    const res = await middleware(req);
 
+    const forwarded = forwardedCookieHeader(res);
+    expect(forwarded).toContain(CUSTOMER_KEY);
+    expect(forwarded).toContain(`refreshed-${CUSTOMER_KEY}`);
+    // The stale chunk value must not survive in the forwarded header.
+    expect(forwarded).not.toContain('refreshed- ');
     expect(req.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
+  });
+
+  it('forwards new default, customer and admin cookies downstream when all three refresh', async () => {
+    pendingRefreshes.set(DEFAULT_KEY, refreshCookies(DEFAULT_KEY, ''));
+    pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
+    pendingRefreshes.set(ADMIN_KEY, refreshCookies(ADMIN_KEY, ''));
+    const res = await middleware(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
+
+    const forwarded = forwardedCookieHeader(res);
+    expect(forwarded).toContain(`refreshed-${DEFAULT_KEY}`);
+    expect(forwarded).toContain(`refreshed-${CUSTOMER_KEY}`);
+    expect(forwarded).toContain(`refreshed-${ADMIN_KEY}`);
+  });
+
+  it('forwards an unrelated request header downstream unchanged', async () => {
+    pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
+    const req = new NextRequest('https://example.test/account', {
+      method: 'GET',
+      headers: { 'x-custom-tracker': 'keep-me', cookie: `${CUSTOMER_KEY}.0=stale` },
+    });
+    const res = await middleware(req);
+
+    expect(res.headers.get('x-middleware-request-x-custom-tracker')).toBe('keep-me');
+    expect(forwardedCookieHeader(res)).toContain(`refreshed-${CUSTOMER_KEY}`);
+  });
+
+  it('keeps another namespace forwarded and Set-Cookie values when one namespace fails to refresh', async () => {
+    pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
+
+    // Make the admin namespace (the second client created) fail its refresh.
+    const baseImplementation = mocks.createServerClient.getMockImplementation()!;
+    mocks.createServerClient.mockImplementation((...args: unknown[]) => {
+      const options = args[2] as { cookieOptions?: { name?: string } };
+      if (options.cookieOptions?.name === ADMIN_KEY) {
+        return {
+          auth: {
+            getUser: vi.fn().mockRejectedValue(new Error('refresh failed')),
+          },
+        };
+      }
+      return baseImplementation(...(args as Parameters<typeof baseImplementation>));
+    });
+
+    const res = await middleware(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
+
+    expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
+    expect(res.cookies.get(ADMIN_KEY)).toBeUndefined();
+    const forwarded = forwardedCookieHeader(res);
+    expect(forwarded).toContain(`refreshed-${CUSTOMER_KEY}`);
+    // The failed admin namespace keeps its ORIGINAL cookie value downstream —
+    // it is neither refreshed nor erased.
+    expect(forwarded).toContain('rfz-admin-auth=value');
+  });
+
+  it('passes a request through unchanged when no session refresh occurs', async () => {
+    const res = await middleware(makeRequest([CUSTOMER_KEY]));
+
+    expect(mocks.createServerClient).toHaveBeenCalled(); // client created, but no refresh
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    expect(forwardedCookieHeader(res)).toBeNull();
+    const setCookie = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
+    expect(setCookie).toHaveLength(0);
   });
 
   it('does not create any Supabase client when no session cookie is present', async () => {
@@ -205,7 +279,7 @@ describe('middleware session refresh', () => {
 
     expect(clientsCalled()).toEqual([CUSTOMER_KEY]);
     expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
-    expect(req.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
+    expect(forwardedCookieHeader(res)).toContain(`refreshed-${CUSTOMER_KEY}`);
   });
 
   it('does not touch unrelated sessions when one namespace fails to refresh', async () => {
