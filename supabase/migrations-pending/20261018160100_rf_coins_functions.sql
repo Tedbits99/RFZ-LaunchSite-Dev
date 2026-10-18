@@ -24,12 +24,14 @@
      'topup:<id>'). Duplicate calls return success without re-crediting.
      Never credits for non-PENDING/failed/expired top-ups.
    - rf_coin_mark_topup_status(p_topup_id, p_status) — terminal status moves
-     (FAILED/EXPIRED/CANCELLED/REFUND_PENDING/REFUNDED). REFUNDED additionally
-     reverses previously credited coins+bonus exactly once via a bounded DEBIT
-     (ledger idem 'topup-reversal:<id>'). When the wallet no longer holds the
-     full credited amount (coins already spent), only the available balance is
-     reversed and the top-up moves to REFUND_PENDING for manual reconciliation
-     instead of silently crediting or failing the reversal.
+     (FAILED/EXPIRED/CANCELLED/REFUND_PENDING/REFUNDED). Refunds reverse the
+     credited coins+bonus with a bounded DEBIT that RESUMES earlier partial
+     reversals: rf_coin_topups.credited_total/reversed_total track the exact
+     original credit and cumulative reversal, the outstanding debt is always
+     credited_total - reversed_total, and each partial ledger entry carries a
+     distinct idempotency key ('topup-reversal:<id>:<cumulative>') so repeated
+     reconciliation never double-debits. Whatever cannot be reversed (coins
+     already spent) stays visible as REFUND_PENDING for manual handling.
    - rf_coin_settle_order_payment(p_order_id, p_user_id) — atomic full-wallet
      payment for a product order. Computes coins from the order's own
      total_cents and the CURRENT centavos_per_coin (never browser input),
@@ -209,7 +211,7 @@ BEGIN
 
   UPDATE rf_coin_topups
     SET status = 'PAID', provider_reference = COALESCE(p_provider_reference, provider_reference),
-        credited_at = now(), updated_at = now()
+        credited_at = now(), credited_total = v_total, updated_at = now()
     WHERE id = t.id;
 
   RETURN QUERY SELECT true, v_balance, NULL::text;
@@ -230,6 +232,7 @@ DECLARE
   v_balance bigint;
   v_total bigint;
   v_reversed bigint;
+  v_outstanding bigint;
 BEGIN
   IF p_status NOT IN ('FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED') THEN
     RETURN QUERY SELECT false, 'RF_COIN_INVALID_STATUS'::text; RETURN;
@@ -255,41 +258,55 @@ BEGIN
     RETURN QUERY SELECT true, NULL::text; RETURN;
   END IF;
 
-  IF p_status = 'REFUNDED' THEN
+  IF p_status IN ('REFUND_PENDING','REFUNDED') THEN
     -- Correct accounting: reverse the originally credited amount (coins +
-    -- bonus) with a DEBIT, bounded by what the wallet still holds. Coins
-    -- already spent are never clawed back into a negative balance; a partial
-    -- reversal parks the top-up in REFUND_PENDING for manual reconciliation.
+    -- bonus) with a DEBIT, resuming any earlier partial reversal. The
+    -- outstanding debt is credited_total - reversed_total, so repeated
+    -- reconciliation can never double-debit. Coins already spent are not
+    -- clawed back into a negative balance; whatever cannot be reversed right
+    -- now keeps the top-up in REFUND_PENDING for controlled manual handling.
+    v_total := COALESCE(NULLIF(t.credited_total, 0), t.coins::bigint + t.bonus_coins::bigint);
+    v_outstanding := v_total - t.reversed_total;
+    IF v_outstanding <= 0 THEN
+      -- Debt already fully settled by earlier reversals: just close it out.
+      UPDATE rf_coin_topups SET status = 'REFUNDED', updated_at = now() WHERE id = t.id;
+      RETURN QUERY SELECT true, NULL::text; RETURN;
+    END IF;
+
     SELECT * INTO v_wallet FROM rf_coin_wallets WHERE user_id = t.user_id FOR UPDATE;
-    IF v_wallet IS NULL THEN
+    IF v_wallet IS NULL OR v_wallet.balance_coins <= 0 THEN
       UPDATE rf_coin_topups SET status = 'REFUND_PENDING', updated_at = now() WHERE id = t.id;
       RETURN QUERY SELECT false, 'RF_COIN_REVERSAL_INCOMPLETE'::text; RETURN;
     END IF;
-    v_total := t.coins::bigint + t.bonus_coins::bigint;
-    v_reversed := least(v_total, v_wallet.balance_coins);
-    IF v_reversed <= 0 THEN
-      UPDATE rf_coin_topups SET status = 'REFUND_PENDING', updated_at = now() WHERE id = t.id;
-      RETURN QUERY SELECT false, 'RF_COIN_REVERSAL_INCOMPLETE'::text; RETURN;
-    END IF;
+    v_reversed := least(v_outstanding, v_wallet.balance_coins);
     v_balance := v_wallet.balance_coins - v_reversed;
+
     UPDATE rf_coin_wallets
       SET balance_coins = v_balance,
           total_reversed_coins = total_reversed_coins + v_reversed,
           updated_at = now()
       WHERE user_id = t.user_id;
+
     INSERT INTO rf_coin_ledger (
       wallet_user_id, direction, amount_coins, kind, balance_after,
       reason, reference_type, reference_id, actor_type, idempotency_key)
     VALUES (
       t.user_id, 'debit', v_reversed, 'chargeback_reversal', v_balance,
       'RF Coins purchase refund reversal', 'rf_coin_topup', t.id::text, 'system',
-      'topup-reversal:' || t.id::text);
-    IF v_reversed < v_total THEN
-      -- Could not reverse in full: leave in REFUND_PENDING for an admin to
-      -- reconcile manually. Never credit the customer for a refund.
-      UPDATE rf_coin_topups SET status = 'REFUND_PENDING', updated_at = now() WHERE id = t.id;
+      'topup-reversal:' || t.id::text || ':' || (t.reversed_total + v_reversed)::text);
+
+    UPDATE rf_coin_topups
+      SET reversed_total = reversed_total + v_reversed,
+          status = CASE WHEN t.reversed_total + v_reversed >= v_total
+                    THEN 'REFUNDED' ELSE 'REFUND_PENDING' END,
+          provider_reference = COALESCE(p_provider_reference, provider_reference),
+          updated_at = now()
+      WHERE id = t.id;
+
+    IF t.reversed_total + v_reversed < v_total THEN
       RETURN QUERY SELECT false, 'RF_COIN_REVERSAL_INCOMPLETE'::text; RETURN;
     END IF;
+    RETURN QUERY SELECT true, NULL::text; RETURN;
   END IF;
 
   UPDATE rf_coin_topups
@@ -316,6 +333,8 @@ DECLARE
   v_wallet rf_coin_wallets;
   v_balance bigint;
   v_order_status text;
+  v_order_method text;
+  v_order_payment text;
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_FORBIDDEN'::text; RETURN;
@@ -329,16 +348,23 @@ BEGIN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_SPENDING_DISABLED'::text; RETURN;
   END IF;
 
-  SELECT id, total_cents, customer_user_id, status INTO ord
+  SELECT id, total_cents, customer_user_id, status, payment_method, payment_status INTO ord
     FROM orders WHERE id = p_order_id;
   IF NOT FOUND THEN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_ORDER_NOT_FOUND'::text; RETURN;
   END IF;
-  IF ord.status <> 'WAITING_PAYMENT' THEN
-    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_ORDER_NOT_WAITING'::text; RETURN;
+  -- Cross-method protection: only orders created for the RF Coins wallet
+  -- method can be settled here, and only while still awaiting payment. A
+  -- PayMongo/gcash/manual order must never be settled from wallet balance.
+  IF ord.payment_method IS NULL OR ord.payment_method <> 'rf_coin_wallet' THEN
+    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_ORDER_WRONG_METHOD'::text; RETURN;
+  END IF;
+  IF ord.customer_user_id IS NULL OR ord.customer_user_id <> p_user_id THEN
+    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_FORBIDDEN'::text; RETURN;
   END IF;
   -- Idempotency: a second settlement attempt for the same order returns the
-  -- original result instead of double-debiting.
+  -- original result instead of double-debiting. Checked before the waiting
+  -- pre-check because an already-settled order is no longer WAITING_PAYMENT.
   IF EXISTS (
     SELECT 1 FROM rf_coin_ledger WHERE idempotency_key = 'order:' || ord.id::text
   ) THEN
@@ -346,8 +372,8 @@ BEGIN
       FROM rf_coin_ledger WHERE idempotency_key = 'order:' || ord.id::text;
     RETURN QUERY SELECT v_coins, v_balance, NULL::text; RETURN;
   END IF;
-  IF ord.customer_user_id IS NULL OR ord.customer_user_id <> p_user_id THEN
-    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_FORBIDDEN'::text; RETURN;
+  IF ord.status <> 'WAITING_PAYMENT' OR COALESCE(ord.payment_status, 'UNPAID') NOT IN ('UNPAID','PENDING') THEN
+    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_ORDER_NOT_WAITING'::text; RETURN;
   END IF;
 
   -- Coin price derived from the order's own stored total (server authority).
@@ -363,9 +389,13 @@ BEGIN
   v_balance := v_wallet.balance_coins - v_coins;
 
   -- Lock the order row and settle + verify in one atomic block. Re-check
-  -- status under lock so a concurrent payment attempt cannot slip through.
-  SELECT status INTO v_order_status FROM orders WHERE id = ord.id FOR UPDATE;
-  IF v_order_status <> 'WAITING_PAYMENT' THEN
+  -- method/status under lock so a concurrent PayMongo settlement or a second
+  -- RF Coins attempt cannot slip through between the pre-checks and here.
+  SELECT status, payment_method, payment_status INTO v_order_status, v_order_method, v_order_payment
+    FROM orders WHERE id = ord.id FOR UPDATE;
+  IF v_order_method <> 'rf_coin_wallet'
+     OR v_order_status <> 'WAITING_PAYMENT'
+     OR COALESCE(v_order_payment, 'UNPAID') NOT IN ('UNPAID','PENDING') THEN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_ORDER_NOT_WAITING'::text; RETURN;
   END IF;
 
@@ -825,6 +855,20 @@ REVOKE ALL ON FUNCTION rf_coin_upsert_package(uuid, text, integer, integer, inte
 -- Customer-callable functions (identity checked against auth.uid() inside).
 GRANT EXECUTE ON FUNCTION rf_coin_create_topup(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment(uuid, uuid) TO authenticated;
--- All other functions stay revoked from PUBLIC: they run only via the service
--- role (webhook, workers) or from admin API routes with the admin's own
--- authenticated JWT (the functions verify the SUPER_ADMIN role internally).
+
+-- Admin mutation RPCs: callable by authenticated admins whose JWT the API
+-- route forwards. Each function independently re-verifies the SUPER_ADMIN
+-- role, active status and caller identity via rf_coin_assert_super_admin(),
+-- so the grant alone confers no privilege.
+GRANT EXECUTE ON FUNCTION rf_coin_request_adjustment(uuid, text, integer, text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION rf_coin_decide_adjustment(uuid, boolean, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION rf_coin_set_settings(boolean, boolean, boolean, integer, integer, integer) TO authenticated;
+GRANT EXECUTE ON FUNCTION rf_coin_upsert_package(uuid, text, integer, integer, integer, boolean, integer) TO authenticated;
+
+-- Webhook settlement/status RPCs: service role only (payment-webhook Edge
+-- Function). Never callable directly by any browser identity.
+GRANT EXECUTE ON FUNCTION rf_coin_credit_paid_topup(uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION rf_coin_mark_topup_status(uuid, text, text) TO service_role;
+-- Internal helpers + the order-release reversal (admin operational tooling
+-- through the service-role client only) stay inaccessible to direct calls.
+GRANT EXECUTE ON FUNCTION rf_coin_release_order_payment(uuid, text) TO service_role;

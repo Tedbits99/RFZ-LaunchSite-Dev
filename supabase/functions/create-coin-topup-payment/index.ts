@@ -256,11 +256,11 @@ Deno.serve(async (req: Request) => {
       idempotency_key: idempotencyKey,
       provider_name: "paymongo",
       action: "create",
-      method_key: "paymongo_qrph",
       amount_cents: priceCents,
       status: "pending",
       provider_reference: intentId,
       expires_at: expiresAt,
+      metadata: { method_key: "paymongo_qrph", purpose: "rf_coin_topup" },
     });
     if (txInsertError) {
       console.error("payment_transactions insert failed", txInsertError);

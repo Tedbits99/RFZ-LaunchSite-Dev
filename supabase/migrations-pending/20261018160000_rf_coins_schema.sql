@@ -52,6 +52,9 @@
        (snapshotted at creation; immune to later package/price changes)
      - status CHECK ('PENDING','PAID','FAILED','EXPIRED','CANCELLED',
        'REFUND_PENDING','REFUNDED')
+     - credited_total / reversed_total: exact original credit and cumulative
+       reversal amounts, so partial refunds never double-debit and the
+       outstanding debt stays explicit for controlled manual handling
      - provider text DEFAULT 'paymongo', provider_reference text NULL,
        idempotency_key text UNIQUE, credited_at timestamptz NULL
      - Unique partial index on provider_reference WHERE NOT NULL.
@@ -164,6 +167,10 @@ CREATE TRIGGER rf_coin_ledger_no_mutation
   BEFORE UPDATE OR DELETE ON rf_coin_ledger
   FOR EACH ROW EXECUTE FUNCTION rf_coin_ledger_append_only();
 
+-- Lock down the trigger helper: SECURITY DEFINER functions default to
+-- EXECUTE for PUBLIC, which would let any client run it directly.
+REVOKE ALL ON FUNCTION rf_coin_ledger_append_only() FROM PUBLIC;
+
 -- ============ PACKAGES ============
 CREATE TABLE IF NOT EXISTS rf_coin_packages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -194,6 +201,13 @@ CREATE TABLE IF NOT EXISTS rf_coin_topups (
   provider_reference text,
   idempotency_key text NOT NULL UNIQUE,
   credited_at timestamptz,
+  -- Partial-refund debt tracking: exactly how many coins were originally
+  -- credited (coins + bonus) and how many have been reversed so far. The
+  -- outstanding debt is credited_total - reversed_total; repeated
+  -- reconciliation can resume an unfinished reversal without double-debiting.
+  credited_total bigint NOT NULL DEFAULT 0 CHECK (credited_total >= 0),
+  reversed_total bigint NOT NULL DEFAULT 0 CHECK (reversed_total >= 0),
+  CHECK (reversed_total <= credited_total),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -261,9 +275,17 @@ CREATE TRIGGER rf_coin_audit_no_mutation
   BEFORE UPDATE OR DELETE ON rf_coin_admin_audit
   FOR EACH ROW EXECUTE FUNCTION rf_coin_audit_append_only();
 
+-- Lock down the trigger helper: SECURITY DEFINER functions default to
+-- EXECUTE for PUBLIC, which would let any client run it directly.
+REVOKE ALL ON FUNCTION rf_coin_audit_append_only() FROM PUBLIC;
+
 -- ============ payment_transactions compatibility for coin top-ups ============
--- order_id stays required for all existing order flows; new top-up events
--- use rf_coin_topup_id instead. Both nullable together for top-up rows.
+-- The live table has: id, order_id, idempotency_key, provider_name,
+-- provider_reference, action, status, amount_cents, currency, checkout_url,
+-- webhook_payload, error_message, metadata, created_at, updated_at,
+-- qr_image_url, expires_at, provider_payment_id, webhook_event_id.
+-- Top-up payment events reuse those columns; the order link becomes the new
+-- nullable rf_coin_topup_id (order_id itself stays untouched for order rows).
 ALTER TABLE payment_transactions ALTER COLUMN order_id DROP NOT NULL;
 ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS rf_coin_topup_id
   uuid REFERENCES rf_coin_topups(id) ON DELETE SET NULL;
@@ -313,6 +335,15 @@ CREATE POLICY "rf_coin_adjust_select_own" ON rf_coin_adjustment_requests
 
 -- Settings and audit: NO client policies (fail closed; RLS blocks everyone).
 -- Admin UI reads these through the existing service-role admin client.
+
+-- Deterministic client read surface: SELECT is granted to browser roles the
+-- same way the platform's default privileges do on the live project; row
+-- visibility is decided solely by the policies above. Settings and audit
+-- have no policies, so any client SELECT there returns zero rows.
+GRANT SELECT ON rf_coin_settings, rf_coin_wallets, rf_coin_ledger,
+  rf_coin_packages, rf_coin_topups, rf_coin_adjustment_requests,
+  rf_coin_admin_audit
+  TO anon, authenticated;
 
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON rf_coin_settings,
   rf_coin_wallets, rf_coin_ledger, rf_coin_packages, rf_coin_topups,

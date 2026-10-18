@@ -134,6 +134,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: friendly }, { status: 400 });
     }
 
+    // Fire-and-forget: push the paid order into the existing idempotent
+    // fulfillment pipeline (atomic complete_fulfillment claim prevents
+    // duplicate supplier orders even if this or a later retry runs again).
+    // Mirrors the webhook's triggerFulfillment for PayMongo-paid orders; a
+    // coin-paid order must never sit in PAYMENT_VERIFIED waiting for a worker.
+    const { startFulfillment } = await import('@/lib/suppliers/fulfillment');
+    startFulfillment(row.out_order_id).catch((fulfillError) => {
+      console.error('coin checkout: fulfillment scheduling failed (order stays recoverable via admin retry)', fulfillError);
+    });
+
     const response = NextResponse.json({
       reference: row.out_reference,
       totalCents: row.out_total_cents,

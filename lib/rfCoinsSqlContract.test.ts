@@ -24,7 +24,7 @@ describe('rf_coin_settle_order_payment', () => {
   const fn = extractFunction(functionsSql, 'rf_coin_settle_order_payment');
 
   it('locks the order row and re-checks status under lock before debiting', () => {
-    expect(fn).toMatch(/SELECT status INTO v_order_status FROM orders WHERE id = ord\.id FOR UPDATE/);
+    expect(fn).toMatch(/SELECT status, payment_method, payment_status INTO v_order_status, v_order_method, v_order_payment\n?\s*FROM orders WHERE id = ord\.id FOR UPDATE/);
     const lockIdx = fn.indexOf('FOR UPDATE');
     const debitIdx = fn.indexOf('UPDATE rf_coin_wallets');
     expect(lockIdx).toBeGreaterThan(-1);
@@ -61,17 +61,17 @@ describe('rf_coin_mark_topup_status refund reversal', () => {
   const fn = extractFunction(functionsSql, 'rf_coin_mark_topup_status');
 
   it('reverses refunds as a DEBIT, never a credit', () => {
-    const refundBlock = fn.slice(fn.indexOf("IF p_status = 'REFUNDED' THEN"));
+    const refundBlock = fn.slice(fn.indexOf("IF p_status IN ('REFUND_PENDING','REFUNDED') THEN"));
     expect(refundBlock).toMatch(/'debit', v_reversed/);
     expect(refundBlock).not.toMatch(/'credit', t\.coins/);
   });
 
   it('includes bonus coins in the reversal amount', () => {
-    expect(fn).toMatch(/v_total := t\.coins::bigint \+ t\.bonus_coins::bigint/);
+    expect(fn).toMatch(/v_total := COALESCE\(NULLIF\(t\.credited_total, 0\), t\.coins::bigint \+ t\.bonus_coins::bigint\)/);
   });
 
   it('bounds the reversal by the remaining balance (no negative wallets)', () => {
-    expect(fn).toMatch(/least\(v_total, v_wallet\.balance_coins\)/);
+    expect(fn).toMatch(/least\(v_outstanding, v_wallet\.balance_coins\)/);
   });
 
   it('parks partial reversals in REFUND_PENDING instead of crediting', () => {
@@ -148,10 +148,15 @@ describe('grants and schema', () => {
     }
   });
 
-  it('grants EXECUTE only to the two customer-callable functions', () => {
+  it('grants EXECUTE to customer-callable functions; admin RPCs gated inside; webhook RPCs to service_role', () => {
     expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_create_topup\(uuid, uuid\) TO authenticated/);
     expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment\(uuid, uuid\) TO authenticated/);
-    expect(functionsSql).not.toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_request_adjustment/);
+    // Admin RPCs are granted to authenticated but each independently verifies
+    // SUPER_ADMIN internally; webhook RPCs go to service_role only.
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_request_adjustment\(uuid, text, integer, text, text, text\) TO authenticated/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_credit_paid_topup\(uuid, text\) TO service_role/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_mark_topup_status\(uuid, text, text\) TO service_role/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_release_order_payment\(uuid, text\) TO service_role/);
     expect(functionsSql).not.toMatch(/GRANT ALL ON/);
   });
 
