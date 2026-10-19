@@ -1,0 +1,118 @@
+RUNFAZONE.COM — FAST DEVELOPMENT, TESTING & LIVE INTEGRATION MODE
+
+PERMANENT OWNER INSTRUCTION
+
+PRIMARY GOAL:
+Accelerate RunFazone.com development through direct implementation, efficient testing, automatic error correction, and integration into the existing production website.
+
+DEVELOPMENT ENVIRONMENT:
+Use ONLY the existing RunFazone.com project currently open in Bolt.new.
+
+Do NOT create or inspect external workspaces, cloned repositories, temporary projects, or unrelated GitHub code.
+
+DEVELOPMENT WORKFLOW:
+
+PHASE 1 — DIRECT IMPLEMENTATION
+
+1. Understand the specific task.
+2. Read ONLY relevant files in the existing Bolt project.
+3. Implement the required changes immediately.
+4. Reuse existing components, APIs, database functions, and architecture.
+5. Avoid unnecessary rewrites and unrelated refactoring.
+
+PHASE 2 — TESTING
+
+After implementing a change:
+
+1. Run focused tests for the changed functionality.
+2. If a test fails, identify the actual root cause.
+3. Fix the error directly in the relevant source code.
+4. Rerun affected tests until they pass.
+5. Run TypeScript validation.
+6. Run lint.
+7. Run the complete test suite and production build before publishing.
+
+Do not repeat expensive checks unnecessarily when no relevant code has changed.
+
+PHASE 3 — AUTOMATIC ERROR FIXING
+
+If a coding, TypeScript, lint, test, or build error occurs:
+
+- Investigate the exact failure.
+- Apply the smallest compatible correction.
+- Rerun the relevant verification.
+- Continue automatically.
+
+Do NOT stop after the first ordinary coding error to ask the owner for instructions.
+
+Do NOT report PASS while required tests or the build are failing.
+
+If blocked by missing permissions, credentials, an unsafe migration, or a genuine production risk, STOP and report the specific blocker.
+
+PHASE 4 — INTEGRATION
+
+When all required checks pass:
+
+1. Integrate the completed changes into the CURRENT existing Bolt project code.
+2. Ensure modified components work with existing RunFazone functionality.
+3. Preserve PayMongo QRPh, FazerCards, customer authentication, orders, admin dashboard, and RF Coins security.
+4. Use only the existing Bolt-supported source synchronization workflow.
+5. Do not create a replacement application or development environment.
+
+PHASE 5 — LIVE PUBLISHING
+
+The owner has already authorized the current website-code publishing task, including the tested RF Coins admin refund and retry fixes.
+
+For THAT approved task only:
+
+- Publish the validated source to the EXISTING RunFazone production website.
+- Do not create a new deployment target or unrelated domain.
+- Verify the deployment actually succeeded.
+- Check that key existing customer functionality remains available.
+- Confirm that RF Coins remains disabled.
+
+For future tasks, request fresh authorization before additional production publishing or production configuration changes.
+
+PRODUCTION SAFETY LIMITS:
+
+The current publishing approval does NOT authorize:
+- New live database migrations
+- Unapproved production database writes
+- RF Coins activation
+- Changing payment configurations
+- Real transactions or refunds
+- Supplier API transactions
+- Cron activation
+- Secret changes
+- Unrelated Edge Function deployments
+
+EFFICIENCY RULES:
+
+- One assigned task = one continuous implementation-and-verification workflow.
+- Do not repeatedly inspect the project.
+- Do not announce identical plans multiple times.
+- Do not interrupt routine coding for unnecessary confirmations.
+- Do not run tests without acting on meaningful failures.
+- Do not invent PASS results, deployment success, or code changes.
+- Do not silently skip failing tests.
+- Do not claim a site is live without deployment confirmation.
+- Prioritize safe implementation speed and working integrations.
+
+FINAL REPORT ONLY AFTER WORK IS COMPLETE:
+
+TASK:
+FILES CHANGED:
+FOCUSED TESTS:
+FULL TESTS:
+TYPESCRIPT:
+LINT:
+BUILD:
+ERRORS FOUND AND FIXED:
+INTEGRATION RESULT:
+PRODUCTION PUBLISH STATUS:
+LIVE VERIFICATION:
+RF COINS FLAGS:
+REMAINING BLOCKERS:
+FINAL STATUS: PASS / BLOCKED
+
+START THE ASSIGNED DEVELOPMENT TASK DIRECTLY AND CONTINUE THROUGH TESTING, FIXING, AND AUTHORIZED PUBLISHING WITHOUT UNNECESSARY DELAYS.
