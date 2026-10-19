@@ -1,17 +1,28 @@
 # Fresh Supabase backend manifest
 
 This is a repository-derived preparation artifact for a new development
-project. It is not evidence of a deployed Supabase project. The repository
-currently exposes no callable Supabase MCP tools in this Codex session, so
-remote identity, ownership, quota, region, billing, applied migrations, and
-permissions remain unverified.
+project. It is not evidence of a deployed Supabase project. A later
+authenticated, project-scoped Supabase MCP inspection verified database
+metadata for project reference `ketdhcmwowzztcdlmris`; control-plane
+ownership, organization, region, quota and billing remain unexposed by the
+available MCP tools.
 
 ## MCP and provisioning gate
 
-Current discovery result: GitHub MCP tools are available, but no Supabase
-organization/project, database, schema, migration, Edge Function, secrets,
-quota, billing, or region tool is callable. No Supabase project was created,
-linked, authenticated, or modified.
+Current discovery result: the Supabase MCP server is registered and OAuth
+authenticated with the project-scoped URL for `ketdhcmwowzztcdlmris`.
+Read-only calls successfully returned the project URL, tables, migrations,
+extensions, branches, Edge Function list, catalog metadata and advisors. The
+MCP tool set also exposes write-capable operations; this batch used none of
+them, so read-only handling is procedural rather than a claim that the server
+enforces a read-only token.
+
+Verified project URL: `https://ketdhcmwowzztcdlmris.supabase.co`.
+The project is identifiable as an existing RunFazone backend because its
+schema contains the RunFazone catalog tables and its applied migration names
+are `runfazone_*`. Ownership, organization, region, plan, quota and
+environment designation were not returned by the available project-scoped
+tools and must not be inferred from the reference or names.
 
 Provisioning requires owner confirmation of all of the following through an
 actual Supabase control-plane connection:
@@ -25,9 +36,56 @@ actual Supabase control-plane connection:
 Until then, expected monthly cost is **unknown / not quoted**. Do not infer
 free-plan eligibility from repository files or from successful MCP login.
 
+## Live hosted inventory and migration reconciliation
+
+The authenticated read-only inspection returned 13 public tables, all with
+RLS enabled; 48 public constraints; 30 public indexes; no public views or
+materialized views; five public routines; 13 public policies; no public
+triggers; no Realtime publication members; and no deployed Edge Functions.
+The `auth`, `storage` and `vault` schemas exist. No storage bucket or storage
+policy metadata was returned. The database catalog did not expose Auth
+provider configuration, backup/PITR settings, or organization/project
+ownership metadata.
+
+The hosted migration ledger contains exactly these 11 versions, all matching
+the first 11 logical migrations in the active local tree:
+
+`20260927062024`, `20260927063133`, `20260927064634`, `20260928042134`,
+`20260928051223`, `20260928055204`, `20260928055236`, `20260928060956`,
+`20260928061342`, `20260928062007`, `20260928062039`.
+
+The remote tool returned version/name metadata but not checksums, so content
+identity is not proven. The active local tree contains 115 SQL files: 11
+applied matches and 104 locally defined, unrecorded candidates. It also has
+two pending RF Coins files and 13 archived duplicate copies. The unrecorded
+set includes the receipt/reconciliation, supplier, security, and RF Coins
+families; their absence from the hosted ledger is not permission to apply
+them. No remote-only version was identified from the returned ledger.
+
+The default `main` branch is reported as `MIGRATIONS_FAILED`; its preview
+status is `ACTIVE_HEALTHY`. The available branch metadata and read-only logs
+did not identify a failed migration version or machine-readable failure
+message. The primary database answered catalog queries, but complete branch
+health and partial-application state remain unverified. No reset, repair or
+hosted migration was attempted.
+
+Security advisors reported three RLS-enabled public tables without policies:
+`payment_submissions`, `voucher_usages` and `vouchers`. They also reported
+five public `SECURITY DEFINER` routines executable by `anon` and
+`authenticated`, including the legacy admin status/game routines and
+`rls_auto_enable`, plus disabled leaked-password protection. These are live
+findings, not fixes applied by this audit.
+
+No `cron` or `net` schema was present in the catalog, no Realtime members were
+reported, and the Edge Function list was empty. The installed extension
+metadata included `supabase_vault`, `pgcrypto`, `pg_stat_statements`,
+`uuid-ossp` and `plpgsql`; `pg_cron` and `pg_net` were listed as available but
+not installed. No outbound target or secret value was retrieved.
+
 ## Local migration classification
 
-The local tree contains 115 SQL migration files. All are classified as
+The local tree contains 115 active SQL migration files. All beyond the 11
+verified hosted matches are classified as
 `local-candidate` only; none is classified as remotely applied or pending
 without Supabase migration-history evidence.
 
