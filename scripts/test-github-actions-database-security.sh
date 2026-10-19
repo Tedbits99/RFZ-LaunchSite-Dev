@@ -473,7 +473,9 @@ psql() {
 }
 echo "Applying the isolated migration baseline..."
 if [ "$upgrade_mode" = true ]; then
+  echo "LEGACY_UPGRADE_PHASE=baseline-reset"
   supabase_local db reset
+  echo "LEGACY_UPGRADE_PHASE=baseline-reset-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --command "DO \$\$ BEGIN
       IF (SELECT count(*) FROM supabase_migrations.schema_migrations) <> 11 THEN
@@ -505,6 +507,7 @@ if [ "$upgrade_mode" = true ]; then
         ;;
     esac
     source_migration="$project_root/supabase/migrations/$migration_name"
+    echo "LEGACY_UPGRADE_CANDIDATE=$migration_name"
     [ -f "$source_migration" ] || {
       echo "ERROR: Canonical upgrade migration is missing: $migration_name" >&2
       exit 13
@@ -521,7 +524,9 @@ if [ "$upgrade_mode" = true ]; then
     echo "ERROR: Expected 85 canonical post-baseline migrations; found $upgrade_count." >&2
     exit 13
   fi
+  echo "LEGACY_UPGRADE_PHASE=canonical-selection-complete count=$upgrade_count"
   supabase_local migration up
+  echo "LEGACY_UPGRADE_PHASE=canonical-apply-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --file supabase/tests/database/existing-schema-upgrade.sql
   # A second migration-up must be a no-op. This is separate from db reset so
