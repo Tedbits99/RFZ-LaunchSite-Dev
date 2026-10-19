@@ -102,7 +102,7 @@ jobs:
       - name: Install Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: v1.46.3
 
       - name: Check reconciliation Edge Functions
         run: |
