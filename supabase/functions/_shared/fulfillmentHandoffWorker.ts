@@ -3,8 +3,16 @@
 // served by multiple routes (the platform router failed to register the
 // dedicated slug). Behavior is identical to the reviewed original.
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { hasValidReconciliationSecret } from "./reconciliationSecurity.ts";
+
+// Keep the shared worker compatible with the untyped service-role clients
+// created by Edge Functions. The default generic parameters in recent
+// supabase-js releases infer an unusable `unknown` schema here, even though
+// the runtime client is intentionally created without generated database
+// types. This is a type-only alias; it does not alter the client or its
+// authorization behavior.
+type EdgeSupabaseClient = SupabaseClient<any>;
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,7 +83,7 @@ async function fazercardsCreateOrder(
 // payment-webhook triggerFulfillment: gate -> atomic claim -> mapping -> idempotent
 // supplier transaction -> supplier call -> recorded outcome.
 async function runFulfillmentForOrder(
-  supabase: ReturnType<typeof createClient>,
+  supabase: EdgeSupabaseClient,
   orderId: string,
 ): Promise<{ success: boolean; error: string | null }> {
   try {
@@ -245,7 +253,7 @@ async function runFulfillmentForOrder(
  * when the secret is missing or unreadable (callers must then fail closed).
  */
 export async function getFulfillmentHandoffSecret(
-  db: ReturnType<typeof createClient>,
+  db: EdgeSupabaseClient,
 ): Promise<string | null> {
   const { data: secretRow, error } = await db
     .from("_cron_secrets")
@@ -272,7 +280,7 @@ export function isAuthorizedFulfillmentHandoffRequest(
  * fulfillment pipeline. Identical to the original worker's main loop.
  */
 export async function processFulfillmentHandoffBatch(
-  db: ReturnType<typeof createClient>,
+  db: EdgeSupabaseClient,
 ): Promise<Response> {
   const { data: claimed, error: claimError } = await db.rpc("rf_coin_claim_fulfillment_handoffs", {
     p_limit: CLAIM_BATCH_LIMIT,
