@@ -27,3 +27,6 @@ verify_jwt = false
 
 [functions.fulfillment-handoff]
 verify_jwt = false
+
+[functions.fulfillment-handoff-v2]
+verify_jwt = false
