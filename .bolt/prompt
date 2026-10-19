@@ -1,1 +1,53 @@
-Inspect briefly → Implement related features → Fix errors → Run tests → Final report
+PERMANENT OWNER RULE — HIGHEST DEVELOPMENT PRIORITY
+
+Work EXCLUSIVELY inside the EXISTING RunFazone.com project currently open in Bolt.new.
+
+The current Bolt project source code and its connected Bolt Database are the ONLY development environment.
+
+STRICT RULES:
+
+1. NO external workspaces.
+2. NO inspection of external GitHub repositories.
+3. NO separate project directories or cloned repositories.
+4. NO temporary development projects.
+5. NO unrelated architecture or workspace exploration.
+6. NO repetitive project-state or working-directory inspections.
+7. NO switching to other coding agents or environments.
+8. NO rebuilding features that already exist.
+
+When I assign a task:
+
+- Open only the relevant existing files inside this Bolt project.
+- Make the necessary compatible code changes directly.
+- Run focused tests, then required project checks.
+- Report actual changes and results.
+- Finish the task without unrelated analysis.
+
+GitHub synchronization may use Bolt's existing built-in workflow when appropriate, but GitHub is NOT a separate development workspace or source to explore.
+
+Do not create or search for another workspace.
+
+Do not repeatedly say:
+"I'll inspect the project state first."
+"I'll check the working directory."
+"I'm ready to help."
+
+START WORKING ON THE ASSIGNED CODE TASK IMMEDIATELY.
+
+CURRENT PRIORITY:
+Complete RF Coins admin refund integration using the existing Bolt project source code and existing refund RPC.
+
+PRODUCTION SAFETY:
+Do not modify the live database, process real refunds, deploy, publish, change secrets, or activate RF Coins without explicit owner authorization.
+
+If a required project file is genuinely unavailable, report the exact blocker instead of searching outside Bolt.
+
+FINAL REPORT:
+TASK COMPLETED:
+FILES MODIFIED:
+TESTS:
+DATABASE CHANGES:
+DEPLOYMENT:
+STATUS:
+
+DIRECT BOLT CODING ONLY. NO EXTERNAL WORKSPACES.
