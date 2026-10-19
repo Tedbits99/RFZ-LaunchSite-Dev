@@ -43,7 +43,8 @@ Compatible-runner procedure: use a GitHub Actions Linux runner or owner-managed 
 
 ## Additional read-only checks
 
-- Repository/top-level/main/origin identity and matching remote HEAD verified at `79e793226ac2914d25022986f6faca4a3c2ec106`.
+- Repository/top-level/main/origin identity and matching remote HEAD verified at `8330aaf6f5a3a6a167a53b106d6d5f33e2b27266`.
+- Documentation-only push validation: GitHub Actions run `39314389301` completed successfully for `8330aaf`; the job summary reports 47 passing test files and 826 passing tests with 1 skipped. This does not establish hosted Supabase deployment or production readiness.
 - GitHub branch endpoint: protected=false; rulesets: []; deployments: []; hooks: HTTP 403. The last result blocks proof of safe push side effects.
 - All 396 source/config inventory files read for structural/risk markers; source hashes and routes/admin controls recorded.
 - 914 reachable Git text blobs scanned heuristically for selected token/private-key patterns; zero candidates, with explicit limits in [security findings](SECURITY_FINDINGS.md).

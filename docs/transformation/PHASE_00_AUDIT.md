@@ -8,13 +8,13 @@ Latest attached owner directive returns current execution to Phase 0, authorizes
 
 - Workspace/top level: `/workspaces/RFZ-LaunchSite-Dev`.
 - Repository: `Tedbits99/RFZ-LaunchSite-Dev`; branch `main`; origin verified by remote and remote-head lookup.
-- Resumed at HEAD `79e793226ac2914d25022986f6faca4a3c2ec106`; `git fetch origin main` completed and `origin/main` matches HEAD with no local commit divergence.
+- The current documentation evidence commit is `8330aaf6f5a3a6a167a53b106d6d5f33e2b27266`; `origin/main` was verified at the same SHA after push.
 - Prior uncommitted source/security/framework edits and staged Tailwind-config deletion were present at start and preserved. The audit evaluates this working tree, not a deployed or committed application release.
 - Current commit/push outcome is recorded in [phase status](PHASE_STATUS.md); no original repository was modified.
 
 ## Coverage and evidence limits
 
-396 source/config files were structurally scanned and fingerprinted. Inventory includes 49 API routes (51 total route handlers), 52 pages, 32 admin pages, 11 Edge entrypoints, 50 Vitest files, 114 active migration files, 2 pending SQL files and 13 archived copies. See [full file/route/control inventory](SOURCE_INVENTORY.md) and [database declaration inventory](DATABASE_OBJECT_INVENTORY.md).
+396 source/config files were structurally scanned and fingerprinted. Inventory includes 49 API routes (51 total route handlers), 52 pages, 32 admin pages, 11 Edge entrypoints, 50 Vitest files, 115 active migration files, 2 pending SQL files and 13 archived copies. See [full file/route/control inventory](SOURCE_INVENTORY.md), [database declaration inventory](DATABASE_OBJECT_INVENTORY.md) and the [live Supabase reconciliation](../SUPABASE_FRESH_BACKEND_MANIFEST.md).
 
 Coverage means file/declaration/control indexing plus targeted source review and reuse of the prior audit, not a claim that every line or browser action is verified. All admin button/event locations are recorded; the complete staged behavior/role matrix remains an explicit Phase 0 verification blocker. No production feature is labeled VERIFIED WORKING.
 
@@ -55,7 +55,7 @@ Counts apply only to the following 26 significant feature groups, not individual
 
 [Security findings](SECURITY_FINDINGS.md) retains prior critical/high source boundary issues and distinguishes local corrections from deployed proof. New findings include unsupported ESLint 9, unprotected main/no returned rulesets, missing generic secret-file ignore coverage, unreviewed install-script warning and unverified privileged data-access boundaries. npm audit reports zero advisories, not zero application vulnerabilities. A heuristic history scan covered 914 reachable text blobs and found no candidates for its limited patterns; no secret values were printed.
 
-Supabase-compatible schemas/RPC/RLS/Auth/Realtime/Vault/cron dependencies are reusable source. Ownership, independent operation, schema export rights, migration ledger, Auth/storage migration and restore capability remain unknown. No hosted SQL, data export or provisioning occurred. See [portability audit](DATABASE_PORTABILITY.md). RF Coins activation remains prohibited; its movement ledger is not accepted as balanced double-entry accounting.
+Supabase-compatible schemas/RPC/RLS/Auth/Realtime/Vault/cron dependencies are reusable source. Authenticated MCP inspection verified project reference `ketdhcmwowzztcdlmris`, the legacy 13-table schema and 11-migration hosted ledger, but organization ownership, region, plan/quota, schema export rights and restore capability remain unknown. No hosted SQL write, data export or provisioning occurred. See [portability audit](DATABASE_PORTABILITY.md). RF Coins activation remains prohibited; its movement ledger is not accepted as balanced double-entry accounting.
 
 ## Infrastructure and existing business assets
 
@@ -91,13 +91,13 @@ TypeScript and lint pass locally; lint has 168 warnings. The restricted sandbox 
 2. Full disposable database verification after resolving the local Docker/Supabase startup failure; resolve the skipped engine test without bypassing the safety filter or connecting production.
 3. Complete target inventory and safe staging/browser verification needed to classify all significant admin/customer behavior; no fabricated PASS for unavailable cases.
 4. Account-specific hosting/email costs/limits and production deployment mapping; current public list prices do not supply these facts.
-5. Verified push-side-effect isolation: hooks API is inaccessible, and no Cloudflare Worker/GitHub App account mapping is available. Do not push this documentation while production trigger safety is unknown.
+5. Verified deployment-side-effect isolation: this documentation was pushed to `main` and GitHub Actions run 39314389301 passed, but the hooks API is inaccessible and no Cloudflare Worker/GitHub App account mapping is available. Owner confirmation is still required before any production deployment or hosting cutover.
 
 Existing future-phase implementation defects are documented and assigned; they do not by themselves fail the audit. The missing mandatory evidence above keeps Phase 0 BLOCKED. See [all 21 phase deliverables/acceptance criteria](MASTER_ROADMAP_2026.md) and [master issue register](MASTER_ISSUE_REGISTER.md).
 
 ## Non-actions
 
-No application/configuration implementation was modified during this audit. No hosted SQL, migration, seed, production DB export, payment, supplier order, email send, credential/setting edit, DNS/nameserver/DNSSEC change, purchase, deployment, Bolt tooling, original-repository edit or force-push occurred. Public DNS/TLS and restricted GitHub metadata were read-only.
+No application/configuration implementation was modified during this audit. No hosted SQL write, migration, seed, production DB export, payment, supplier order, email send, credential/setting edit, DNS/nameserver/DNSSEC change, purchase, deployment, Bolt tooling, original-repository edit or force-push occurred. The documentation-only commit was pushed to `main`; its GitHub Actions validation passed. Public DNS/TLS, Supabase metadata and restricted GitHub metadata were read-only.
 
 ## Documentation deliverable manifest
 

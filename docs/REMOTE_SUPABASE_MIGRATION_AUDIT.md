@@ -1,8 +1,31 @@
-# Remote Supabase migration audit plan
+# Remote Supabase migration audit plan and evidence
 
-Phase 0 remote verification is intentionally read-only. No project link,
-database connection, service-role key, access token, or hosted SQL execution is
-authorized by this repository change.
+Phase 0 remote verification is intentionally read-only. The authenticated
+project-scoped MCP connection for `ketdhcmwowzztcdlmris` is now verified, and
+catalog metadata was read without retrieving customer rows or secret values.
+No service-role key, database password, export, provisioning, or hosted SQL
+write is authorized by this repository change.
+
+## Verified live evidence
+
+The MCP returned project URL `https://ketdhcmwowzztcdlmris.supabase.co`, 13
+public tables with RLS enabled, 11 recorded migration versions, 48 public
+constraints, 30 public indexes, five public `SECURITY DEFINER` routines, 13
+public policies, zero public views/materialized views, zero Realtime members,
+zero deployed Edge Functions, and a `main` branch status of
+`MIGRATIONS_FAILED` with an `ACTIVE_HEALTHY` preview status. Organization,
+ownership, region, plan/quota, backup/restore and the exact failed migration
+diagnostic were not exposed.
+
+The effective Codex MCP URL is project-scoped but does not contain
+`read_only=true`; write-capable tools are visible. This audit used only
+read-only metadata, catalog, log and advisor operations, so read-only behavior
+is an operating restriction rather than a server-enforced permission claim.
+
+The hosted ledger matches only the first 11 logical local migrations. The
+active local tree has 115 files, with 104 unrecorded candidates, two pending
+RF Coins files and 13 archived duplicate copies. No receipt/reconciliation,
+security-hardening, supplier or RF Coins migration is recorded remotely.
 
 ## Required owner-authorized evidence
 

@@ -24,6 +24,15 @@ are `runfazone_*`. Ownership, organization, region, plan, quota and
 environment designation were not returned by the available project-scoped
 tools and must not be inferred from the reference or names.
 
+The effective Codex registration is a project-scoped streamable HTTP server
+with the URL above and feature flags for docs, account, database, debugging,
+development, functions and branching. It contains no `read_only=true`
+parameter, bearer-token environment variable, or HTTP-header restriction.
+Therefore this evidence proves project scope and successful read-only use, but
+does not prove server-enforced read-only permissions. The safe operating rule
+for Phase 0 is to call only metadata/catalog/advisor tools and never invoke the
+exposed write-capable tools.
+
 Provisioning requires owner confirmation of all of the following through an
 actual Supabase control-plane connection:
 
@@ -76,6 +85,26 @@ five public `SECURITY DEFINER` routines executable by `anon` and
 `rls_auto_enable`, plus disabled leaked-password protection. These are live
 findings, not fixes applied by this audit.
 
+The five hosted public routines are owned by `postgres` and use fixed
+`search_path` values: `admin_change_order_status(uuid,text,text,text)` uses
+`search_path=public`; `admin_get_all_games()`;
+`admin_get_games_with_package_counts()`; and
+`admin_set_game_active(uuid,boolean)` use `search_path=public`; and
+`rls_auto_enable()` uses `search_path=pg_catalog`. The first four are
+`SECURITY DEFINER` and currently grant `EXECUTE` to `anon` and
+`authenticated`; `rls_auto_enable` has no explicit ACL returned. The function
+bodies contain no `auth.uid()`/admin-row authorization checks. The status
+routine validates state transitions but not caller identity; the game routines
+read or update catalog state without caller authorization. These are confirmed
+privilege-boundary exposures, not merely hypothetical risks. Application call
+sites include the admin games page/API and admin order status/refund routes;
+the payment webhook also calls the status routine. The repository contains a
+later source migration that revokes public grants and adds authorization
+checks, but that migration is not present in the hosted 11-version ledger.
+The safe mitigation is to apply and verify the reviewed security migration in
+an isolated development project first, then separately approve any hosted
+change; this audit made no fix.
+
 No `cron` or `net` schema was present in the catalog, no Realtime members were
 reported, and the Edge Function list was empty. The installed extension
 metadata included `supabase_vault`, `pgcrypto`, `pg_stat_statements`,
@@ -126,6 +155,31 @@ Known reviewed disposable-baseline exclusions are the historical incomplete
 fulfillment schema, ambiguous RPC, hard-coded Honor of Kings UID migration,
 and the scheduler migration. The corrected Honor of Kings migration is the
 required replacement in the current isolated harness.
+
+### Deterministic fresh-install procedure
+
+The canonical fresh install is a generated, reviewed selection—not a replay
+of every filename. Build it from the lexicographically sorted active tree,
+then apply these deterministic dispositions: retain one reviewed core
+version per logical object; retain the later security/replacement migration
+only after its predecessor and dependencies are recorded; exclude every
+archived duplicate; keep the two pending RF Coins files outside the baseline
+until their handoff contract is approved; and quarantine all scheduler,
+provider-URL, Vault-secret and Edge-target SQL behind mock/loopback guards.
+Record for every active file its local path, timestamp, logical family,
+disposition, dependency predecessor and outbound classification. A fresh
+install is reproducible only when this manifest, a schema/object inventory,
+and a clean disposable run all agree.
+
+The disposable gate must: start an unlinked local Supabase instance; reject
+non-loopback provider, email, supplier, payment and Edge URLs before startup;
+assert no real credential variables are inherited; run migrations in manifest
+order; verify tables, constraints, RLS, grants, RPC authorization, receipt
+outbox/reconciliation idempotency and transaction boundaries; run the worker
+engine against synthetic fixtures; and stop/clean up in a trap. The existing
+GitHub workflow and loopback rewrite guard provide this safety pattern, but
+local image startup remains blocked and a clean full disposable installation
+has not yet completed.
 
 ### Archived and pending state
 

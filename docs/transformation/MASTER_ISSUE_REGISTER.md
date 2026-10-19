@@ -21,13 +21,13 @@
 - **SEVERITY:** High
 - **COMPONENT:** Production/backend identity and portability
 - **FILE_PATH:** [backend clients](../../lib/supabaseAdmin.ts), [portability](DATABASE_PORTABILITY.md)
-- **DESCRIPTION:** No owner-controlled deployed project/schema/export/restore metadata available.
-- **EVIDENCE:** Source integrations only; no authorized connector for the owner-selected Cloudflare Worker or retained Supabase project is available.
+- **DESCRIPTION:** Owner-controlled organization/region/plan/export/restore rights and complete deployed-service metadata remain unverified.
+- **EVIDENCE:** Authenticated project-scoped Supabase MCP now returns project URL, 13 public tables, 11 recorded migrations, catalog metadata, advisors, branch state and zero Edge Functions. The available MCP registration has no `read_only=true` setting; ownership, organization, region, plan/quota and backup/restore metadata are not exposed.
 - **ROOT_CAUSE_IF_KNOWN:** Access and service ownership not established.
 - **ASSIGNED_PHASE:** 0
 - **REQUIRED_FIX:** Obtain approved read-only ownership/schema/Auth/storage/backup evidence and reconcile source.
 - **REQUIRED_TESTS:** Metadata comparison and isolated restore evidence in approved later scope.
-- **CURRENT_STATUS:** BLOCKED
+- **CURRENT_STATUS:** BLOCKED — live project metadata partially verified; ownership/control-plane evidence outstanding
 
 ### A0-002 — Full disposable database verification
 

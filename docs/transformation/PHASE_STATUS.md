@@ -9,10 +9,10 @@
 | Current phase | 0 — Full system audit |
 | Phase status | BLOCKED |
 | Next phase allowed | NO |
-| HEAD at resumed audit | 79e793226ac2914d25022986f6faca4a3c2ec106 |
-| Remote reconciliation | `origin/main` fetched and matches HEAD; no local commits ahead/behind |
-| Commit | Phase 0 evidence and isolated harness change pending review/commit |
-| Pushed to dev main | NO — deployment side effects cannot be verified; hooks API HTTP 403 |
+| HEAD at current evidence update | 8330aaf6f5a3a6a167a53b106d6d5f33e2b27266 |
+| Remote reconciliation | `origin/main` verified at HEAD after the documentation push |
+| Commit | `docs: record live Supabase reconciliation` |
+| Pushed to dev main | YES — GitHub Actions run 39314389301 completed successfully; deployment mapping remains unverified because hooks API returned HTTP 403 |
 | Production changes | NONE |
 
 ## Completed audit work
@@ -27,7 +27,7 @@ The earlier Phase 1 edits remain present and uncommitted. Their findings are not
 
 ## Documentation validation
 
-Current checks: the validation-only main-branch workflow was updated with serialized tests, current Deno setup, a value-aware high-confidence secret scan over all tracked text files and pinned disposable Supabase CLI; YAML parsing, shell syntax, guards and the local secret scan pass. Full disposable Supabase startup remains blocked by a local Docker/Supabase image bootstrap failure reproduced without RunFazone migrations and with the newer CLI/image set: the bundled Realtime repository cannot obtain a database connection within approximately 14.98 seconds. TypeScript passes, lint exits 0 with 168 warnings, the serialized full Vitest suite passes 832 tests with 1 skipped, and the production build passes outside the restricted child-process sandbox. No remote CI run or production endpoint has been contacted. Cloudflare remains blocked until the current Next.js server paths that require private service-role, supplier, payment-provider and mail secrets are moved behind the approved Supabase-side boundary and validated in a Worker preview.
+Current checks: the validation-only main-branch workflow has serialized tests, current Deno setup, a value-aware high-confidence secret scan over all tracked text files and pinned disposable Supabase CLI. YAML parsing, shell syntax, guards, local secret scan and the pushed CI run pass. Full disposable Supabase startup remains blocked locally by a Docker/Supabase image bootstrap failure reproduced without RunFazone migrations and with newer CLI/image sets: the bundled Realtime repository cannot obtain a database connection within approximately 14.98 seconds. TypeScript passes, lint exits 0 with 168 warnings, the serialized full Vitest suite passes 832 tests with 1 skipped, and the permitted local production build passes. GitHub Actions run 39314389301 passed with 47 test files and 826 tests. The live Supabase MCP inventory is now recorded, but the MCP registration has no `read_only=true` setting; write-capable tools were not invoked. Cloudflare remains blocked until current Next.js server paths requiring private service-role, supplier, payment-provider and mail secrets are moved behind the approved Supabase-side boundary and validated in a Worker preview.
 
 ## Milestone lookup
 
