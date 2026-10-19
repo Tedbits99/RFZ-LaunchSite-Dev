@@ -251,6 +251,7 @@ outbox_worker_a_pid=""
 outbox_worker_b_pid=""
 
 cleanup() {
+  cleanup_status=$?
   if [ -n "$outbox_barrier_in" ]; then
     printf 'COMMIT;\n\\q\n' >&"$outbox_barrier_in" 2>/dev/null || true
   fi
@@ -258,6 +259,21 @@ cleanup() {
   if [ -n "$outbox_worker_b_pid" ]; then wait "$outbox_worker_b_pid" 2>/dev/null || true; fi
   if [ -n "$outbox_barrier_pid" ]; then wait "$outbox_barrier_pid" 2>/dev/null || true; fi
   if [ -d "$test_root" ]; then
+    if [ "$cleanup_status" -ne 0 ] && command -v docker >/dev/null 2>&1; then
+      echo "Diagnostic: disposable Supabase container state before cleanup:" >&2
+      container_names="$(docker ps -a --format '{{.Names}}' | grep -E 'runfazone-security-test|supabase' || true)"
+      if [ -z "$container_names" ]; then
+        echo "  no matching disposable Supabase containers found" >&2
+      else
+        while IFS= read -r container_name; do
+          [ -n "$container_name" ] || continue
+          docker inspect --format '  {{.Name}} status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_name" 2>/dev/null || true
+          docker logs --tail 80 "$container_name" 2>&1 \
+            | sed -E 's/(password|token|key|secret|authorization|apikey|service_role)[^[:space:]]*/\1=<redacted>/Ig; s#https?://[^[:space:]]+#<url-redacted>#g' \
+            | sed 's/^/    /' || true
+        done <<< "$container_names"
+      fi
+    fi
     supabase_local stop --no-backup >/dev/null 2>&1 || true
     rm -rf -- "$test_root"
   fi
@@ -294,6 +310,9 @@ excluded_incomplete_fulfillment="20260928071820_20260928_order_fulfillment_schem
 excluded_ambiguous_status_rpc="20260928072329_20260928_fix_rpc_ambiguous_column.sql"
 excluded_hardcoded_hok_uid="20260928124803_honor_of_kings_uid_input_field.sql"
 required_hok_uid_correction="20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql"
+rf_coins_outbound_migration="20261019014625_20261018160000_rf_coins_schema.sql.sql"
+rf_coins_hosted_url="https://ftbvxkxxzotwkdcdgaot.supabase.co/functions/v1/fulfillment-handoff"
+rf_coins_loopback_url="http://127.0.0.1:9/blocked/fulfillment-handoff"
 excluded_count=0
 
 if [ ! -f "$project_root/supabase/migrations/$required_hok_uid_correction" ]; then
@@ -307,6 +326,25 @@ while IFS= read -r migration; do
     "$excluded_scheduler"|"$excluded_incomplete_fulfillment"|"$excluded_ambiguous_status_rpc"|"$excluded_hardcoded_hok_uid")
       echo "Excluding reviewed historical migration from disposable baseline: $basename"
       excluded_count=$((excluded_count + 1))
+      continue
+      ;;
+    "$rf_coins_outbound_migration")
+      # Preserve the production migration's schema and function semantics in
+      # the disposable baseline, but redirect its explicit outbound target to
+      # an unused loopback port. This prevents an accidental test invocation
+      # from contacting any hosted Supabase or supplier endpoint.
+      if ! grep -Fq "$rf_coins_hosted_url" "$migration"; then
+        echo "ERROR: RF Coins migration no longer contains its reviewed hosted URL; inspect before testing: $basename" >&2
+        exit 3
+      fi
+      sed "s|$rf_coins_hosted_url|$rf_coins_loopback_url|g" "$migration" \
+        > "$test_root/supabase/migrations/$basename"
+      if grep -Fq "$rf_coins_hosted_url" "$test_root/supabase/migrations/$basename" \
+        || grep -Eiq 'https://[^[:space:]]+/functions/' "$test_root/supabase/migrations/$basename"; then
+        echo "ERROR: Disposable RF Coins migration still contains a hosted function URL: $basename" >&2
+        exit 3
+      fi
+      echo "Rewriting reviewed RF Coins outbound target to loopback in disposable baseline: $basename"
       continue
       ;;
   esac
@@ -374,7 +412,7 @@ supabase_local() {
 }
 
 echo "Starting isolated Supabase services..."
-supabase_local start
+supabase_local start --debug
 
 status_env="$(supabase_local status -o env)"
 raw_db_url="$(printf '%s\n' "$status_env" | sed -n 's/^DB_URL=//p' | sed 's/^"//; s/"$//')"

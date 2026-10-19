@@ -1,8 +1,9 @@
-name: Database security tests
+name: Development validation
 
 on:
   push:
     branches:
+      - main
       - security/authorization-hardening
       - feature/customer-auth-phase1
   workflow_dispatch:
@@ -35,8 +36,49 @@ jobs:
       - name: Install Node.js dependencies
         run: npm ci
 
-      - name: Run application tests
-        run: npm test
+      - name: Check tracked files for high-confidence secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const fs = require('node:fs');
+
+          const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'buffer' })
+            .toString('utf8')
+            .split('\0')
+            .filter(Boolean);
+          const patterns = [
+            /-----BEGIN (?:RSA|EC|OPENSSH|PRIVATE) KEY-----/,
+            /\b(?:sk_live_|rk_live_)[A-Za-z0-9]{12,}/,
+            /(?:SUPABASE_SERVICE_ROLE_KEY|PAYMONGO_SECRET_KEY|FAZERCARDS_API_KEY)\s*=\s*["'`](?!REPLACE_WITH|YOUR_|TEST_|SYNTHETIC_|service-key|<|\$\{)[A-Za-z0-9._-]{8,}["'`]/,
+          ];
+          const hits = [];
+
+          for (const file of files) {
+            let content;
+            try {
+              const bytes = fs.readFileSync(file);
+              if (bytes.includes(0)) continue;
+              content = bytes.toString('utf8');
+            } catch {
+              continue;
+            }
+            if (patterns.some((pattern) => pattern.test(content))) hits.push(file);
+          }
+
+          if (hits.length > 0) {
+            console.error(`High-confidence secret pattern found in ${hits.length} tracked text file(s).`);
+            process.exit(1);
+          }
+          console.log('SECRET_SCAN_PASS');
+          NODE
+
+      - name: Audit production and development dependencies
+        run: npm audit --audit-level=low
+
+      - name: Run serialized application tests
+        run: npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
 
       - name: Run TypeScript validation
         run: npx tsc --noEmit
@@ -50,7 +92,7 @@ jobs:
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v3
         with:
-          version: 2.117.0
+          version: 2.121.0
 
       - name: Install PostgreSQL client
         run: |
@@ -58,14 +100,17 @@ jobs:
           sudo apt-get install --yes postgresql-client
 
       - name: Install Deno
-        uses: denoland/setup-deno@v1
+        uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
 
       - name: Check reconciliation Edge Functions
         run: |
+          deno check supabase/functions/archive-old-orders/index.ts
           deno check supabase/functions/auto-reconciliation/index.ts
           deno check supabase/functions/create-qrph-payment/index.ts
+          deno check supabase/functions/fazercards-test/index.ts
+          deno test supabase/functions/fazercards-test/authorization_test.ts
           deno check supabase/functions/payment-webhook/index.ts
           deno check supabase/functions/send-transactional-email/index.ts
           deno check supabase/functions/completion-receipt-email-worker/index.ts
