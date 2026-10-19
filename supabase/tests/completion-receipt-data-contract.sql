@@ -47,6 +47,7 @@ BEGIN
 END $$;
 
 DO $$
+DECLARE v_state text; v_constraint text;
 BEGIN
   BEGIN
     INSERT INTO public.orders (
@@ -63,7 +64,13 @@ BEGIN
     );
     RAISE EXCEPTION 'RECEIPT_CONTRACT_INVALID_QUANTITY_ACCEPTED';
   EXCEPTION WHEN others THEN
-    IF SQLERRM <> 'ORDER_QUANTITY_UNSUPPORTED' THEN
+    GET STACKED DIAGNOSTICS
+      v_state = RETURNED_SQLSTATE,
+      v_constraint = CONSTRAINT_NAME;
+    IF NOT (
+      (v_state = 'P0001' AND SQLERRM = 'ORDER_QUANTITY_UNSUPPORTED')
+      OR (v_state = '23514' AND v_constraint = 'orders_quantity_single_package_check')
+    ) THEN
       RAISE;
     END IF;
   END;
