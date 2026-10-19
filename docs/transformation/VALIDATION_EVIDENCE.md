@@ -1,6 +1,6 @@
 # Phase 0 validation evidence
 
-**Execution date:** 2026-10-19. **Runtime:** Node v24.21.0, npm 11.19.0; CI specifies Node 22.12.0. GitHub Actions run `39332488086` for `3344c498a92e163713f11d1916ff60fc54cb25b4` completed successfully with 47 test files and 826 passed tests. Follow-up run `39333313183` validates commit `9a22dc78061b591946efa038debc0b7fda15563c` and was in progress when this document was updated. Tests operate on the preserved working tree, not solely HEAD. The current repository-side change is documentation-only; production migrations and application business logic were not changed.
+**Execution date:** 2026-10-19. **Runtime:** Node v24.21.0, npm 11.19.0; CI specifies Node 22.12.0. GitHub Actions run `39333785259` for `3201882b475d738bb4f37da4bb951495f9e3439e` completed successfully with 47 test files and 826 passed tests, 1 skipped, 11 warnings and 1 notice. Tests operate on the preserved working tree, not solely HEAD. The current repository-side change is documentation-only; production migrations and application business logic were not changed.
 
 ## Safety review
 
