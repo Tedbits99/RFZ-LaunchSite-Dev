@@ -1,53 +1,118 @@
-PERMANENT OWNER RULE — HIGHEST DEVELOPMENT PRIORITY
+RUNFAZONE.COM — FAST DEVELOPMENT, TESTING & LIVE INTEGRATION MODE
 
-Work EXCLUSIVELY inside the EXISTING RunFazone.com project currently open in Bolt.new.
+PERMANENT OWNER INSTRUCTION
 
-The current Bolt project source code and its connected Bolt Database are the ONLY development environment.
+PRIMARY GOAL:
+Accelerate RunFazone.com development through direct implementation, efficient testing, automatic error correction, and integration into the existing production website.
 
-STRICT RULES:
+DEVELOPMENT ENVIRONMENT:
+Use ONLY the existing RunFazone.com project currently open in Bolt.new.
 
-1. NO external workspaces.
-2. NO inspection of external GitHub repositories.
-3. NO separate project directories or cloned repositories.
-4. NO temporary development projects.
-5. NO unrelated architecture or workspace exploration.
-6. NO repetitive project-state or working-directory inspections.
-7. NO switching to other coding agents or environments.
-8. NO rebuilding features that already exist.
+Do NOT create or inspect external workspaces, cloned repositories, temporary projects, or unrelated GitHub code.
 
-When I assign a task:
+DEVELOPMENT WORKFLOW:
 
-- Open only the relevant existing files inside this Bolt project.
-- Make the necessary compatible code changes directly.
-- Run focused tests, then required project checks.
-- Report actual changes and results.
-- Finish the task without unrelated analysis.
+PHASE 1 — DIRECT IMPLEMENTATION
 
-GitHub synchronization may use Bolt's existing built-in workflow when appropriate, but GitHub is NOT a separate development workspace or source to explore.
+1. Understand the specific task.
+2. Read ONLY relevant files in the existing Bolt project.
+3. Implement the required changes immediately.
+4. Reuse existing components, APIs, database functions, and architecture.
+5. Avoid unnecessary rewrites and unrelated refactoring.
 
-Do not create or search for another workspace.
+PHASE 2 — TESTING
 
-Do not repeatedly say:
-"I'll inspect the project state first."
-"I'll check the working directory."
-"I'm ready to help."
+After implementing a change:
 
-START WORKING ON THE ASSIGNED CODE TASK IMMEDIATELY.
+1. Run focused tests for the changed functionality.
+2. If a test fails, identify the actual root cause.
+3. Fix the error directly in the relevant source code.
+4. Rerun affected tests until they pass.
+5. Run TypeScript validation.
+6. Run lint.
+7. Run the complete test suite and production build before publishing.
 
-CURRENT PRIORITY:
-Complete RF Coins admin refund integration using the existing Bolt project source code and existing refund RPC.
+Do not repeat expensive checks unnecessarily when no relevant code has changed.
 
-PRODUCTION SAFETY:
-Do not modify the live database, process real refunds, deploy, publish, change secrets, or activate RF Coins without explicit owner authorization.
+PHASE 3 — AUTOMATIC ERROR FIXING
 
-If a required project file is genuinely unavailable, report the exact blocker instead of searching outside Bolt.
+If a coding, TypeScript, lint, test, or build error occurs:
 
-FINAL REPORT:
-TASK COMPLETED:
-FILES MODIFIED:
-TESTS:
-DATABASE CHANGES:
-DEPLOYMENT:
-STATUS:
+- Investigate the exact failure.
+- Apply the smallest compatible correction.
+- Rerun the relevant verification.
+- Continue automatically.
 
-DIRECT BOLT CODING ONLY. NO EXTERNAL WORKSPACES.
+Do NOT stop after the first ordinary coding error to ask the owner for instructions.
+
+Do NOT report PASS while required tests or the build are failing.
+
+If blocked by missing permissions, credentials, an unsafe migration, or a genuine production risk, STOP and report the specific blocker.
+
+PHASE 4 — INTEGRATION
+
+When all required checks pass:
+
+1. Integrate the completed changes into the CURRENT existing Bolt project code.
+2. Ensure modified components work with existing RunFazone functionality.
+3. Preserve PayMongo QRPh, FazerCards, customer authentication, orders, admin dashboard, and RF Coins security.
+4. Use only the existing Bolt-supported source synchronization workflow.
+5. Do not create a replacement application or development environment.
+
+PHASE 5 — LIVE PUBLISHING
+
+The owner has already authorized the current website-code publishing task, including the tested RF Coins admin refund and retry fixes.
+
+For THAT approved task only:
+
+- Publish the validated source to the EXISTING RunFazone production website.
+- Do not create a new deployment target or unrelated domain.
+- Verify the deployment actually succeeded.
+- Check that key existing customer functionality remains available.
+- Confirm that RF Coins remains disabled.
+
+For future tasks, request fresh authorization before additional production publishing or production configuration changes.
+
+PRODUCTION SAFETY LIMITS:
+
+The current publishing approval does NOT authorize:
+- New live database migrations
+- Unapproved production database writes
+- RF Coins activation
+- Changing payment configurations
+- Real transactions or refunds
+- Supplier API transactions
+- Cron activation
+- Secret changes
+- Unrelated Edge Function deployments
+
+EFFICIENCY RULES:
+
+- One assigned task = one continuous implementation-and-verification workflow.
+- Do not repeatedly inspect the project.
+- Do not announce identical plans multiple times.
+- Do not interrupt routine coding for unnecessary confirmations.
+- Do not run tests without acting on meaningful failures.
+- Do not invent PASS results, deployment success, or code changes.
+- Do not silently skip failing tests.
+- Do not claim a site is live without deployment confirmation.
+- Prioritize safe implementation speed and working integrations.
+
+FINAL REPORT ONLY AFTER WORK IS COMPLETE:
+
+TASK:
+FILES CHANGED:
+FOCUSED TESTS:
+FULL TESTS:
+TYPESCRIPT:
+LINT:
+BUILD:
+ERRORS FOUND AND FIXED:
+INTEGRATION RESULT:
+PRODUCTION PUBLISH STATUS:
+LIVE VERIFICATION:
+RF COINS FLAGS:
+REMAINING BLOCKERS:
+FINAL STATUS: PASS / BLOCKED
+
+START THE ASSIGNED DEVELOPMENT TASK DIRECTLY AND CONTINUE THROUGH TESTING, FIXING, AND AUTHORIZED PUBLISHING WITHOUT UNNECESSARY DELAYS.
