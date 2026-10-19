@@ -9,10 +9,10 @@
 | Current phase | 0 — Full system audit |
 | Phase status | BLOCKED |
 | Next phase allowed | NO |
-| HEAD at current evidence update | 058fbed8b5b94390dbb231f9b1be5340220c7e4b |
+| HEAD at current evidence update | 9a22dc78061b591946efa038debc0b7fda15563c |
 | Remote reconciliation | `origin/main` verified at HEAD after the documentation push |
-| Commit | `docs: record latest phase 0 CI run` |
-| Pushed to dev main | YES — commit `058fbed` is on `origin/main`; GitHub Actions run `39318615211` completed successfully with 47 files and 826 tests. Deployment mapping remains unverified because the hooks API returned HTTP 403 |
+| Commit | `docs: generate canonical disposable migration sequence` |
+| Pushed to dev main | YES — commit `9a22dc7` is on `origin/main`; the follow-up validation run `39333313183` was still in progress during this evidence update. The prior run `39332488086` completed successfully with 47 files and 826 tests. Deployment mapping remains unverified because the hooks API returned HTTP 403 |
 | Production changes | NONE |
 
 ## Completed audit work
@@ -21,9 +21,9 @@ Refreshed source/route/admin-action/database-declaration inventories, source cla
 
 ## Blockers and next permitted tasks
 
-Remain in Phase 0. The finite mandatory blockers are: (1) owner-confirmed organization/project ownership, region, plan/quota, export/restore rights and environment designation; (2) a genuinely isolated fresh backend or compatible owner-managed disposable runner; (3) full disposable migration/RLS/RPC/role/concurrency/receipt verification after resolving the local Docker/Realtime startup failure; (4) complete staged customer/admin behavior and role-matrix verification; (5) account-specific Cloudflare, Supabase and email costs/limits plus deployment mapping; and (6) side-effect isolation evidence sufficient to approve a future production cutover. Do not request secret values in chat. No implementation repair, Phase 1 continuation, provisioning or production changes are authorized by this audit.
+Remain in Phase 0. The finite mandatory blockers are: (1) owner-confirmed organization/project ownership, region, plan/quota, export/restore rights and environment designation; (2) exact failed-branch detail and complete Auth/Storage/Realtime/schedule control-plane evidence; (3) a compatible owner-managed disposable runner for migration/RLS/RPC/role/concurrency/receipt verification; (4) complete staged customer/admin behavior and role-matrix verification; (5) account-specific Cloudflare, Supabase and email costs/limits plus deployment mapping; and (6) side-effect isolation evidence sufficient to approve a future production cutover. The established legacy project is not to be rebuilt or used as the disposable runner. Do not request secret values in chat. No hosted remediation, provisioning, deployment or production changes are authorized by this audit.
 
-Completed requirements include repository/branch provenance, the latest successful CI evidence, source and migration inventories, documented security/history limitations, a safe disposable harness design, a generated 115-file/96-selected canonical disposable migration sequence, and a dependency-ordered backend automation roadmap. The following are future-phase implementation work, not Phase 0 passes: moving private server operations behind Supabase-side boundaries for Cloudflare, completing customer/admin features, payment/supplier/email integrations, RF Coins accounting, and browser/accessibility/performance QA. Owner-controlled actions are explicitly separated in the evidence and portability documents.
+Completed requirements include repository/branch provenance, successful CI evidence through run `39332488086`, source and migration inventories, the existing-backend reconciliation, documented security/history limitations, a safe disposable harness design, a generated 115-file/96-selected canonical disposable migration sequence, and a dependency-ordered backend automation roadmap. The following are future-phase implementation work, not Phase 0 passes: moving private server operations behind Supabase-side boundaries for Cloudflare, completing customer/admin features, payment/supplier/email integrations, Edge Function deployment, RF Coins accounting, and browser/accessibility/performance QA. Owner-controlled actions are explicitly separated in the [existing backend reconciliation](EXISTING_BACKEND_RECONCILIATION.md), evidence and portability documents.
 
 The earlier Phase 1 edits remain present and uncommitted. Their findings are not discarded, their source checks are not deployed PASS, and the new ESLint/release-control findings reopen the relevant later gates. Phase 1 starts only after Phase 0 verified PASS and explicit owner approval.
 

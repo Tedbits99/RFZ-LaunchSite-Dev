@@ -1,6 +1,6 @@
 # Phase 0 validation evidence
 
-**Execution date:** 2026-10-19. **Runtime:** Node v24.21.0, npm 11.19.0; CI specifies Node 22.12.0. GitHub Actions run `39318615211` for `058fbed8b5b94390dbb231f9b1be5340220c7e4b` completed successfully with 47 test files and 826 passed tests. Tests operate on the preserved working tree, not solely HEAD. The only current implementation change is the test-harness loopback isolation described below; production migrations and application business logic were not changed.
+**Execution date:** 2026-10-19. **Runtime:** Node v24.21.0, npm 11.19.0; CI specifies Node 22.12.0. GitHub Actions run `39332488086` for `3344c498a92e163713f11d1916ff60fc54cb25b4` completed successfully with 47 test files and 826 passed tests. Follow-up run `39333313183` validates commit `9a22dc78061b591946efa038debc0b7fda15563c` and was in progress when this document was updated. Tests operate on the preserved working tree, not solely HEAD. The current repository-side change is documentation-only; production migrations and application business logic were not changed.
 
 ## Safety review
 
@@ -55,6 +55,12 @@ Compatible-runner procedure: use a GitHub Actions Linux runner or owner-managed 
 - Prior Phase 1 Deno checks and two authorization tests are recorded in [historical progress](../roadmap/PHASE_PROGRESS.md). They were not rerun during this Phase 0 task; no Deno binary is installed directly.
 
 ## Latest authenticated Supabase evidence
+
+The complete existing-project reconciliation is recorded in
+[EXISTING_BACKEND_RECONCILIATION.md](EXISTING_BACKEND_RECONCILIATION.md). It
+supersedes the earlier fresh-project framing: the established project remains
+the integration target, while disposable installation is a later validation
+runner and not a request to create or reset infrastructure.
 
 The project-scoped Supabase MCP returned, without invoking any write-capable tool:
 
