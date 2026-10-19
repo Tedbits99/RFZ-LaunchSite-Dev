@@ -474,7 +474,15 @@ psql() {
 echo "Applying the isolated migration baseline..."
 if [ "$upgrade_mode" = true ]; then
   echo "LEGACY_UPGRADE_PHASE=baseline-reset"
-  supabase_local db reset
+  set +e
+  supabase_local db reset --debug
+  baseline_reset_status=$?
+  set -e
+  echo "LEGACY_UPGRADE_BASELINE_RESET_STATUS=$baseline_reset_status"
+  if [ "$baseline_reset_status" -ne 0 ]; then
+    echo "ERROR: The reproduced 11-migration hosted baseline could not be reset locally." >&2
+    exit "$baseline_reset_status"
+  fi
   echo "LEGACY_UPGRADE_PHASE=baseline-reset-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --command "DO \$\$ BEGIN
