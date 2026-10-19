@@ -2,6 +2,12 @@
 -- boundary. Supplier completion must never be reversed because receipt data is
 -- incomplete or malformed; invalid receipts are quarantined instead.
 
+-- Keep the final contract self-contained. The quarantine path intentionally
+-- stores no recipient, so a legacy database that reached this migration with
+-- the original NOT NULL column definition must still be able to apply it.
+ALTER TABLE public.order_email_outbox
+  ALTER COLUMN recipient_email DROP NOT NULL;
+
 CREATE OR REPLACE FUNCTION public.finalize_supplier_reconciliation(
   p_supplier_transaction_id uuid,
   p_outcome text,
@@ -171,7 +177,7 @@ BEGIN
       NULLIF(btrim(v_order.player_inputs->>'riot_id'), '')
     );
 
-    IF v_order.quantity IS NULL THEN
+    IF v_order.quantity IS DISTINCT FROM 1 THEN
       INSERT INTO public.order_email_outbox (
         order_id, template, recipient_email, status, last_error, completed_at, receipt_snapshot
       )

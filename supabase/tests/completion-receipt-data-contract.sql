@@ -201,6 +201,26 @@ BEGIN
   END IF;
 END $$;
 
+-- Reconciliation is idempotent after quarantine; it must not create a second
+-- receipt or alter the original dead-letter evidence.
+DO $$
+DECLARE v_result record; v_count integer; v_error text;
+BEGIN
+  SELECT * INTO v_result
+  FROM public.finalize_supplier_reconciliation(
+    '00000000-0000-0000-0000-000000000507', 'completed', 'auto-reconciliation', NULL
+  );
+  SELECT count(*), max(last_error) INTO v_count, v_error
+  FROM public.order_email_outbox
+  WHERE order_id = '00000000-0000-0000-0000-000000000506'
+    AND template = 'completion_receipt';
+  IF v_result.out_outcome <> 'already-finalized'
+     OR v_count <> 1
+     OR v_error <> 'Receipt quantity unavailable for legacy order' THEN
+    RAISE EXCEPTION 'RECEIPT_CONTRACT_LEGACY_QUARANTINE_NOT_IDEMPOTENT';
+  END IF;
+END $$;
+
 -- A malformed legacy recipient is quarantined without reversing completion.
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,
