@@ -8,7 +8,7 @@ Latest attached owner directive returns current execution to Phase 0, authorizes
 
 - Workspace/top level: `/workspaces/RFZ-LaunchSite-Dev`.
 - Repository: `Tedbits99/RFZ-LaunchSite-Dev`; branch `main`; origin verified by remote and remote-head lookup.
-- The current documentation evidence commit is `995556e5ec1b8573b0032e1fcc96c0e3126db6a1`; `origin/main` was verified at the same SHA after push.
+- The current documentation evidence commit is `058fbed8b5b94390dbb231f9b1be5340220c7e4b`; `origin/main` was verified at the same SHA after push. GitHub Actions run `39318615211` completed successfully with 47 test files and 826 passed tests.
 - Prior uncommitted source/security/framework edits and staged Tailwind-config deletion were present at start and preserved. The audit evaluates this working tree, not a deployed or committed application release.
 - Current commit/push outcome is recorded in [phase status](PHASE_STATUS.md); no original repository was modified.
 
@@ -55,7 +55,7 @@ Counts apply only to the following 26 significant feature groups, not individual
 
 [Security findings](SECURITY_FINDINGS.md) retains prior critical/high source boundary issues and distinguishes local corrections from deployed proof. New findings include unsupported ESLint 9, unprotected main/no returned rulesets, missing generic secret-file ignore coverage, unreviewed install-script warning and unverified privileged data-access boundaries. npm audit reports zero advisories, not zero application vulnerabilities. A heuristic history scan covered 914 reachable text blobs and found no candidates for its limited patterns; no secret values were printed.
 
-Supabase-compatible schemas/RPC/RLS/Auth/Realtime/Vault/cron dependencies are reusable source. Authenticated MCP inspection verified project reference `ketdhcmwowzztcdlmris`, the legacy 13-table schema and 11-migration hosted ledger, but organization ownership, region, plan/quota, schema export rights and restore capability remain unknown. No hosted SQL write, data export or provisioning occurred. See [portability audit](DATABASE_PORTABILITY.md). RF Coins activation remains prohibited; its movement ledger is not accepted as balanced double-entry accounting.
+Supabase-compatible schemas/RPC/RLS/Auth/Realtime/Vault/cron dependencies are reusable source. The latest authenticated MCP inspection verified project reference `ketdhcmwowzztcdlmris`, the legacy 13-table schema, 11-migration hosted ledger, zero deployed Edge Functions, and branch status `MIGRATIONS_FAILED` with preview `ACTIVE_HEALTHY`; organization ownership, region, plan/quota, schema export rights and restore capability remain unknown. Current advisors report three RLS policy gaps, five publicly executable `SECURITY DEFINER` routines, disabled leaked-password protection, six unindexed foreign keys and nine unused indexes. No hosted SQL write, data export or provisioning occurred. See [portability audit](DATABASE_PORTABILITY.md). RF Coins activation remains prohibited; its movement ledger is not accepted as balanced double-entry accounting.
 
 ## Infrastructure and existing business assets
 

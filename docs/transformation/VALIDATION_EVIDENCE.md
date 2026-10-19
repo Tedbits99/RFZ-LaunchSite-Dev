@@ -1,6 +1,6 @@
 # Phase 0 validation evidence
 
-**Execution date:** 2026-10-19. **Runtime:** Node v24.21.0, npm 11.19.0; CI specifies Node 22.12.0 and has not been executed remotely for this documentation snapshot. Tests operate on the preserved working tree, not solely HEAD. The only current implementation change is the test-harness loopback isolation described below; production migrations and application business logic were not changed.
+**Execution date:** 2026-10-19. **Runtime:** Node v24.21.0, npm 11.19.0; CI specifies Node 22.12.0. GitHub Actions run `39318615211` for `058fbed8b5b94390dbb231f9b1be5340220c7e4b` completed successfully with 47 test files and 826 passed tests. Tests operate on the preserved working tree, not solely HEAD. The only current implementation change is the test-harness loopback isolation described below; production migrations and application business logic were not changed.
 
 ## Safety review
 
@@ -44,12 +44,26 @@ Compatible-runner procedure: use a GitHub Actions Linux runner or owner-managed 
 ## Additional read-only checks
 
 - Repository/top-level/main/origin identity and matching remote HEAD verified at `995556e5ec1b8573b0032e1fcc96c0e3126db6a1`.
-- Documentation-only push validation: GitHub Actions run `39315729700` completed successfully for `995556e`; the job ran the serialized application suite, TypeScript, lint, production build, Edge Function checks, and isolated database security tests, ending with `PASS: RunFazone database security integration tests completed.` This does not establish hosted Supabase deployment or production readiness.
+- Documentation-only push validation: GitHub Actions run `39318615211` completed successfully for `058fbed`; the isolated job reported 47 passing test files and 826 passing tests. The workflow also ran the serialized application suite, TypeScript, lint, production build, Edge Function checks, and isolated database security tests. This does not establish hosted Supabase deployment or production readiness.
 - GitHub branch endpoint: protected=false; rulesets: []; deployments: []; hooks: HTTP 403. The last result blocks proof of safe push side effects.
 - All 396 source/config inventory files read for structural/risk markers; source hashes and routes/admin controls recorded.
 - 914 reachable Git text blobs scanned heuristically for selected token/private-key patterns; zero candidates, with explicit limits in [security findings](SECURITY_FINDINGS.md).
 - Public DNS read-only observations and SMTP TLS certificate/greeting recorded in [deployment dependencies](DEPLOYMENT_DEPENDENCIES.md). No AUTH or email command sent.
 - Prior Phase 1 Deno checks and two authorization tests are recorded in [historical progress](../roadmap/PHASE_PROGRESS.md). They were not rerun during this Phase 0 task; no Deno binary is installed directly.
+
+## Latest authenticated Supabase evidence
+
+The project-scoped Supabase MCP returned, without invoking any write-capable tool:
+
+- project URL `https://ketdhcmwowzztcdlmris.supabase.co`;
+- 13 public tables, all reported with RLS enabled;
+- 11 hosted migration versions, matching the first 11 logical local migrations; checksums were not exposed;
+- default branch status `MIGRATIONS_FAILED` with preview status `ACTIVE_HEALTHY`;
+- zero deployed Edge Functions;
+- security advisors reporting no policies on `payment_submissions`, `voucher_usages` and `vouchers`, five publicly executable `SECURITY DEFINER` routines, and disabled leaked-password protection;
+- performance advisors reporting six unindexed foreign keys and nine unused indexes.
+
+The MCP registration has no `read_only=true` parameter and exposes write-capable operations. Therefore this is evidence of disciplined read-only use, not server-enforced read-only authorization. Organization ownership, region, billing/plan, quota, backup/PITR, export/restore rights, Auth configuration, Storage objects, Realtime membership and the failed migration detail remain unavailable through the inspected project-scoped tools. No hosted SQL, migration, reset, branch creation, export, deployment, provider call or secret retrieval occurred.
 
 ## Documentation checks
 

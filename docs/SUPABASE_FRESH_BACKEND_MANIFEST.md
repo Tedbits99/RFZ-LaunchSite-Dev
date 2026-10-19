@@ -1,7 +1,7 @@
 # Fresh Supabase backend manifest
 
 This is a repository-derived preparation artifact for a new development
-project. It is not evidence of a deployed Supabase project. A later
+project. It is not evidence of a deployed Supabase project. The latest
 authenticated, project-scoped Supabase MCP inspection verified database
 metadata for project reference `ketdhcmwowzztcdlmris`; control-plane
 ownership, organization, region, quota and billing remain unexposed by the
@@ -56,7 +56,7 @@ policy metadata was returned. The database catalog did not expose Auth
 provider configuration, backup/PITR settings, or organization/project
 ownership metadata.
 
-The hosted migration ledger contains exactly these 11 versions, all matching
+The hosted migration ledger currently contains exactly these 11 versions, all matching
 the first 11 logical migrations in the active local tree:
 
 `20260927062024`, `20260927063133`, `20260927064634`, `20260928042134`,
@@ -71,7 +71,7 @@ set includes the receipt/reconciliation, supplier, security, and RF Coins
 families; their absence from the hosted ledger is not permission to apply
 them. No remote-only version was identified from the returned ledger.
 
-The default `main` branch is reported as `MIGRATIONS_FAILED`; its preview
+The default `main` branch is currently reported as `MIGRATIONS_FAILED`; its preview
 status is `ACTIVE_HEALTHY`. The available branch metadata and read-only logs
 did not identify a failed migration version or machine-readable failure
 message. The primary database answered catalog queries, but complete branch
@@ -218,30 +218,34 @@ After owner-authorized read-only access exists, capture and compare:
 Do not fetch secret values. Record only secret names, storage location, and
 whether a synthetic development value is present.
 
-## Backend automation plan
+## Backend automation roadmap
 
 The target development automation is:
 
-1. `create_order` validates catalog/package/input data server-side and persists
+1. **Foundation and identity:** create the isolated project only after owner approval; establish customer Auth, admin RBAC in app metadata/database roles, session refresh/revocation, and deny-by-default RLS. No browser code receives service-role or provider secrets.
+2. **Catalog and order boundary:** `create_order` validates catalog/package/input data server-side and persists
    integer-cent pricing, voucher snapshots, ownership capability, and an
    idempotent order reference.
-2. Payment webhooks verify provider signatures, event IDs, order identity,
+3. **Payment verification:** payment webhooks verify provider signatures, event IDs, order identity,
    amount, currency, and state transitions before calling secure RPCs.
-3. Fulfillment may start only after verified payment and an atomic claim. The
+4. **Fulfillment:** fulfillment may start only after verified payment and an atomic claim. The
    supplier idempotency key and captured mapping prevent duplicate top-ups.
-4. Reconciliation polls only synthetic/mock providers in development and
+5. **Reconciliation and retries:** reconciliation polls only synthetic/mock providers in development and
    finalizes supplier outcomes transactionally.
-5. Completion receipts use the outbox claim/lease/ack/fail protocol; malformed
+6. **Receipt delivery:** completion receipts use the outbox claim/lease/ack/fail protocol; malformed
    or historical data is dead-lettered without reversing supplier completion.
-6. Notifications run through a private Edge Function with bounded retries,
+7. **Notifications and monitoring:** notifications run through a private Edge Function with bounded retries,
    sanitized errors, and no browser-visible credentials.
-7. Admin overrides require authenticated admin RPC boundaries, explicit
+8. **Administrative recovery:** admin overrides require authenticated admin RPC boundaries, explicit
    approval/audit entries, terminal-state protections, and no direct table
    bypass.
-8. Recovery covers duplicate webhooks, provider timeouts, expired leases,
+9. **Recovery drills:** recovery covers duplicate webhooks, provider timeouts, expired leases,
    supplier retries, dead letters, reconciliation replay, and restore drills.
 
-These are preparation boundaries for later roadmap phases, not a claim that a
+Development mode must keep payment, supplier, email, scheduler and outbound
+HTTP activity disabled or loopback-mocked, and RF Coins must remain inactive
+until its separate double-entry/security approval. These are preparation
+boundaries for later roadmap phases, not a claim that a
 fresh backend is operational.
 
 ## Fresh-install validation gate
