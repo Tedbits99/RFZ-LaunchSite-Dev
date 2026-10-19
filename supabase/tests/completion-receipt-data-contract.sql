@@ -21,8 +21,7 @@ VALUES (
   'fazercards', 'custom', true, 'sandbox'
 );
 
--- Omitting quantity proves that the new-order trigger persists the only
--- supported storefront quantity, exactly one.
+-- Explicit quantity represents the supported one-package storefront order.
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,
   subtotal_cents, discount_cents, fee_cents, total_cents, payment_method,
@@ -206,14 +205,14 @@ END $$;
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,
   subtotal_cents, discount_cents, fee_cents, total_cents, payment_method,
-  status, payment_status, fulfillment_status
+  status, payment_status, fulfillment_status, quantity
 )
 VALUES (
   '00000000-0000-0000-0000-000000000509', 'RECEIPT-CONTRACT-NO-EMAIL',
   'receipt-no-email@example.invalid', 'Receipt Recipient Test',
   '00000000-0000-0000-0000-000000000502', '00000000-0000-0000-0000-000000000503',
   jsonb_build_object('__rfz_order_access_hash', repeat('d', 64)),
-  23456, 0, 0, 23456, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+  23456, 0, 0, 23456, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
 );
 UPDATE public.orders SET email = ''
 WHERE id = '00000000-0000-0000-0000-000000000509';
