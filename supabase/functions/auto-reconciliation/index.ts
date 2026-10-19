@@ -4,11 +4,12 @@ import {
   getReconciliationDecision,
   isInFlightSupplierTransactionStatus,
   isEnabledFazerCardsSupplier,
+  authorizeFulfillmentHandoffDispatch,
+  type DispatchAuthDecision,
 } from "../_shared/reconciliationSecurity.ts";
 import {
   processFulfillmentHandoffBatch,
   getFulfillmentHandoffSecret,
-  isAuthorizedFulfillmentHandoffRequest,
   json as handoffJson,
 } from "../_shared/fulfillmentHandoffWorker.ts";
 
@@ -46,14 +47,18 @@ const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const POLL_BATCH_LIMIT = 25;
 
 /*
-  Fulfillment handoff dispatch route (behind this function's cron secret).
+  Fulfillment handoff dispatch route.
 
   The platform edge router never registered the dedicated fulfillment-handoff
   slugs despite successful deployments, so the handoff worker is also served
-  here at POST ?dispatch=fulfillment-handoff. Strictly gated: this
-  auto-reconciliation secret first, then the fulfillment handoff secret on
-  top. Behavior of the scheduled reconciliation path is unchanged; with no
-  query string this function behaves exactly as before.
+  here at POST ?dispatch=fulfillment-handoff. Authenticated ONLY by the
+  fulfillment handoff cron secret (fulfillment_handoff_secret) via the
+  existing X-Cron-Secret header and constant-time comparator — never by this
+  function's auto_recon_secret alone, and never without a valid secret.
+  Unauthenticated requests and requests presenting any other secret are
+  rejected with 401 before any queue claim or supplier access. Behavior of
+  the scheduled reconciliation path is unchanged; with no query string this
+  function behaves exactly as before.
 
   This dispatch NEVER creates supplier orders on its own; it drives the same
   canonical fulfillment pipeline (verified-payment gate, atomic
@@ -71,23 +76,17 @@ async function handleFulfillmentHandoffDispatch(req: Request): Promise<Response 
   }
   const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  // Gate 1: this function's own cron secret (unchanged requirement).
-  const { data: reconSecretRow } = await db
-    .from("_cron_secrets")
-    .select("value")
-    .eq("key", "auto_recon_secret")
-    .maybeSingle();
-  const reconSecret = typeof reconSecretRow?.value === "string" ? reconSecretRow.value : null;
-  if (!hasValidReconciliationSecret(req.headers.get("X-Cron-Secret"), reconSecret)) {
-    return handoffJson({ error: "Unauthorized." }, 401);
-  }
-
-  // Gate 2: the fulfillment handoff cron secret on top (defense in depth).
+  // Sole dispatch credential: the fulfillment handoff cron secret.
   const handoffSecret = await getFulfillmentHandoffSecret(db);
-  if (!handoffSecret) {
+  const decision: DispatchAuthDecision = authorizeFulfillmentHandoffDispatch({
+    dispatch: url.searchParams.get("dispatch"),
+    providedSecret: req.headers.get("X-Cron-Secret"),
+    configuredHandoffSecret: handoffSecret,
+  });
+  if (decision === "unavailable") {
     return handoffJson({ error: "Service unavailable." }, 503);
   }
-  if (!isAuthorizedFulfillmentHandoffRequest(req.headers.get("X-Cron-Secret"), handoffSecret)) {
+  if (decision === "unauthorized") {
     return handoffJson({ error: "Unauthorized." }, 401);
   }
 

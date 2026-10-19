@@ -53,3 +53,24 @@ export function getReconciliationDecision(raw: string, failReason: unknown): 'co
 export function isInFlightSupplierTransactionStatus(status: unknown): boolean {
   return status === 'submitted' || status === 'pending';
 }
+
+/**
+ * Auth decision for the fulfillment handoff dispatch route served inside the
+ * auto-reconciliation function. The dispatch is authorized ONLY by the
+ * fulfillment handoff cron secret — never by auto_recon_secret alone, and
+ * never without a configured secret. 'not-dispatch' lets the caller fall
+ * through to the normal reconciliation path unchanged.
+ */
+export type DispatchAuthDecision = 'not-dispatch' | 'authorized' | 'unauthorized' | 'unavailable';
+
+export function authorizeFulfillmentHandoffDispatch(params: {
+  dispatch: string | null;
+  providedSecret: string | null;
+  configuredHandoffSecret: string | null | undefined;
+}): DispatchAuthDecision {
+  if (params.dispatch !== 'fulfillment-handoff') return 'not-dispatch';
+  if (!params.configuredHandoffSecret) return 'unavailable';
+  return hasValidReconciliationSecret(params.providedSecret, params.configuredHandoffSecret)
+    ? 'authorized'
+    : 'unauthorized';
+}
