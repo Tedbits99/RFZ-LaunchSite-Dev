@@ -12,13 +12,13 @@ VALUES ('00000000-0000-0000-0000-000000000603', '00000000-0000-0000-0000-0000000
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,
   subtotal_cents, discount_cents, fee_cents, total_cents, payment_method,
-  status, payment_status, fulfillment_status
+  status, payment_status, fulfillment_status, quantity
 )
 VALUES
-  ('00000000-0000-0000-0000-000000000604', 'OUTBOX-WORKER-1', 'worker-1@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('a', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED'),
-  ('00000000-0000-0000-0000-000000000605', 'OUTBOX-WORKER-2', 'worker-2@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('b', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED'),
-  ('00000000-0000-0000-0000-000000000606', 'OUTBOX-WORKER-3', 'worker-3@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('c', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED'),
-  ('00000000-0000-0000-0000-000000000607', 'OUTBOX-WORKER-RACE', 'worker-race@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('d', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED');
+  ('00000000-0000-0000-0000-000000000604', 'OUTBOX-WORKER-1', 'worker-1@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('a', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED', 1),
+  ('00000000-0000-0000-0000-000000000605', 'OUTBOX-WORKER-2', 'worker-2@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('b', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED', 1),
+  ('00000000-0000-0000-0000-000000000606', 'OUTBOX-WORKER-3', 'worker-3@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('c', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED', 1),
+  ('00000000-0000-0000-0000-000000000607', 'OUTBOX-WORKER-RACE', 'worker-race@example.invalid', 'Worker Test', '00000000-0000-0000-0000-000000000602', '00000000-0000-0000-0000-000000000603', jsonb_build_object('user_id', '1234', '__rfz_order_access_hash', repeat('d', 64)), 1, 0, 0, 1, 'manual', 'COMPLETED', 'VERIFIED', 'COMPLETED', 1);
 
 INSERT INTO public.suppliers (id, name, code, adapter, enabled, environment)
 VALUES ('00000000-0000-0000-0000-000000000613', 'Outbox Worker Test Supplier', 'fazercards', 'custom', true, 'sandbox');
@@ -38,6 +38,34 @@ VALUES
   ('00000000-0000-0000-0000-000000000609', '00000000-0000-0000-0000-000000000605', 'completion_receipt', 'worker-2@example.invalid'),
   ('00000000-0000-0000-0000-000000000610', '00000000-0000-0000-0000-000000000606', 'completion_receipt', 'worker-3@example.invalid'),
   ('00000000-0000-0000-0000-000000000611', '00000000-0000-0000-0000-000000000607', 'completion_receipt', 'worker-race@example.invalid');
+
+WITH stamped AS (
+  SELECT id, clock_timestamp() AS completed_at
+  FROM public.order_email_outbox
+  WHERE id IN (
+    '00000000-0000-0000-0000-000000000608',
+    '00000000-0000-0000-0000-000000000609',
+    '00000000-0000-0000-0000-000000000610',
+    '00000000-0000-0000-0000-000000000611'
+  )
+)
+UPDATE public.order_email_outbox AS outbox
+SET completed_at = stamped.completed_at,
+    receipt_snapshot = jsonb_build_object(
+      'reference', orders.reference,
+      'total_cents', orders.total_cents,
+      'payment_method', orders.payment_method,
+      'game_name', games.name,
+      'package_name', packages.name,
+      'quantity', orders.quantity,
+      'masked_player_identifier', '****1234',
+      'completed_at', stamped.completed_at
+    )
+FROM stamped
+JOIN public.orders ON orders.id = outbox.order_id
+JOIN public.games ON games.id = orders.game_id
+JOIN public.packages ON packages.id = orders.package_id
+WHERE outbox.id = stamped.id;
 
 UPDATE public.order_email_outbox
 SET next_attempt_at = clock_timestamp() + interval '1 hour'
