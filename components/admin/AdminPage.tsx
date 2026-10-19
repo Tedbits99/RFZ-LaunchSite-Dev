@@ -2,9 +2,9 @@ import { ReactNode } from 'react';
 
 export function AdminPage({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <main>
-      <div className="mx-auto max-w-[1280px] px-5 py-8">
-        <p className="mb-6 text-[10px] uppercase tracking-widest text-slate-500">{title}</p>
+    <main aria-labelledby="admin-page-title">
+      <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <h1 id="admin-page-title" className="sr-only">{title}</h1>
         {children}
       </div>
     </main>

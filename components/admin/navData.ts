@@ -1,4 +1,15 @@
-import { Boxes, ClipboardList, CreditCard, Home, Receipt, ShieldCheck, Users2, LucideIcon } from 'lucide-react';
+import {
+  ClipboardList,
+  Home,
+  Megaphone,
+  Receipt,
+  ShieldCheck,
+  Store,
+  Truck,
+  Users2,
+  WalletCards,
+  type LucideIcon,
+} from 'lucide-react';
 
 export type NavLeaf = { label: string; href: string };
 export type NavLinkItem = { label: string; href: string; icon: LucideIcon; match: string[] };
@@ -9,8 +20,8 @@ export const PRIMARY_NAV: NavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: Home, match: ['/admin'] },
   { label: 'Orders', href: '/admin/orders', icon: Receipt, match: ['/admin/orders'] },
   {
-    label: 'Catalog',
-    icon: Boxes,
+    label: 'Products & pricing',
+    icon: Store,
     items: [
       { label: 'Games & Packages', href: '/admin/games' },
       { label: 'Pricing', href: '/admin/pricing' },
@@ -20,7 +31,7 @@ export const PRIMARY_NAV: NavItem[] = [
   },
   {
     label: 'Marketing',
-    icon: Receipt,
+    icon: Megaphone,
     items: [
       { label: 'Promotions', href: '/admin/promotions' },
       { label: 'Announcements', href: '/admin/announcements' },
@@ -28,12 +39,11 @@ export const PRIMARY_NAV: NavItem[] = [
     ],
   },
   {
-    label: 'Users',
+    label: 'Customers & access',
     icon: Users2,
     items: [
       { label: 'Customers', href: '/admin/customers' },
       { label: 'Staff', href: '/admin/staff' },
-      { label: 'Add Admin', href: '/admin/staff' },
       { label: 'Roles & Permissions', href: '/admin/roles' },
     ],
   },
@@ -45,6 +55,12 @@ export const PRIMARY_NAV: NavItem[] = [
       { label: 'Tickets', href: '/admin/tickets' },
       { label: 'Tasks', href: '/admin/tasks' },
       { label: 'Blocklist', href: '/admin/blocklist' },
+    ],
+  },
+  {
+    label: 'Suppliers',
+    icon: Truck,
+    items: [
       { label: 'Suppliers', href: '/admin/suppliers' },
       { label: 'FazerCards Catalog', href: '/admin/suppliers/fazercards-catalog' },
       { label: 'Controlled Test Order', href: '/admin/suppliers/controlled-test-order' },
@@ -52,8 +68,8 @@ export const PRIMARY_NAV: NavItem[] = [
     ],
   },
   {
-    label: 'Finance',
-    icon: CreditCard,
+    label: 'Payments & finance',
+    icon: WalletCards,
     items: [
       { label: 'Payments', href: '/admin/payments' },
       { label: 'Reconciliation', href: '/admin/reconciliation' },
@@ -62,15 +78,15 @@ export const PRIMARY_NAV: NavItem[] = [
     ],
   },
   {
-    label: 'System',
+    label: 'Reports & system',
     icon: ShieldCheck,
     items: [
+      { label: 'Analytics', href: '/admin/analytics' },
       { label: 'Activity Log', href: '/admin/activity-log' },
       { label: 'Risk Alerts', href: '/admin/risk-alerts' },
       { label: 'System Health', href: '/admin/system-health' },
       { label: 'Security', href: '/admin/security' },
       { label: 'Settings', href: '/admin/settings' },
-      { label: 'Analytics', href: '/admin/analytics' },
     ],
   },
 ];

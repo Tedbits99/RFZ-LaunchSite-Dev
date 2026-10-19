@@ -1,6 +1,8 @@
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import GamesVisibilityPanel from './GamesVisibilityPanel';
+import Link from 'next/link';
 import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, Package, ShoppingCart, Users, XCircle } from 'lucide-react';
+import { PageHeader, StatusBadge } from '@/components/admin/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,8 +48,6 @@ async function getMetrics(): Promise<{
 }
 
 const fmtP = (cents: number) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
-const statusColor: Record<string, string> = { PENDING: 'text-amber-300', PAID: 'text-emerald-300', PROCESSING: 'text-blue-300', COMPLETED: 'text-emerald-400', CANCELLED: 'text-rose-300', FAILED: 'text-rose-400', REFUND_REQUESTED: 'text-orange-300', REFUNDED: 'text-slate-400', PAYMENT_PENDING: 'text-amber-200' };
-
 export default async function AdminDashboard() {
   const data = await getMetrics();
   const { orders, games, packages, error } = data;
@@ -70,13 +70,12 @@ export default async function AdminDashboard() {
   ];
 
   return (
-    <div className="mx-auto max-w-[1180px] px-5 py-8">
-      <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div><h1 className="font-display text-2xl font-bold">Overview</h1><p className="text-xs text-slate-500">Live metrics from your database</p></div>
-        <div className="flex gap-2 text-xs">
-          <span className="rounded-lg border border-[#253451] px-3 py-2 text-slate-400">Last 100 orders</span>
-        </div>
-      </div>
+    <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      <PageHeader
+        title="Overview"
+        subtitle="A live snapshot of orders, revenue, fulfillment, and catalog health."
+        action={<Link href="/admin/orders" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">View orders</Link>}
+      />
 
       {error && (
         <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
@@ -84,29 +83,32 @@ export default async function AdminDashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {cards.map((c) => (
-          <div key={c.label} className={`rounded-xl border border-[#1b2a45] bg-gradient-to-br ${c.accent} p-4`}>
+          <div key={c.label} className={`rounded-xl border border-[#1b2a45] bg-gradient-to-br ${c.accent} p-4 shadow-lg shadow-black/5`}>
             <div className="flex items-center justify-between"><span className="text-[11px] uppercase tracking-wider text-slate-400">{c.label}</span><c.icon size={16} className={c.iconColor} /></div>
-            <p className="font-display mt-3 text-2xl font-bold">{c.value}</p>
+            <p className="font-display mt-3 text-2xl font-bold tracking-tight text-white">{c.value}</p>
           </div>
         ))}
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
-          <h2 className="font-display mb-4 text-sm font-semibold">Recent Orders</h2>
+        <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4 sm:p-5 lg:col-span-2">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div><h2 className="font-display text-sm font-semibold text-white">Recent orders</h2><p className="mt-1 text-xs text-slate-500">The latest records returned by the admin query.</p></div>
+            <Link href="/admin/orders" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Open all <span aria-hidden="true">→</span></Link>
+          </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-slate-500"><tr className="border-b border-[#1b2a45]"><th className="pb-2 font-medium">Reference</th><th className="pb-2 font-medium">Customer</th><th className="pb-2 font-medium">Game</th><th className="pb-2 font-medium">Status</th><th className="pb-2 text-right font-medium">Total</th></tr></thead>
+            <table className="w-full min-w-[620px] text-left text-xs">
+              <thead className="text-[10px] uppercase tracking-wider text-slate-500"><tr className="border-b border-[#1b2a45]"><th className="pb-3 font-medium">Reference</th><th className="pb-3 font-medium">Customer</th><th className="pb-3 font-medium">Game</th><th className="pb-3 font-medium">Status</th><th className="pb-3 text-right font-medium">Total</th></tr></thead>
               <tbody>
-                {orders.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-600">No orders yet. Orders from the storefront will appear here.</td></tr>}
+                {orders.length === 0 && <tr><td colSpan={5} className="py-10 text-center text-slate-500">No orders yet. Orders from the storefront will appear here.</td></tr>}
                 {orders.slice(0, 12).map((o) => (
-                  <tr key={o.id} className="border-b border-[#0f1b31]">
+                  <tr key={o.id} className="border-b border-[#0f1b31] last:border-0">
                     <td className="py-3 font-mono text-cyan-300">{o.reference}</td>
                     <td className="py-3 text-slate-300">{o.email}</td>
                     <td className="py-3 text-slate-400">{o.games?.name || '—'}</td>
-                    <td className={`py-3 font-medium ${statusColor[o.status] || 'text-slate-400'}`}>{o.status}</td>
+                    <td className="py-3"><StatusBadge status={o.status} /></td>
                     <td className="py-3 text-right font-medium">{fmtP(o.total_cents)}</td>
                   </tr>
                 ))}
@@ -117,7 +119,7 @@ export default async function AdminDashboard() {
 
         <div className="space-y-4">
           <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
-            <h2 className="font-display mb-4 text-sm font-semibold">Catalog</h2>
+            <div className="mb-4 flex items-center justify-between"><h2 className="font-display text-sm font-semibold">Catalog</h2><Link href="/admin/games" className="text-xs text-cyan-300 hover:text-cyan-200">Manage</Link></div>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Gamepad2 size={14} className="text-cyan-300" /> Games</span><span className="font-display font-bold text-slate-200">{games.length}</span></div>
               <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Package size={14} className="text-violet-300" /> Packages</span><span className="font-display font-bold text-slate-200">{packages.length}</span></div>
@@ -127,6 +129,6 @@ export default async function AdminDashboard() {
           <GamesVisibilityPanel initialGames={games.map((g) => ({ id: g.id, name: g.name, slug: g.slug, is_active: g.is_active, is_featured: g.is_featured }))} />
         </div>
       </div>
-    </div>
+    </main>
   );
 }
