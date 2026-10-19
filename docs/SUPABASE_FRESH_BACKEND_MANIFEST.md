@@ -120,7 +120,9 @@ without Supabase migration-history evidence.
 
 ### Canonical installation groups
 
-Install only from a reviewed, normalized manifest in this order:
+Install only from the generated [canonical disposable migration sequence](transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md), not by replaying the directory blindly. It records all 115 active files, checksums, inclusion/exclusion, replacement relationships, dependency chain and safety classification. The selected disposable sequence contains no RF Coins or scheduler migrations.
+
+The logical installation groups are:
 
 1. **Core catalog and commerce primitives** — the 20260927 core catalog,
    vouchers/promotions, games/package policies, order/payment/fulfillment
