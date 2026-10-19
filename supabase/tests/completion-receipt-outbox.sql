@@ -32,7 +32,7 @@ VALUES
     '00000000-0000-0000-0000-000000000404', 'RECEIPT-COMPLETE-1',
     'receipt-complete-1@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
-    jsonb_build_object('__rfz_order_access_hash', repeat('1', 64)),
+    jsonb_build_object('user_id', '123456789', '__rfz_order_access_hash', repeat('1', 64)),
     12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
   ),
   (
@@ -81,7 +81,7 @@ VALUES
     '00000000-0000-0000-0000-000000000418', 'RECEIPT-COMPLETE-2',
     'receipt-complete-2@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
-    jsonb_build_object('__rfz_order_access_hash', repeat('8', 64)),
+    jsonb_build_object('user_id', '223456789', '__rfz_order_access_hash', repeat('8', 64)),
     12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
   ),
   (
