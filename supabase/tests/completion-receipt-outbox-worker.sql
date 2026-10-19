@@ -62,10 +62,13 @@ SET completed_at = stamped.completed_at,
       'completed_at', stamped.completed_at
     )
 FROM stamped
-JOIN public.orders ON orders.id = outbox.order_id
-JOIN public.games ON games.id = orders.game_id
-JOIN public.packages ON packages.id = orders.package_id
-WHERE outbox.id = stamped.id;
+  , public.orders
+  , public.games
+  , public.packages
+WHERE outbox.id = stamped.id
+  AND orders.id = outbox.order_id
+  AND games.id = orders.game_id
+  AND packages.id = orders.package_id;
 
 UPDATE public.order_email_outbox
 SET next_attempt_at = clock_timestamp() + interval '1 hour'
