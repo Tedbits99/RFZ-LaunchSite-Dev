@@ -1,6 +1,7 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
 import OrdersManager from './OrdersManager';
+import { getAdminSession } from '@/lib/adminGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,19 +19,28 @@ type OrderRow = {
   supplier_transactions?: { supplier_reference: string | null; status: string; suppliers?: { code: string; name: string } | null }[] | null;
 };
 
-export default async function AdminOrdersPage({ searchParams }: { searchParams: { q?: string; status?: string; date?: string; archived?: string } }) {
+export default async function AdminOrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; date?: string; archived?: string }> }) {
+  const resolvedSearchParams = await searchParams;
   let orders: OrderRow[] = [];
   let dbReady = false;
-  let statusCounts: Record<string, number> = {};
+  const statusCounts: Record<string, number> = {};
 
   const db = adminSupabase || supabase;
   if (db) {
     dbReady = true;
 
-    // Run archive cleanup on page load so the list is always current
-    try { await db.rpc('archive_old_unpaid_orders'); } catch {}
+    // Archival mutates orders. Run it only for an authenticated, active admin.
+    const adminSession = await getAdminSession();
+    if (adminSession && adminSupabase) {
+      try {
+        const { error: archiveError } = await adminSupabase.rpc('archive_old_unpaid_orders');
+        if (archiveError && process.env.NODE_ENV !== 'production') console.warn('Order archival RPC failed.');
+      } catch {
+        if (process.env.NODE_ENV !== 'production') console.warn('Order archival RPC failed.');
+      }
+    }
 
-    const showArchived = searchParams.archived === '1';
+    const showArchived = resolvedSearchParams.archived === '1';
 
     let query = db
       .from('orders')
@@ -41,15 +51,15 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
     // Exclude archived orders unless explicitly viewing archived
     query = query.eq('is_archived', showArchived);
 
-    if (searchParams.status && searchParams.status !== 'ALL') {
-      query = query.eq('status', searchParams.status);
+    if (resolvedSearchParams.status && resolvedSearchParams.status !== 'ALL') {
+      query = query.eq('status', resolvedSearchParams.status);
     }
-    if (searchParams.q) {
-      const q = searchParams.q.replace(/[%_]/g, '\\$&');
+    if (resolvedSearchParams.q) {
+      const q = resolvedSearchParams.q.replace(/[%_]/g, '\\$&');
       query = query.or(`reference.ilike.%${q}%,email.ilike.%${q}%`);
     }
-    if (searchParams.date) {
-      const d = searchParams.date;
+    if (resolvedSearchParams.date) {
+      const d = resolvedSearchParams.date;
       const next = new Date(d);
       next.setDate(next.getDate() + 1);
       query = query.gte('created_at', `${d}T00:00:00Z`).lt('created_at', `${next.toISOString().slice(0, 10)}T00:00:00Z`);
@@ -70,5 +80,5 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
     }
   }
 
-  return <OrdersManager orders={orders} dbReady={dbReady} searchParams={searchParams} statusCounts={statusCounts} />;
+  return <OrdersManager orders={orders} dbReady={dbReady} searchParams={resolvedSearchParams} statusCounts={statusCounts} />;
 }

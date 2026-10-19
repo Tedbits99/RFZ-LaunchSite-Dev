@@ -12,14 +12,14 @@ type CookieToSet = { name: string; value: string; options: CookieOptions }
  * example during static analysis). We read the cookie store defensively so a
  * missing request context degrades to "no session" instead of crashing.
  */
-export function createSupabaseServerClient() {
+export async function createSupabaseServerClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !anonKey) throw new Error('Supabase is not configured.')
 
-  let cookieStore: ReturnType<typeof cookies> | null = null
+  let cookieStore: Awaited<ReturnType<typeof cookies>> | null = null
   try {
-    cookieStore = cookies()
+    cookieStore = await cookies()
   } catch {
     cookieStore = null
   }

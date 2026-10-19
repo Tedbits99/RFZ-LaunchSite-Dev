@@ -76,7 +76,8 @@ type SupplierTransaction = {
   suppliers: { code: string; name: string } | null;
 };
 
-export default async function AdminOrderDetailPage({ params }: { params: { id: string } }) {
+export default async function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const db = adminSupabase || supabase;
   if (!db) {
     return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>;
@@ -85,7 +86,7 @@ export default async function AdminOrderDetailPage({ params }: { params: { id: s
   const { data: orderData, error: orderError } = await db
     .from('orders')
     .select('id, reference, email, customer_name, status, payment_status, fulfillment_status, payment_verification_method, total_cents, subtotal_cents, discount_cents, payment_method, payment_reference, payment_submitted_at, payment_provider, payment_mode, payment_verified_at, payment_verified_by, provider_checkout_url, created_at, updated_at, player_inputs, voucher_code, games(name), packages(name, amount)')
-    .eq('id', params.id)
+    .eq('id', id)
     .maybeSingle();
 
   if (orderError && process.env.NODE_ENV !== 'production') console.error('Admin order detail load failed:', orderError);
@@ -98,7 +99,7 @@ export default async function AdminOrderDetailPage({ params }: { params: { id: s
   const { data: timelineData } = await db
     .from('order_timeline')
     .select('id, status, actor_email, note, created_at')
-    .eq('order_id', params.id)
+    .eq('order_id', id)
     .order('created_at', { ascending: true });
 
   const timeline = (timelineData || []) as unknown as TimelineEntry[];
@@ -106,7 +107,7 @@ export default async function AdminOrderDetailPage({ params }: { params: { id: s
   const { data: paymentData } = await db
     .from('payment_submissions')
     .select('id, payment_method, reference_number, amount_cents, note, proof_url, submitted_at')
-    .eq('order_id', params.id)
+    .eq('order_id', id)
     .order('submitted_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -116,7 +117,7 @@ export default async function AdminOrderDetailPage({ params }: { params: { id: s
   const { data: refundData } = await db
     .from('refunds')
     .select('id, reference, amount_cents, reason, status, approved_by, created_at')
-    .eq('order_id', params.id)
+    .eq('order_id', id)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -126,7 +127,7 @@ export default async function AdminOrderDetailPage({ params }: { params: { id: s
   const { data: supplierTxData } = await db
     .from('supplier_transactions')
     .select('id, supplier_id, supplier_reference, status, action, error_message, attempt, idempotency_key, duration_ms, created_at, last_polled_at, suppliers(code, name)')
-    .eq('order_id', params.id)
+    .eq('order_id', id)
     .eq('action', 'create_order')
     .order('created_at', { ascending: false })
     .limit(1)

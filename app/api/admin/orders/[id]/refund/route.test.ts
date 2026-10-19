@@ -25,7 +25,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: { __anonClient: true } }));
 
 import { POST } from './route';
 
-const routeContext = { params: { id: '11111111-1111-1111-1111-111111111111' } };
+const routeContext = { params: Promise.resolve({ id: '11111111-1111-1111-1111-111111111111' }) };
 
 type TableConfig = {
   maybeSingle?: unknown;
@@ -213,14 +213,13 @@ describe('admin refund RF Coins integration', () => {
     const refundedCoinOrder = { ...coinOrder, status: 'REFUNDED' };
 
     function makeRetryDb(ledgerRow: unknown, insertError?: { message: string } | null) {
-      let inserts = 0;
       const log = makeDb({
         orders: { maybeSingle: refundedCoinOrder },
         rf_coin_ledger: { maybeSingle: ledgerRow },
         refunds: { maybeSingle: null, insertError: insertError ?? null },
         order_timeline: {},
       });
-      return { log, countInserts: () => inserts };
+      return { log };
     }
 
     it('recovers: verifies the ledger reversal, never re-calls the RPC, creates the missing record', async () => {

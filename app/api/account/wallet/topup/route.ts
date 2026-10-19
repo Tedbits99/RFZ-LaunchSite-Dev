@@ -55,7 +55,7 @@ async function getActiveCustomerSessionForRequest(req: NextRequest) {
     /^rfz-customer-auth(?:\.\d+)?$/.test(name));
   if (!hasCustomerAuthCookie) return null;
   try {
-    const client = createCustomerServerClient();
+    const client = await createCustomerServerClient();
     const { data, error } = await client.auth.getUser();
     if (error || !data.user || !data.user.email_confirmed_at) return null;
     const { data: profile } = await client

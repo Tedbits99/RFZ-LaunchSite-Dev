@@ -45,12 +45,20 @@ describe('requireAdmin authorization boundary', () => {
 
   it('returns the session and authenticated client for an authorized admin', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: { id: 'admin-1', email: 'admin@example.com' } }, error: null });
-    mocks.maybeSingle.mockResolvedValue({ data: { email: 'admin@example.com', name: 'Admin', role: 'ADMIN' }, error: null });
+    mocks.maybeSingle.mockResolvedValue({ data: { email: 'admin@example.com', name: 'Admin', role: 'ADMIN', is_active: true }, error: null });
     const result = await requireAdmin(request);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.session.userId).toBe('admin-1');
       expect(result.session.role).toBe('ADMIN');
     }
+  });
+
+  it('returns 403 for a suspended admin account', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'admin-1', email: 'admin@example.com' } }, error: null });
+    mocks.maybeSingle.mockResolvedValue({ data: { email: 'admin@example.com', name: 'Admin', role: 'ADMIN', is_active: false }, error: null });
+    const result = await requireAdmin(request);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
   });
 });

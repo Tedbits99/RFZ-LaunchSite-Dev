@@ -333,8 +333,7 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
                 <div className="mt-2">
                   <span className={labelCls}>Preview</span>
                   <div className="overflow-hidden rounded-lg border border-[#1b2a45]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                                        <img
                       src={newPromo.image_url}
                       alt="New promotion banner preview"
                       className="h-40 w-full object-contain bg-[#0a1124]"
@@ -548,8 +547,7 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
                   <div>
                     <span className={labelCls}>Preview</span>
                     <div className="overflow-hidden rounded-lg border border-[#1b2a45]">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                                            <img
                         src={p.image_url}
                         alt={`${p.title} banner preview`}
                         className="h-40 w-full object-contain bg-[#0a1124]"

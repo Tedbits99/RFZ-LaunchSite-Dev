@@ -26,7 +26,7 @@ export default async function AdminGamesPage() {
   let loadError: string | null = null
 
   try {
-    const db = createSupabaseServerClient()
+    const db = await createSupabaseServerClient()
     const { data: { user } } = await db.auth.getUser()
     if (!user) throw new Error('Not authenticated')
     dbReady = true

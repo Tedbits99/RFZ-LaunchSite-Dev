@@ -4,7 +4,8 @@ import { supabase } from '@/lib/supabase';
 import { requireAdmin } from '@/lib/adminGuard';
 import { sendPaymentSuccessEmail } from '@/lib/transactionalEmail';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const session = await requireAdmin(req);
   if (!session.ok) return session.response;
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Call verify_payment RPC — sets payment_status=VERIFIED, status=PAYMENT_VERIFIED
     // Does NOT trigger fulfillment. Idempotent — safe for duplicate clicks.
     const { data: rpcResult, error: rpcError } = await client.rpc('verify_payment', {
-      p_order_id: params.id,
+      p_order_id: id,
       p_verified_by: session.session.email,
       p_verification_method: 'MANUAL',
       p_payment_reference: paymentReference,
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Send payment-success email (fire-and-forget, duplicate-guarded by email_sent_log).
     // Only sends if payment_status actually transitioned to VERIFIED.
     if (result?.out_payment_status === 'VERIFIED' || !rpcError) {
-      sendPaymentSuccessEmail(client, params.id).catch(() => {});
+      sendPaymentSuccessEmail(client, id).catch(() => {});
     }
 
     return NextResponse.json({

@@ -27,7 +27,8 @@ type TimelineEntry = {
   created_at: string;
 };
 
-export default async function AccountOrderDetail({ params }: { params: { id: string } }) {
+export default async function AccountOrderDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const session = await getActiveCustomerSession();
 
   // Guest access is handled by /track-order after one-time email verification;
@@ -39,7 +40,7 @@ export default async function AccountOrderDetail({ params }: { params: { id: str
   const { data } = await client
     .from('orders')
     .select('id, reference, email, status, payment_status, fulfillment_status, total_cents, created_at, updated_at, player_inputs, payment_method, games(name), packages(name, amount)')
-    .eq('id', params.id)
+    .eq('id', id)
     .eq('customer_user_id', session.user.id)
     .maybeSingle();
   const order = data as unknown as Order | null;
@@ -48,7 +49,7 @@ export default async function AccountOrderDetail({ params }: { params: { id: str
   const { data: timelineData } = await client
     .from('order_timeline')
     .select('id, status, note, created_at')
-    .eq('order_id', params.id)
+    .eq('order_id', id)
     .order('created_at', { ascending: true });
   const timeline = (timelineData || []) as unknown as TimelineEntry[];
 

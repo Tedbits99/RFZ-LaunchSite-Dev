@@ -216,8 +216,7 @@ export default function PackagesManager({ packages: initialPackages, gameId, isM
                     </label>
                     {draft.imageUrl.startsWith('https://') && (
                       <div className="flex justify-center rounded-lg border border-[#253451] bg-[#080f20] p-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={draft.imageUrl} alt="Package preview" className="h-16 w-16 object-contain" />
+                                                <img src={draft.imageUrl} alt="Package preview" className="h-16 w-16 object-contain" />
                       </div>
                     )}
                     <div className="flex gap-2 pt-1">

@@ -11,17 +11,15 @@ export type AdminSession = {
 }
 
 export async function getAdminSession(): Promise<AdminSession | null> {
-  const supabase = createSupabaseServerClient()
+  const supabase = await createSupabaseServerClient()
 
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser()
   if (error || !user) {
-    console.log('[adminGuard] No session found. error:', error?.message || 'null user')
     return null
   }
-  console.log('[adminGuard] Session found for user:', user.id, 'email:', user.email)
 
   let name = ''
   let role = 'ADMIN'
@@ -31,15 +29,14 @@ export async function getAdminSession(): Promise<AdminSession | null> {
   const client = adminSupabase || supabase
   const { data: admin } = await client
     .from('admins')
-    .select('email, name, role')
+    .select('email, name, role, is_active')
     .eq('id', user.id)
     .maybeSingle()
-  if (admin) {
+  if (admin?.is_active) {
     name = admin.name || ''
     role = admin.role || 'ADMIN'
-    console.log('[adminGuard] Admin record found:', admin.email, 'role:', admin.role)
   } else {
-    console.log('[adminGuard] No admin record found for user:', user.id)
+    return null
   }
 
   return {
@@ -78,8 +75,8 @@ function jsonError(status: number, message: string): Response {
 
 export async function requireAdmin(
   req: NextRequest,
-): Promise<{ ok: true; session: AdminSession; client: ReturnType<typeof createSupabaseServerClient> } | { ok: false; response: Response }> {
-  let supabase: ReturnType<typeof createSupabaseServerClient>
+): Promise<{ ok: true; session: AdminSession; client: Awaited<ReturnType<typeof createSupabaseServerClient>> } | { ok: false; response: Response }> {
+  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
   try {
     supabase = createRequestClient(req)
   } catch {
@@ -101,10 +98,10 @@ export async function requireAdmin(
     const client = adminSupabase || supabase
     const { data: admin } = await client
       .from('admins')
-      .select('email, name, role')
+      .select('email, name, role, is_active')
       .eq('id', user.id)
       .maybeSingle()
-    if (!admin) {
+    if (!admin || !admin.is_active) {
       return { ok: false, response: jsonError(403, 'Forbidden.') }
     }
 

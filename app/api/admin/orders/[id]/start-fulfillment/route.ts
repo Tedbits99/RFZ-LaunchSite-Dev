@@ -3,7 +3,8 @@ import { requireAdmin } from '@/lib/adminGuard';
 import { startFulfillment } from '@/lib/suppliers/fulfillment';
 import { sendFulfillmentFailedEmail } from '@/lib/transactionalEmail';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const session = await requireAdmin(req);
   if (!session.ok) return session.response;
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const { data: order } = await session.client
       .from('orders')
       .select('id, payment_status, fulfillment_status')
-      .eq('id', params.id)
+      .eq('id', id)
       .maybeSingle();
 
     if (!order) {
@@ -36,10 +37,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: 'Fulfillment cannot be started from the current state.' }, { status: 400 });
     }
 
-    const result = await startFulfillment(params.id, session.client);
+    const result = await startFulfillment(id, session.client);
 
     if (!result.success) {
-      sendFulfillmentFailedEmail(session.client, params.id, result.error || 'Fulfillment failed to start').catch(() => {});
+      sendFulfillmentFailedEmail(session.client, id, result.error || 'Fulfillment failed to start').catch(() => {});
       return NextResponse.json({
         ok: false,
         error: result.error || 'Fulfillment failed to start.',

@@ -48,7 +48,7 @@ export async function authorizeOrderRequest(
 ): Promise<boolean> {
   if (hasCustomerAuthCookie(req)) {
     try {
-      const customerClient = createCustomerServerClient();
+      const customerClient = await createCustomerServerClient();
       const { data, error } = await customerClient.auth.getUser();
       if (error || !data.user) return false;
       if (order.customer_user_id && order.customer_user_id === data.user.id) return true;
@@ -63,7 +63,7 @@ export async function authorizeOrderRequest(
   const legacyAuthCookiePresent = req.cookies.getAll().some(({ name }) => /^sb-.+-auth-token(?:\.\d+)?$/.test(name));
   if (legacyAuthCookiePresent) {
     try {
-      const authClient = createSupabaseServerClient();
+      const authClient = await createSupabaseServerClient();
       const { data, error } = await authClient.auth.getUser();
       if (error || !data.user) return false;
       if (order.customer_user_id && order.customer_user_id === data.user.id) return true;

@@ -43,9 +43,9 @@ export async function POST(request: NextRequest) {
     return json({ error: GENERIC_INVALID }, 400);
   }
 
-  let recovery: ReturnType<typeof createRecoveryServerClient>;
+  let recovery: Awaited<ReturnType<typeof createRecoveryServerClient>>;
   try {
-    recovery = createRecoveryServerClient();
+    recovery = await createRecoveryServerClient();
   } catch {
     return json({ error: GENERIC_503 }, 503);
   }

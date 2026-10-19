@@ -14,7 +14,7 @@ function serveBlock(): string {
 describe('fulfillment-handoff-v2 health-check safety contract', () => {
   it('registers the v2 config entry with JWT verification disabled', () => {
     const config = readFileSync(new URL('../../config.toml', import.meta.url), 'utf8');
-    const entry = config.match(/\[functions\.fulfillment-handoff-v2\]([^\[]*)/);
+    const entry = config.match(/\[functions\.fulfillment-handoff-v2\]([^[]*)/);
     expect(entry).not.toBeNull();
     expect(entry![1]).toContain('verify_jwt = false');
   });

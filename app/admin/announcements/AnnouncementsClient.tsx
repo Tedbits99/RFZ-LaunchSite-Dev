@@ -230,8 +230,7 @@ function PreviewModal({ announcement, onClose }: { announcement: Announcement; o
 
         {a.image_url && (
           <div className="border-b border-[#1b2a45]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={a.image_url} alt="" className="h-40 w-full object-cover" />
+                        <img src={a.image_url} alt="" className="h-40 w-full object-cover" />
           </div>
         )}
 

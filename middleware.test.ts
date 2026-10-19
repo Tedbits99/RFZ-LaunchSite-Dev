@@ -11,7 +11,7 @@ vi.mock('@supabase/ssr', () => ({
   NextResponse: NextResponse,
 }));
 
-import { middleware, config } from './middleware';
+import { proxy, config } from './proxy';
 
 const URL_ENV = 'https://sbref123456.supabase.co';
 const ANON_KEY = 'anon-key-test';
@@ -87,7 +87,7 @@ function forwardedCookieHeader(res: NextResponse): string | null {
   return res.headers.get('x-middleware-request-cookie');
 }
 
-describe('middleware session refresh', () => {
+describe('proxy session refresh', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.unstubAllEnvs();
@@ -103,7 +103,7 @@ describe('middleware session refresh', () => {
 
   it('refreshes the default Supabase session when its cookie is present', async () => {
     pendingRefreshes.set(DEFAULT_KEY, refreshCookies(DEFAULT_KEY, ''));
-    const res = await middleware(makeRequest([DEFAULT_KEY]));
+    const res = await proxy(makeRequest([DEFAULT_KEY]));
 
     expect(clientsCalled()).toEqual([DEFAULT_KEY]);
     expect(res.cookies.get(DEFAULT_KEY)?.value).toBe(`refreshed-${DEFAULT_KEY}`);
@@ -112,7 +112,7 @@ describe('middleware session refresh', () => {
 
   it('refreshes the customer session through the customer namespace', async () => {
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
-    const res = await middleware(makeRequest([CUSTOMER_KEY]));
+    const res = await proxy(makeRequest([CUSTOMER_KEY]));
 
     expect(clientsCalled()).toEqual([CUSTOMER_KEY]);
     expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
@@ -120,7 +120,7 @@ describe('middleware session refresh', () => {
 
   it('refreshes the admin session through the admin namespace', async () => {
     pendingRefreshes.set(ADMIN_KEY, refreshCookies(ADMIN_KEY, ''));
-    const res = await middleware(makeRequest([ADMIN_KEY]));
+    const res = await proxy(makeRequest([ADMIN_KEY]));
 
     expect(clientsCalled()).toEqual([ADMIN_KEY]);
     expect(res.cookies.get(ADMIN_KEY)?.value).toBe(`refreshed-${ADMIN_KEY}`);
@@ -129,7 +129,7 @@ describe('middleware session refresh', () => {
   it('refreshes customer and admin sessions independently when both are present', async () => {
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
     pendingRefreshes.set(ADMIN_KEY, refreshCookies(ADMIN_KEY, ''));
-    const res = await middleware(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
+    const res = await proxy(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
 
     expect(clientsCalled()).toEqual([CUSTOMER_KEY, ADMIN_KEY]);
     expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
@@ -140,7 +140,7 @@ describe('middleware session refresh', () => {
     pendingRefreshes.set(DEFAULT_KEY, refreshCookies(DEFAULT_KEY, ''));
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
     pendingRefreshes.set(ADMIN_KEY, refreshCookies(ADMIN_KEY, ''));
-    const res = await middleware(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
+    const res = await proxy(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
 
     expect(clientsCalled()).toEqual([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]);
     expect(res.cookies.get(DEFAULT_KEY)?.value).toBe(`refreshed-${DEFAULT_KEY}`);
@@ -162,7 +162,7 @@ describe('middleware session refresh', () => {
       { name: `${ADMIN_KEY}.metadata`, value: 'm3', options: { path: '/' } },
     ]);
 
-    const res = await middleware(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
+    const res = await proxy(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
 
     const setCookie = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
     const setCookieText = setCookie.join('\n');
@@ -181,7 +181,7 @@ describe('middleware session refresh', () => {
   it('forwards the refreshed customer cookie to downstream request handling via the response headers', async () => {
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
     const req = makeRequest([`${CUSTOMER_KEY}.0`]);
-    const res = await middleware(req);
+    const res = await proxy(req);
 
     const forwarded = forwardedCookieHeader(res);
     expect(forwarded).toContain(CUSTOMER_KEY);
@@ -195,7 +195,7 @@ describe('middleware session refresh', () => {
     pendingRefreshes.set(DEFAULT_KEY, refreshCookies(DEFAULT_KEY, ''));
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
     pendingRefreshes.set(ADMIN_KEY, refreshCookies(ADMIN_KEY, ''));
-    const res = await middleware(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
+    const res = await proxy(makeRequest([DEFAULT_KEY, CUSTOMER_KEY, ADMIN_KEY]));
 
     const forwarded = forwardedCookieHeader(res);
     expect(forwarded).toContain(`refreshed-${DEFAULT_KEY}`);
@@ -209,7 +209,7 @@ describe('middleware session refresh', () => {
       method: 'GET',
       headers: { 'x-custom-tracker': 'keep-me', cookie: `${CUSTOMER_KEY}.0=stale` },
     });
-    const res = await middleware(req);
+    const res = await proxy(req);
 
     expect(res.headers.get('x-middleware-request-x-custom-tracker')).toBe('keep-me');
     expect(forwardedCookieHeader(res)).toContain(`refreshed-${CUSTOMER_KEY}`);
@@ -232,7 +232,7 @@ describe('middleware session refresh', () => {
       return baseImplementation(...(args as Parameters<typeof baseImplementation>));
     });
 
-    const res = await middleware(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
+    const res = await proxy(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
 
     expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
     expect(res.cookies.get(ADMIN_KEY)).toBeUndefined();
@@ -244,7 +244,7 @@ describe('middleware session refresh', () => {
   });
 
   it('passes a request through unchanged when no session refresh occurs', async () => {
-    const res = await middleware(makeRequest([CUSTOMER_KEY]));
+    const res = await proxy(makeRequest([CUSTOMER_KEY]));
 
     expect(mocks.createServerClient).toHaveBeenCalled(); // client created, but no refresh
     expect(res.headers.get('x-middleware-next')).toBe('1');
@@ -254,7 +254,7 @@ describe('middleware session refresh', () => {
   });
 
   it('does not create any Supabase client when no session cookie is present', async () => {
-    const res = await middleware(makeRequest(['unrelated-cookie']));
+    const res = await proxy(makeRequest(['unrelated-cookie']));
 
     expect(mocks.createServerClient).not.toHaveBeenCalled();
     expect(namespaceCalls).toHaveLength(0);
@@ -264,7 +264,7 @@ describe('middleware session refresh', () => {
 
   it('skips Auth network calls for namespaces without cookies while refreshing the present one', async () => {
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
-    await middleware(makeRequest([CUSTOMER_KEY]));
+    await proxy(makeRequest([CUSTOMER_KEY]));
 
     const called = clientsCalled();
     expect(called).toContain(CUSTOMER_KEY);
@@ -275,7 +275,7 @@ describe('middleware session refresh', () => {
   it('detects chunked session cookies as a present namespace', async () => {
     pendingRefreshes.set(CUSTOMER_KEY, refreshCookies(CUSTOMER_KEY, ''));
     const req = makeRequest([`${CUSTOMER_KEY}.0`, `${CUSTOMER_KEY}.1`]);
-    const res = await middleware(req);
+    const res = await proxy(req);
 
     expect(clientsCalled()).toEqual([CUSTOMER_KEY]);
     expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
@@ -299,7 +299,7 @@ describe('middleware session refresh', () => {
       return baseImplementation(...(args as Parameters<typeof baseImplementation>));
     });
 
-    const res = await middleware(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
+    const res = await proxy(makeRequest([CUSTOMER_KEY, ADMIN_KEY]));
 
     expect(res.cookies.get(CUSTOMER_KEY)?.value).toBe(`refreshed-${CUSTOMER_KEY}`);
     expect(res.cookies.get(ADMIN_KEY)).toBeUndefined();
@@ -309,7 +309,7 @@ describe('middleware session refresh', () => {
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    const res = await middleware(makeRequest([CUSTOMER_KEY]));
+    const res = await proxy(makeRequest([CUSTOMER_KEY]));
 
     expect(mocks.createServerClient).not.toHaveBeenCalled();
     expect(res.headers.get('x-middleware-next')).toBe('1');
@@ -319,7 +319,7 @@ describe('middleware session refresh', () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'not a valid url';
 
     const req = makeRequest([DEFAULT_KEY]);
-    const res = await middleware(req);
+    const res = await proxy(req);
 
     expect(clientsCalled()).toEqual([]); // default namespace name unresolvable
     // customer/admin namespaces are still independent of URL parsing

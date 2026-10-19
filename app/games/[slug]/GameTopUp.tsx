@@ -335,8 +335,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
       {badge && (badge.toLowerCase().includes('popular') || badge.toLowerCase().includes('best')) && <span className="absolute -top-2 right-2 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 px-2 py-0.5 text-[9px] font-semibold text-white">{badge}</span>}
       {pkg.image_url && pkg.image_url.startsWith('https://') && (
         <div className="mb-2 flex justify-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={pkg.image_url} alt={pkg.name} className="h-14 w-14 object-contain" />
+                    <img src={pkg.image_url} alt={pkg.name} className="h-14 w-14 object-contain" />
         </div>
       )}
       <span className="block text-xs font-semibold text-slate-100">{pkg.name}</span>
@@ -380,8 +379,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
             <div className="mt-2 flex flex-col items-center">
               {qrModal.qrData ? (
                 <div className="rounded-lg border border-[#253451] bg-white p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={qrModal.qrData} alt={`${qrModal.displayName} QR code`} className="h-44 w-44 object-contain" />
+                                    <img src={qrModal.qrData} alt={`${qrModal.displayName} QR code`} className="h-44 w-44 object-contain" />
                 </div>
               ) : (
                 <div className="flex h-44 w-44 flex-col items-center justify-center rounded-lg border border-[#253451] bg-[#080f20] text-center text-xs text-slate-500">
@@ -463,8 +461,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
                     </div>
                     {proofFile && (
                       <div className="mt-1.5 rounded-lg border border-[#253451] bg-white p-1.5 inline-block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={proofFile} alt="Payment proof preview" className="h-16 w-16 object-cover" />
+                                                <img src={proofFile} alt="Payment proof preview" className="h-16 w-16 object-cover" />
                       </div>
                     )}
                   </label>

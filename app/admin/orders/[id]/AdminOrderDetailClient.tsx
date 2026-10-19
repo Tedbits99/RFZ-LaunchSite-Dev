@@ -410,8 +410,7 @@ export default function AdminOrderDetailClient({
                 {paymentSubmission.proof_url && (
                   <div className="mt-3">
                     <p className="mb-1 text-xs text-slate-500">Payment Proof Screenshot:</p>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={paymentSubmission.proof_url} alt="Payment proof" className="max-h-64 rounded-lg border border-[#253451]" />
+                                        <img src={paymentSubmission.proof_url} alt="Payment proof" className="max-h-64 rounded-lg border border-[#253451]" />
                   </div>
                 )}
               </div>

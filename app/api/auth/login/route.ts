@@ -48,9 +48,9 @@ export async function POST(request: NextRequest) {
   const validation = validateRegistrationInput({ email, password, name: 'Customer' });
   if (!validation.ok) return json({ error: genericLoginError }, 401);
 
-  let client: ReturnType<typeof createCustomerServerClient>;
+  let client: Awaited<ReturnType<typeof createCustomerServerClient>>;
   try {
-    client = createCustomerServerClient();
+    client = await createCustomerServerClient();
   } catch {
     return json({ error: 'Customer authentication is temporarily unavailable.' }, 503);
   }

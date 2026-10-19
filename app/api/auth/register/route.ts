@@ -51,9 +51,9 @@ export async function POST(req: NextRequest) {
   const emailRedirectTo = getAuthCallbackUrl();
   if (!emailRedirectTo) return errorResponse('Registration is temporarily unavailable.', 503);
 
-  let supabase: ReturnType<typeof createSupabaseServerClient>;
+  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   try {
-    supabase = createSupabaseServerClient();
+    supabase = await createSupabaseServerClient();
   } catch {
     return errorResponse('Registration is temporarily unavailable.', 503);
   }

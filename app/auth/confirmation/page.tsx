@@ -1,7 +1,7 @@
 import ResendConfirmationForm from './ResendConfirmationForm';
 
 type ConfirmationPageProps = {
-  searchParams?: { status?: string; email?: string };
+  searchParams?: Promise<{ status?: string; email?: string }>;
 };
 
 const messages: Record<string, { title: string; detail: string }> = {
@@ -27,14 +27,15 @@ const messages: Record<string, { title: string; detail: string }> = {
   },
 };
 
-export default function ConfirmationPage({ searchParams }: ConfirmationPageProps) {
-  const statusKey = searchParams?.status || 'error';
+export default async function ConfirmationPage({ searchParams }: ConfirmationPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const statusKey = resolvedSearchParams?.status || 'error';
   const message = messages[statusKey] || messages.error;
   const showResend = statusKey === 'pending' || statusKey === 'invalid';
   // The prefilled email comes only from the login page's own link; the resend
   // request itself validates it server-side, so an arbitrary value here is
   // harmless.
-  const initialEmail = typeof searchParams?.email === 'string' ? searchParams.email.slice(0, 320) : undefined;
+  const initialEmail = typeof resolvedSearchParams?.email === 'string' ? resolvedSearchParams.email.slice(0, 320) : undefined;
   return (
     <main className="min-h-screen bg-[#030718] px-5 py-20 text-slate-100">
       <div className="mx-auto max-w-lg rounded-xl border border-[#1b2a45] bg-[#0b1225] p-8 text-center">

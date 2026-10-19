@@ -18,9 +18,9 @@ async function getMetrics(): Promise<{
   error: string | null;
 }> {
   const empty = { orders: [], games: [], packages: [], customerEmails: [], error: null as string | null };
-  let db: ReturnType<typeof createSupabaseServerClient>;
+  let db: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   try {
-    db = createSupabaseServerClient();
+    db = await createSupabaseServerClient();
     const { data: { user } } = await db.auth.getUser();
     if (!user) return { ...empty, error: 'Not authenticated' };
   } catch {

@@ -23,21 +23,22 @@ type PackageRecord = {
   supplier_cost_usd: string | null
 }
 
-export default async function AdminGamePackagesPage({ params }: { params: { id: string } }) {
-  let db: ReturnType<typeof createSupabaseServerClient>
+export default async function AdminGamePackagesPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  let db: Awaited<ReturnType<typeof createSupabaseServerClient>>
   try {
-    db = adminSupabase || createSupabaseServerClient()
+    db = adminSupabase || await createSupabaseServerClient()
   } catch {
     return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>
   }
 
-  const { data: game } = await db.from('games').select('id,name,slug').eq('id', params.id).maybeSingle()
+  const { data: game } = await db.from('games').select('id,name,slug').eq('id', id).maybeSingle()
   if (!game) notFound()
 
   const { data: packageRows } = await db
     .from('packages')
     .select('id, name, sku, amount, price_cents, original_price_cents, bonus, is_active, sort_order, badge, image_url, supplier_offer_id, supplier_category_id, supplier_cost_usd')
-    .eq('game_id', params.id)
+    .eq('game_id', id)
     .order('sort_order')
   const allPackages = (packageRows || []) as PackageRecord[]
   const packages = game.slug === 'mobile-legends' || game.slug === 'mlbb'

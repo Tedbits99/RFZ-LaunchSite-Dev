@@ -131,7 +131,8 @@ async function refundCoinOrder(
   return recordCoinRefund(db, order, reason, adminEmail)
 }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const auth = await requireAdmin(req)
   if (!auth.ok) return auth.response
   const db = adminSupabase || supabase
@@ -148,7 +149,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const { data: order } = await db
       .from('orders')
       .select('id, reference, status, total_cents, payment_method, fulfillment_status')
-      .eq('id', params.id)
+      .eq('id', id)
       .maybeSingle()
 
     if (!order) {
@@ -165,7 +166,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     if (order.status !== 'REFUND_PENDING') {
       const { error: statusErr } = await db.rpc('admin_change_order_status', {
-        p_order_id: params.id,
+        p_order_id: id,
         p_new_status: 'REFUND_PENDING',
         p_actor_email: auth.session.email,
         p_note: 'Refund requested',
@@ -177,7 +178,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const refundRef = `RFD-${order.reference}-${Date.now().toString(36).toUpperCase()}`
     const { error: refundErr } = await db.from('refunds').insert({
-      order_id: params.id,
+      order_id: id,
       reference: refundRef,
       amount_cents: order.total_cents,
       reason: reason.trim().slice(0, 1000),

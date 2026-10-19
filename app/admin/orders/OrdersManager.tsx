@@ -411,8 +411,7 @@ export default function OrdersManager({
                 {detail.paymentSubmission.proof_url && (
                   <div className="mt-3">
                     <p className="mb-1 text-xs text-slate-500">Payment Proof Screenshot:</p>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                                        <img
                       src={detail.paymentSubmission.proof_url}
                       alt="Payment proof"
                       className="max-h-48 cursor-pointer rounded-lg border border-[#253451] transition hover:border-cyan-400"

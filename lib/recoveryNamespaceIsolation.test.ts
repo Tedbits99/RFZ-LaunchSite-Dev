@@ -47,7 +47,7 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
   });
 
   it('binds the recovery client to its own storage key, distinct from default, customer and admin', async () => {
-    const recovery = createRecoveryServerClient();
+    const recovery = await createRecoveryServerClient();
     const auth = recovery.auth as unknown as { storageKey: string };
 
     expect(auth.storageKey).toBe(RECOVERY_SESSION_COOKIE);
@@ -60,7 +60,7 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
   it('stores the recovery PKCE verifier only under the recovery namespace', async () => {
     cookieJar.set(`${RECOVERY_SESSION_COOKIE}-code-verifier`, 'recovery-verifier');
 
-    const recovery = createRecoveryServerClient();
+    const recovery = await createRecoveryServerClient();
     await recovery.auth.exchangeCodeForSession('synthetic-code');
 
     // The verifier is read from the recovery namespace (exchange attempted
@@ -70,21 +70,20 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
     expect(cookieNames().some((n) => n.startsWith(`${CUSTOMER_SESSION_COOKIE}-`) && n.includes('code-verifier'))).toBe(false);
   });
 
-  it('a default-namespace verifier cannot be consumed by the recovery client (signup cannot become recovery)', () => {
+  it('a default-namespace verifier cannot be consumed by the recovery client (signup cannot become recovery)', async () => {
     cookieJar.set('sb-project-ref-auth-token-code-verifier', 'signup-verifier');
     cookieJar.set(`${CUSTOMER_SESSION_COOKIE}-code-verifier`, 'customer-verifier');
     cookieJar.set(`${ADMIN_SESSION_COOKIE}-code-verifier`, 'admin-verifier');
 
-    const recovery = createRecoveryServerClient();
-    return recovery.auth.exchangeCodeForSession('attacker-code').then((result) => {
-      expect(result.data.session).toBeNull();
-      expect(result.error?.code).toBe('pkce_code_verifier_not_found');
-      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    const recovery = await createRecoveryServerClient();
+    const result = await recovery.auth.exchangeCodeForSession('attacker-code');
+    expect(result.data.session).toBeNull();
+    expect(result.error?.code).toBe('pkce_code_verifier_not_found');
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
       // The foreign verifiers are untouched.
-      expect(cookieJar.get('sb-project-ref-auth-token-code-verifier')).toBe('signup-verifier');
-      expect(cookieJar.get(`${CUSTOMER_SESSION_COOKIE}-code-verifier`)).toBe('customer-verifier');
-      expect(cookieJar.get(`${ADMIN_SESSION_COOKIE}-code-verifier`)).toBe('admin-verifier');
-    });
+    expect(cookieJar.get('sb-project-ref-auth-token-code-verifier')).toBe('signup-verifier');
+    expect(cookieJar.get(`${CUSTOMER_SESSION_COOKIE}-code-verifier`)).toBe('customer-verifier');
+    expect(cookieJar.get(`${ADMIN_SESSION_COOKIE}-code-verifier`)).toBe('admin-verifier');
   });
 
   it('a recovery-namespace verifier cannot be consumed by the default client (recovery cannot activate)', async () => {
@@ -92,7 +91,7 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
 
     vi.resetModules();
     const { createSupabaseServerClient } = await import('@/lib/supabaseServer');
-    const supabase = createSupabaseServerClient();
+    const supabase = await createSupabaseServerClient();
     const result = await supabase.auth.exchangeCodeForSession('recovery-code');
 
     expect(result.data.session).toBeNull();

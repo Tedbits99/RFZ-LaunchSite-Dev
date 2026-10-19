@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 
-// Real Next.js 13.5 route-module HTTP round trip: userland route handlers run
+// Real Next.js route-module HTTP round trip: userland route handlers run
 // inside AppRouteRouteModule.handle() exactly as the production server runs
 // them. `next/headers` cookies() returns the framework's own
 // MutableRequestCookiesAdapter and the route module merges those mutations
@@ -16,6 +16,7 @@ const ACCESS_TOKEN = 'recovery-access-token-roundtrip';
 const USER_ID = 'customer-roundtrip-1';
 
 const fetchMock = vi.spyOn(globalThis, 'fetch');
+let NextRequestConstructor: typeof import('next/server').NextRequest;
 
 function getSetCookieHeaders(response: Response): string[] {
   const gsc = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
@@ -112,10 +113,11 @@ function recoveryNetwork() {
 
 async function loadRouteModule(routePath: string) {
   const userland = await import(routePath);
-  const { AppRouteRouteModule } = await import('next/dist/server/future/route-modules/app-route/module.js');
+  const { AppRouteRouteModule } = await import('next/dist/server/route-modules/app-route/module.js');
   const dir = routePath.replace(/\/route\.ts$/, '').replace(/^@/, '');
   return new AppRouteRouteModule({
-    userland,
+    userland: () => userland,
+    getUserland: () => userland,
     definition: { kind: 'route', pathname: dir, filename: 'route.ts', bundlePath: `${dir}/route`, page: dir },
     resolvedPagePath: routePath,
     nextConfigOutput: undefined,
@@ -128,7 +130,15 @@ async function runRoute(loaded: Awaited<ReturnType<typeof loadRouteModule>>, pat
   return loaded.handle(request, {
     params: {},
     prerenderManifest: { version: 3, routes: {}, dynamicRoutes: {}, preview: PREVIEW },
-    staticGenerationContext: { supportsDynamicHTML: true, originalPathname: path },
+    renderOpts: {
+      supportsDynamicHTML: true,
+      originalPathname: path,
+      experimental: { useCacheTimeout: undefined, durableUseCacheEntries: false },
+      cacheComponents: false,
+      validationLevel: 'error',
+    },
+    sharedContext: { buildId: 'test-build', deploymentId: null },
+    previewProps: PREVIEW,
   } as never);
 }
 
@@ -148,6 +158,7 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     // Next's async storage resolves through globalThis.AsyncLocalStorage.
     const { AsyncLocalStorage } = await import('node:async_hooks');
     (globalThis as unknown as { AsyncLocalStorage?: unknown }).AsyncLocalStorage = AsyncLocalStorage;
+    NextRequestConstructor = (await import('next/server')).NextRequest;
     browser = new BrowserCookieStore();
     process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
     process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = TEST_SECRET;
@@ -163,7 +174,7 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     // Step 1: recovery email link lands on the callback. The request carries
     // unrelated existing sessions plus the PKCE verifier a real browser would
     // hold after resetPasswordForEmail.
-    const callbackRes = await runRoute(callback, '/auth/callback', new NextRequest('https://example.test/auth/callback?code=rc&type=recovery', {
+    const callbackRes = await runRoute(callback, '/auth/callback', new NextRequestConstructor('https://example.test/auth/callback?code=rc&type=recovery', {
       headers: {
         cookie: [
           'sb-project-ref-auth-token=existing-default-session',
@@ -207,7 +218,7 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     expect(browser.has('rfz-recovery-proof', '/auth/reset-password')).toBe(true);
     expect(browser.names().some((n) => n.startsWith('rfz-recovery-auth'))).toBe(true);
 
-    const completeRes = await runRoute(complete, '/auth/reset-password/complete', new NextRequest('https://example.test/auth/reset-password/complete', {
+    const completeRes = await runRoute(complete, '/auth/reset-password/complete', new NextRequestConstructor('https://example.test/auth/reset-password/complete', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -256,7 +267,7 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     // No PKCE verifier: the real SDK fails before any session is issued.
     fetchMock.mockImplementation(async () => { throw new Error('exchange must not reach the network without a verifier'); });
 
-    const callbackRes = await runRoute(callback, '/auth/callback', new NextRequest('https://example.test/auth/callback?code=bad&type=recovery'));
+    const callbackRes = await runRoute(callback, '/auth/callback', new NextRequestConstructor('https://example.test/auth/callback?code=bad&type=recovery'));
     const callbackCookies = getSetCookieHeaders(callbackRes);
     expect(callbackCookies.filter((c) => c.startsWith('rfz-recovery-auth='))).toHaveLength(0);
     expect(callbackCookies.some((c) => c.startsWith('rfz-recovery-proof='))).toBe(false);
@@ -275,7 +286,7 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     });
 
     // A valid recovery session exists (callback round trip with a verifier).
-    const callbackRes = await runRoute(callback, '/auth/callback', new NextRequest('https://example.test/auth/callback?code=rc&type=recovery', {
+    const callbackRes = await runRoute(callback, '/auth/callback', new NextRequestConstructor('https://example.test/auth/callback?code=rc&type=recovery', {
       headers: { cookie: `rfz-recovery-auth-code-verifier=${recoveryVerifierCookie()}` },
     }));
     browser.absorb(callbackRes);
@@ -296,7 +307,7 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     })();
     browser.absorb(new Response(null, { headers: { 'set-cookie': `rfz-recovery-proof=${wrongUserProof}; Path=/auth/reset-password; HttpOnly` } }));
 
-    const completeRes = await runRoute(complete, '/auth/reset-password/complete', new NextRequest('https://example.test/auth/reset-password/complete', {
+    const completeRes = await runRoute(complete, '/auth/reset-password/complete', new NextRequestConstructor('https://example.test/auth/reset-password/complete', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

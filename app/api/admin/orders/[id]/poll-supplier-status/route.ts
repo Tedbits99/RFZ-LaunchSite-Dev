@@ -4,7 +4,8 @@ import { supabase } from '@/lib/supabase';
 import { requireAdmin } from '@/lib/adminGuard';
 import { pollFulfillmentStatus } from '@/lib/suppliers/fulfillment';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const session = await requireAdmin(req);
   if (!session.ok) return session.response;
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!client) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   try {
-    const result = await pollFulfillmentStatus(params.id);
+    const result = await pollFulfillmentStatus(id);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error || 'Poll failed' }, { status: 400 });

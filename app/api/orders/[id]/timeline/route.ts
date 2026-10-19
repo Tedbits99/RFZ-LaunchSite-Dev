@@ -3,7 +3,8 @@ import { adminSupabase } from '@/lib/supabaseAdmin';
 import { isOrderOwner, normalizeOrderEmail } from '@/lib/orderAccess';
 import { authorizeOrderRequest } from '@/lib/orderCapability';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const client = adminSupabase;
   if (!client) {
     return NextResponse.json({ error: 'Service unavailable.' }, { status: 503 });
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const { data: order } = await client
     .from('orders')
     .select('id, reference, customer_user_id, email')
-    .eq('id', params.id)
+    .eq('id', id)
     .maybeSingle();
 
   if (!order || (email && !isOrderOwner(email, order.email)) || !await authorizeOrderRequest(req, order)) {
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const { data: timeline } = await client
     .from('order_timeline')
     .select('id, status, note, created_at')
-    .eq('order_id', params.id)
+    .eq('order_id', id)
     .order('created_at', { ascending: true });
 
   return NextResponse.json({ timeline: timeline || [] }, { headers: { 'Cache-Control': 'no-store' } });

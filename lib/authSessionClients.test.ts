@@ -100,12 +100,12 @@ describe('isolated Auth client factories', () => {
     expect(document.cookie).not.toContain(ADMIN_SESSION_COOKIE);
   });
 
-  it('uses the configured namespace for server cookie reads and writes', () => {
-    const customer = createCustomerServerClient();
-    const admin = createAdminServerClient();
+  it('uses the configured namespace for server cookie reads and writes', async () => {
+    const customer = await createCustomerServerClient();
+    const admin = await createAdminServerClient();
     expect(customer).not.toBe(admin);
 
-    return Promise.all([
+    await Promise.all([
       customer.auth.setSession({ access_token: token('customer'), refresh_token: 'customer-refresh' }),
       admin.auth.setSession({ access_token: token('admin'), refresh_token: 'admin-refresh' }),
     ]).then((results) => {

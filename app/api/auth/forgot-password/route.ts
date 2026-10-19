@@ -34,9 +34,9 @@ export async function POST(request: NextRequest) {
   const validation = validateEmailInput(values.email);
   if (!validation.ok) return json({ error: 'Please provide a valid email address.' }, 400);
 
-  let client: ReturnType<typeof createRecoveryServerClient>;
+  let client: Awaited<ReturnType<typeof createRecoveryServerClient>>;
   try {
-    client = createRecoveryServerClient();
+    client = await createRecoveryServerClient();
   } catch {
     return json({ error: GENERIC_503 }, 503);
   }

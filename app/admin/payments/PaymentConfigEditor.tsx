@@ -246,8 +246,7 @@ export default function PaymentConfigEditor({ initialConfigs }: { initialConfigs
                   <input value={config.logo_url || ''} onChange={(e) => update(config.id, 'logo_url', e.target.value)} placeholder="https://example.com/logo.png" className={inputCls} />
                   {config.logo_url ? (
                     <span className="mt-2 inline-flex items-center gap-2 rounded-lg border border-[#253451] bg-[#0a1124] p-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                                            <img
                         src={config.logo_url}
                         alt="Logo preview"
                         className="h-9 w-9 rounded-lg object-contain"
@@ -356,8 +355,7 @@ export default function PaymentConfigEditor({ initialConfigs }: { initialConfigs
             <input value={newConfig.logo_url || ''} onChange={(e) => setNewConfig((p) => ({ ...p, logo_url: e.target.value }))} placeholder="https://example.com/logo.png" className={inputCls} />
             {newConfig.logo_url ? (
               <span className="mt-2 inline-flex items-center gap-2 rounded-lg border border-[#253451] bg-[#0a1124] p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                                <img
                   src={newConfig.logo_url}
                   alt="Logo preview"
                   className="h-9 w-9 rounded-lg object-contain"

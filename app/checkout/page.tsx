@@ -39,22 +39,23 @@ type PaymentConfig = {
   logo_url: string | null;
 };
 
-export default async function Checkout({ searchParams }: { searchParams: { ref?: string } }) {
+export default async function Checkout({ searchParams }: { searchParams: Promise<{ ref?: string }> }) {
+  const resolvedSearchParams = await searchParams;
   let order: OrderDetail | null = null;
   let paymentConfigs: PaymentConfig[] = [];
   let verifiedName: string | null = null;
 
   const db = adminSupabase || supabase;
 
-  if (searchParams.ref && db) {
+  if (resolvedSearchParams.ref && db) {
     const { data } = await db
       .from('orders')
       .select('id, reference, email, customer_user_id, status, total_cents, payment_method, payment_reference, payment_submitted_at, payment_mode, payment_provider, payment_config_snapshot, games(name), packages(name), player_inputs')
-      .eq('reference', searchParams.ref)
+      .eq('reference', resolvedSearchParams.ref)
       .maybeSingle();
     const candidate = data as unknown as OrderDetail & { customer_user_id: string | null } | null;
     if (candidate) {
-      const token = cookies().get(orderCapabilityCookieName(candidate.reference))?.value;
+      const token = (await cookies()).get(orderCapabilityCookieName(candidate.reference))?.value;
       if (await verifyOrderCapability(candidate.id, candidate.reference, token)) {
         const { customer_user_id: _ownerId, ...safeOrder } = candidate;
         order = safeOrder;
@@ -121,8 +122,7 @@ export default async function Checkout({ searchParams }: { searchParams: { ref?:
                 <div className="flex justify-between"><span className="text-slate-500">Game</span><span>{order.games?.name || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">Package</span><span>{order.packages?.name || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">Payment Method</span><span className="flex items-center gap-2">{activeConfig?.logo_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={activeConfig.logo_url} alt={paymentMethodLabel(order.payment_method)} className="h-5 w-5 rounded object-contain" />
+                                    <img src={activeConfig.logo_url} alt={paymentMethodLabel(order.payment_method)} className="h-5 w-5 rounded object-contain" />
                 ) : null}<span>{paymentMethodLabel(order.payment_method)}</span></span></div>
                 <div className="flex justify-between"><span className="text-slate-500">Email</span><span className="text-slate-300">{order.email}</span></div>
                 {verifiedName && <div className="flex justify-between"><span className="text-slate-500">Player Name</span><span className="font-semibold text-emerald-300">{verifiedName}</span></div>}
@@ -150,8 +150,7 @@ export default async function Checkout({ searchParams }: { searchParams: { ref?:
                 {activeConfig.account_number && <div className="mt-1 text-xs"><span className="text-slate-500">Account Number: </span><span className="text-slate-200">{activeConfig.account_number}</span></div>}
                 {activeConfig.qr_data && (
                   <div className="mt-4 rounded-xl border border-[#253451] bg-white p-3 inline-block">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={activeConfig.qr_data} alt="Payment QR code" className="h-40 w-40 object-contain" />
+                                        <img src={activeConfig.qr_data} alt="Payment QR code" className="h-40 w-40 object-contain" />
                     <p className="mt-2 text-center text-[10px] text-slate-500">Scan to pay · {paymentMethodLabel(order.payment_method)}</p>
                   </div>
                 )}

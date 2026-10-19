@@ -199,8 +199,7 @@ export default function WalletClient() {
             </button>
           </div>
           <div className="mt-4 flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={qr.qrImageUrl} alt="RF Coins payment QR code" className="h-64 w-64 rounded-lg bg-white p-2" />
+                        <img src={qr.qrImageUrl} alt="RF Coins payment QR code" className="h-64 w-64 rounded-lg bg-white p-2" />
           </div>
           <p className="mt-3 text-center text-xs text-slate-500">Expires {new Date(qr.expiresAt).toLocaleTimeString('en-PH')}</p>
         </div>

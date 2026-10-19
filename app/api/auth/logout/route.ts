@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const client = createCustomerServerClient();
+    const client = await createCustomerServerClient();
     const { error } = await client.auth.signOut({ scope: 'local' });
     if (error) return json({ error: 'Could not sign out.' }, 503);
     return json({ message: 'Signed out.' }, 200);

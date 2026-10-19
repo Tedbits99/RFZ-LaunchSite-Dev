@@ -16,15 +16,17 @@ type CustomerPackage = {
   image_url: string | null;
 };
 
-export async function generateMetadata({ params }: { params: { slug: string } }) {
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   if (!supabase) return { title: 'Game Top-Up | RunFazone' };
-  const { data } = await supabase.from('games').select('name, description').eq('slug', params.slug).maybeSingle();
+  const { data } = await supabase.from('games').select('name, description').eq('slug', slug).maybeSingle();
   return { title: data ? `${data.name} Top-Up | RunFazone` : 'Game Top-Up | RunFazone', description: data?.description || 'Top up your favorite game with RunFazone.' };
 }
 
-export default async function GamePage({ params }: { params: { slug: string } }) {
+export default async function GamePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   if (!supabase) return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>;
-  const { data: game } = await supabase.from('games').select('*').eq('slug', params.slug).eq('is_active', true).maybeSingle();
+  const { data: game } = await supabase.from('games').select('*').eq('slug', slug).eq('is_active', true).maybeSingle();
   if (!game) notFound();
   const { data: fields } = await supabase.from('game_input_fields').select('*').eq('game_id', game.id).order('sort_order');
   const { data: packages } = await supabase

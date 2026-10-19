@@ -21,35 +21,36 @@ const STATUS_MESSAGES: Record<string, { title: string; detail: string }> = {
   error: { title: 'Confirmation unavailable', detail: 'We could not complete confirmation right now. Please try again later.' },
 };
 
-function renderWithStatus(status?: string): string {
-  return renderToString(React.createElement(ConfirmationPage, { searchParams: status ? { status } : undefined }));
+async function renderWithStatus(status?: string): Promise<string> {
+  const page = await ConfirmationPage({ searchParams: status ? Promise.resolve({ status }) : undefined });
+  return renderToString(page);
 }
 
 describe('confirmation page status rendering (SSR)', () => {
-  it('renders all five status messages intact', () => {
+  it('renders all five status messages intact', async () => {
     for (const [key, message] of Object.entries(STATUS_MESSAGES)) {
-      const html = renderWithStatus(key);
+      const html = await renderWithStatus(key);
       expect(html).toContain(message.title);
       expect(html).toContain(message.detail);
     }
   });
 
-  it('shows the resend form for the pending status only', () => {
-    expect(renderWithStatus('pending')).toContain('Resend confirmation email');
+  it('shows the resend form for the pending status only', async () => {
+    expect(await renderWithStatus('pending')).toContain('Resend confirmation email');
   });
 
-  it('shows the resend form for the invalid status only', () => {
-    expect(renderWithStatus('invalid')).toContain('Resend confirmation email');
+  it('shows the resend form for the invalid status only', async () => {
+    expect(await renderWithStatus('invalid')).toContain('Resend confirmation email');
   });
 
-  it('does not show the resend form for success, restricted, or error', () => {
-    expect(renderWithStatus('success')).not.toContain('Resend confirmation email');
-    expect(renderWithStatus('restricted')).not.toContain('Resend confirmation email');
-    expect(renderWithStatus('error')).not.toContain('Resend confirmation email');
+  it('does not show the resend form for success, restricted, or error', async () => {
+    expect(await renderWithStatus('success')).not.toContain('Resend confirmation email');
+    expect(await renderWithStatus('restricted')).not.toContain('Resend confirmation email');
+    expect(await renderWithStatus('error')).not.toContain('Resend confirmation email');
   });
 
-  it('preserves the return-to-store navigation', () => {
-    expect(renderWithStatus('pending')).toContain('Return to store');
+  it('preserves the return-to-store navigation', async () => {
+    expect(await renderWithStatus('pending')).toContain('Return to store');
   });
 });
 

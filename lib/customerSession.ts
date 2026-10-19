@@ -7,7 +7,7 @@ type CustomerProfile = {
 };
 
 export type ActiveCustomerSession = {
-  client: ReturnType<typeof createCustomerServerClient>;
+  client: Awaited<ReturnType<typeof createCustomerServerClient>>;
   user: User;
   profile: CustomerProfile;
 };
@@ -19,7 +19,7 @@ export type ActiveCustomerSession = {
  */
 export async function getActiveCustomerSession(): Promise<ActiveCustomerSession | null> {
   try {
-    const client = createCustomerServerClient();
+    const client = await createCustomerServerClient();
     const { data: userData, error: userError } = await client.auth.getUser();
     const user = userData.user;
     if (userError || !user || !user.email_confirmed_at) return null;

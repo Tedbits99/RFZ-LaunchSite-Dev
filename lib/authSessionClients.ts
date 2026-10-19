@@ -17,11 +17,11 @@ function supabaseConfig() {
   return { url, anonKey };
 }
 
-function createServerClientForContext(context: AuthSessionContext) {
+async function createServerClientForContext(context: AuthSessionContext) {
   const { url, anonKey } = supabaseConfig();
-  let cookieStore: ReturnType<typeof cookies> | null = null;
+  let cookieStore: Awaited<ReturnType<typeof cookies>> | null = null;
   try {
-    cookieStore = cookies();
+    cookieStore = await cookies();
   } catch {
     cookieStore = null;
   }
@@ -51,14 +51,14 @@ function createServerClientForContext(context: AuthSessionContext) {
   });
 }
 
-export function createCustomerServerClient() {
+export async function createCustomerServerClient() {
   return createServerClientForContext('customer');
 }
 
-export function createAdminServerClient() {
+export async function createAdminServerClient() {
   return createServerClientForContext('admin');
 }
 
-export function createRecoveryServerClient() {
+export async function createRecoveryServerClient() {
   return createServerClientForContext('recovery');
 }

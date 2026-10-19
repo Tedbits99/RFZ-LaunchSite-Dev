@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { gameId, packageId, name, playerInputs, voucherCode } = body;
-    const customerClient = createCustomerServerClient();
+    const customerClient = await createCustomerServerClient();
     let user: { id: string; email: string | null };
 
     try {

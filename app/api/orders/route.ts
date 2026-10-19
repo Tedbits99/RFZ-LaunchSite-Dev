@@ -24,11 +24,11 @@ export async function POST(req: NextRequest) {
     // (rfz-customer-auth, set by /api/auth/login). A recognized but invalid,
     // unverified, or restricted customer session fails closed and never
     // degrades to guest checkout.
-    let customerClient: ReturnType<typeof createCustomerServerClient> | null = null;
+    let customerClient: Awaited<ReturnType<typeof createCustomerServerClient>> | null = null;
     const hasCustomerAuthCookie = req.cookies.getAll().some(({ name }) => /^rfz-customer-auth(?:\.\d+)?$/.test(name));
     if (hasCustomerAuthCookie) {
       try {
-        customerClient = createCustomerServerClient();
+        customerClient = await createCustomerServerClient();
         const { data, error } = await customerClient.auth.getUser();
         if (error || !data.user) {
           return NextResponse.json({ error: 'Your session could not be verified.' }, { status: 401 });

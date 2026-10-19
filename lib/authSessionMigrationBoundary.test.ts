@@ -36,7 +36,7 @@ describe('registration and confirmation namespace migration boundary', () => {
   });
 
   it('stores legacy registration PKCE material only in the legacy storage namespace', async () => {
-    const legacy = createSupabaseServerClient();
+    const legacy = await createSupabaseServerClient();
     const result = await legacy.auth.signUp({
       email: 'customer@example.com',
       password: 'correct horse battery staple',
@@ -49,8 +49,8 @@ describe('registration and confirmation namespace migration boundary', () => {
     expect(cookieNames().some((name) => name.startsWith(`${CUSTOMER_SESSION_COOKIE}-`))).toBe(false);
   });
 
-  it('would use the customer PKCE namespace without changing the legacy namespace', () => {
-    const customer = createCustomerServerClient();
+  it('would use the customer PKCE namespace without changing the legacy namespace', async () => {
+    const customer = await createCustomerServerClient();
     const auth = customer.auth as unknown as { storageKey: string };
 
     expect(auth.storageKey).toBe(CUSTOMER_SESSION_COOKIE);
@@ -59,7 +59,7 @@ describe('registration and confirmation namespace migration boundary', () => {
 
   it('does not let a customer-only exchange borrow a legacy verifier', async () => {
     cookieJar.set('sb-project-ref-auth-token-code-verifier', 'legacy-verifier');
-    const customer = createCustomerServerClient();
+    const customer = await createCustomerServerClient();
     const result = await customer.auth.exchangeCodeForSession('synthetic-code');
 
     expect(result.data.session).toBeNull();
@@ -71,7 +71,7 @@ describe('registration and confirmation namespace migration boundary', () => {
   it('keeps the current legacy registration/callback and middleware contracts unchanged', () => {
     const registration = source('app/api/auth/register/route.ts');
     const callback = source('app/auth/callback/route.ts');
-    const middleware = source('middleware.ts');
+    const middleware = source('proxy.ts');
 
     expect(registration).toContain("from '@/lib/supabaseServer'");
     expect(registration).not.toContain('createCustomerServerClient');

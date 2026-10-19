@@ -51,17 +51,17 @@ export async function GET(request: NextRequest) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
-  let supabase: ReturnType<typeof createSupabaseServerClient> | null = null;
-  let recovery: ReturnType<typeof createRecoveryServerClient> | null = null;
+  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
+  let recovery: Awaited<ReturnType<typeof createRecoveryServerClient>> | null = null;
   if (isRecovery) {
     try {
-      recovery = createRecoveryServerClient();
+      recovery = await createRecoveryServerClient();
     } catch {
       return recoveryClientError(origin);
     }
   } else {
     try {
-      supabase = createSupabaseServerClient();
+      supabase = await createSupabaseServerClient();
     } catch {
       return redirectToConfirmation('error');
     }

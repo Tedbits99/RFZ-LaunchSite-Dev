@@ -52,7 +52,7 @@ export default function SecureAdminLoginPage() {
       return
     }
 
-    try { await supabase.rpc('claim_first_admin') } catch {}
+    try { await supabase.rpc('claim_first_admin') } catch { /* Bootstrap is one-time; subsequent logins proceed normally. */ }
 
     router.push('/admin')
   }

@@ -38,7 +38,7 @@ export default function Home() {
   const [cardBanners, setCardBanners] = useState<Record<string, string>>({});
   const [customerSignedIn, setCustomerSignedIn] = useState(false);
 
-  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('*').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => {}); } catch {} }, []);
+  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('*').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => { /* Homepage remains usable with its empty catalog state. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
   useEffect(() => {
     let settled = false;
     const finish = () => { if (!settled) { settled = true; setHeroLoaded(true); } };
@@ -62,7 +62,7 @@ export default function Home() {
       }).catch(() => { clearTimeout(timeout); finish(); });
     } catch { clearTimeout(timeout); finish(); }
   }, []);
-  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('promotions').select('target_game_id, image_url').eq('is_active', true).eq('placement', 'GAME_CARD').order('sort_order')).then(({ data }) => { if (data?.length) { const banners: Record<string, string> = {}; (data as CardPromo[]).forEach(p => { if (p.target_game_id && p.image_url && !banners[p.target_game_id]) banners[p.target_game_id] = p.image_url; }); setCardBanners(banners); } }).catch(() => {}); } catch {} }, []);
+  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('promotions').select('target_game_id, image_url').eq('is_active', true).eq('placement', 'GAME_CARD').order('sort_order')).then(({ data }) => { if (data?.length) { const banners: Record<string, string> = {}; (data as CardPromo[]).forEach(p => { if (p.target_game_id && p.image_url && !banners[p.target_game_id]) banners[p.target_game_id] = p.image_url; }); setCardBanners(banners); } }).catch(() => { /* Optional card artwork does not block the storefront. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
   useEffect(() => {
     let cancelled = false;
     try {

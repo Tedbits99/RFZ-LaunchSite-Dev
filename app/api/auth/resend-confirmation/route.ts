@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       return json({ error: 'Too many requests. Please try again later.', retry_after_seconds: retryAfter }, 429);
     }
 
-    const supabase = createSupabaseServerClient();
+    const supabase = await createSupabaseServerClient();
     // The resend result is intentionally not echoed: the response never
     // reveals whether the address has an account.
     await supabase.auth.resend({

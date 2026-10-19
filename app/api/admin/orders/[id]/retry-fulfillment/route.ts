@@ -3,7 +3,8 @@ import { requireAdmin } from '@/lib/adminGuard';
 import { startFulfillment } from '@/lib/suppliers/fulfillment';
 import { sendFulfillmentFailedEmail } from '@/lib/transactionalEmail';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const session = await requireAdmin(req);
   if (!session.ok) return session.response;
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const { data: order } = await session.client
       .from('orders')
       .select('id, payment_status, fulfillment_status')
-      .eq('id', params.id)
+      .eq('id', id)
       .maybeSingle();
 
     if (!order) {
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (order.fulfillment_status === 'PROCESSING') {
       const { data: activeTx } = await (session.client.from('supplier_transactions') as any)
         .select('id, supplier_reference, status')
-        .eq('order_id', params.id)
+        .eq('order_id', id)
         .eq('action', 'create_order')
         .in('status', ['submitted', 'success', 'pending'])
         .maybeSingle();
@@ -59,11 +60,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await session.client
       .from('orders')
       .update({ fulfillment_status: 'NOT_STARTED', updated_at: new Date().toISOString() })
-      .eq('id', params.id);
+      .eq('id', id);
 
     // 4. Insert timeline entry for the retry
     await session.client.from('order_timeline').insert({
-      order_id: params.id,
+      order_id: id,
       status: 'FULFILLMENT_RETRY',
       actor_email: session.session.email,
       note: 'Admin requested fulfillment retry',
@@ -72,11 +73,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // 5. Start fulfillment (the gate will pass since payment is VERIFIED
     //    and fulfillment is NOT_STARTED; existing supplier_transaction
     //    dedup prevents duplicate FazerCards orders)
-    const result = await startFulfillment(params.id, session.client);
+    const result = await startFulfillment(id, session.client);
 
     if (!result.success) {
       // Send fulfillment-failed email (fire-and-forget, duplicate-guarded).
-      sendFulfillmentFailedEmail(session.client, params.id, result.error || 'Fulfillment retry failed').catch(() => {});
+      sendFulfillmentFailedEmail(session.client, id, result.error || 'Fulfillment retry failed').catch(() => {});
     }
 
     return NextResponse.json({

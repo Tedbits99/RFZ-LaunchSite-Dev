@@ -225,8 +225,7 @@ export default function QrPhPayment({
 
   const QrImage = ({ size }: { size: string }) => (
     <div className="rounded-xl border border-[#253451] bg-white p-3">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={qrImageUrl || ''} alt="Scan to pay with QR Ph" className={`${size} object-contain`} />
+            <img src={qrImageUrl || ''} alt="Scan to pay with QR Ph" className={`${size} object-contain`} />
     </div>
   );
 
