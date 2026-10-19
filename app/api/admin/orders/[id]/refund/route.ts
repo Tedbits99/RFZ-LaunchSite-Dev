@@ -12,6 +12,15 @@ import { RF_COIN_PAYMENT_METHOD, rfCoinErrorMessage } from '@/lib/rfCoins'
   once (ledger idempotency key 'order-reversal:<id>') and flips the order to
   REFUNDED in the SAME transaction. It must therefore run BEFORE any status
   transition: REFUND_PENDING is not an eligible state for reversal.
+
+  Retry after a partial failure (reversal succeeded, refund-record insert
+  failed): the order is now REFUNDED and the reversal RPC is NOT callable
+  again — its eligibility check runs before its idempotency-key check, so it
+  returns NOT_ELIGIBLE instead of "already reversed". The retry therefore
+  verifies the completed reversal directly in rf_coin_ledger (keyed by the
+  RPC's own idempotency key, so unrelated REFUNDED orders never match) and
+  only then creates the missing refund record. Coins can never be credited
+  twice: the ledger key is unique and no second RPC call is attempted.
 */
 
 type RefundDb = NonNullable<typeof adminSupabase> | NonNullable<typeof supabase>
@@ -26,36 +35,14 @@ type CoinRefundOrder = {
 
 const COIN_REFUNDABLE_STATUSES = ['PAYMENT_VERIFIED', 'CANCELLED', 'FAILED']
 
-async function refundCoinOrder(
+// Shared tail of both the fresh-reversal and the retry path: dedupe the
+// refund record, then record it plus a best-effort timeline entry.
+async function recordCoinRefund(
   db: RefundDb,
   order: CoinRefundOrder,
   reason: string,
   adminEmail: string,
 ): Promise<NextResponse> {
-  if (!COIN_REFUNDABLE_STATUSES.includes(order.status)) {
-    return NextResponse.json({ error: 'This order cannot be refunded in its current status.' }, { status: 400 })
-  }
-  // Defense in depth on top of the RPC's own state check: never reverse a
-  // wallet payment once supplier fulfillment has started or completed.
-  if (['PROCESSING', 'COMPLETED'].includes(order.fulfillment_status)) {
-    return NextResponse.json({ error: 'This order cannot be refunded in its current status.' }, { status: 400 })
-  }
-
-  const { data: release, error: releaseError } = await db.rpc('rf_coin_release_order_payment', {
-    p_order_id: order.id,
-    p_reason: `Admin refund: ${reason}`.slice(0, 1000),
-  })
-  if (releaseError) {
-    // Nothing changed: the reversal is atomic, so the admin can simply retry.
-    return NextResponse.json({ error: 'Failed to return RF Coins. No refund was recorded. Please try again.' }, { status: 500 })
-  }
-  const releaseRow = Array.isArray(release) ? release[0] : release
-  if (!releaseRow?.out_released) {
-    return NextResponse.json({ error: rfCoinErrorMessage(releaseRow?.out_error, 'RF Coins reversal failed.') }, { status: 400 })
-  }
-
-  // Idempotent refund record: a retried release returns out_released=true
-  // again (already reversed), so skip creating a duplicate record.
   const { data: existing } = await db
     .from('refunds')
     .select('reference, status')
@@ -78,7 +65,8 @@ async function refundCoinOrder(
   })
   if (refundErr) {
     // Coins are already back in the wallet; the retry path above records the
-    // missing refund row without re-crediting (the RPC is exactly-once).
+    // missing refund row without re-crediting (no second reversal is ever
+    // attempted for a REFUNDED order).
     console.error('coin refund: reversal succeeded but refund record failed', refundErr)
     return NextResponse.json({ error: 'RF Coins were returned but the refund record could not be saved. Please retry.' }, { status: 500 })
   }
@@ -93,6 +81,54 @@ async function refundCoinOrder(
   })
 
   return NextResponse.json({ ok: true, reference: refundRef, status: 'REFUNDED' })
+}
+
+async function refundCoinOrder(
+  db: RefundDb,
+  order: CoinRefundOrder,
+  reason: string,
+  adminEmail: string,
+): Promise<NextResponse> {
+  if (order.status === 'REFUNDED') {
+    // Retry after a successful reversal whose refund record failed to save.
+    // Verify the completed reversal via the RPC's own ledger idempotency key:
+    // an unrelated REFUNDED coin order (refunded without a wallet reversal)
+    // has no such entry and is rejected here. Never call the reversal RPC
+    // again for a REFUNDED order.
+    const { data: reversal } = await db
+      .from('rf_coin_ledger')
+      .select('id')
+      .eq('idempotency_key', `order-reversal:${order.id}`)
+      .maybeSingle()
+    if (!reversal) {
+      return NextResponse.json({ error: 'This order was refunded without a wallet reversal; RF Coins cannot be returned automatically.' }, { status: 400 })
+    }
+    return recordCoinRefund(db, order, reason, adminEmail)
+  }
+
+  if (!COIN_REFUNDABLE_STATUSES.includes(order.status)) {
+    return NextResponse.json({ error: 'This order cannot be refunded in its current status.' }, { status: 400 })
+  }
+  // Defense in depth on top of the RPC's own state check: never reverse a
+  // wallet payment once supplier fulfillment has started or completed.
+  if (['PROCESSING', 'COMPLETED'].includes(order.fulfillment_status)) {
+    return NextResponse.json({ error: 'This order cannot be refunded in its current status.' }, { status: 400 })
+  }
+
+  const { data: release, error: releaseError } = await db.rpc('rf_coin_release_order_payment', {
+    p_order_id: order.id,
+    p_reason: `Admin refund: ${reason}`.slice(0, 1000),
+  })
+  if (releaseError) {
+    // Nothing changed: the reversal is atomic, so the admin can simply retry.
+    return NextResponse.json({ error: 'Failed to return RF Coins. No refund was recorded. Please try again.' }, { status: 500 })
+  }
+  const releaseRow = Array.isArray(release) ? release[0] : release
+  if (!releaseRow?.out_released) {
+    return NextResponse.json({ error: rfCoinErrorMessage(releaseRow?.out_error, 'RF Coins reversal failed.') }, { status: 400 })
+  }
+
+  return recordCoinRefund(db, order, reason, adminEmail)
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {

@@ -208,4 +208,80 @@ describe('admin refund RF Coins integration', () => {
     expect(res.status).toBe(400);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+
+  describe('retry after reversal succeeded but refund record failed', () => {
+    const refundedCoinOrder = { ...coinOrder, status: 'REFUNDED' };
+
+    function makeRetryDb(ledgerRow: unknown, insertError?: { message: string } | null) {
+      let inserts = 0;
+      const log = makeDb({
+        orders: { maybeSingle: refundedCoinOrder },
+        rf_coin_ledger: { maybeSingle: ledgerRow },
+        refunds: { maybeSingle: null, insertError: insertError ?? null },
+        order_timeline: {},
+      });
+      return { log, countInserts: () => inserts };
+    }
+
+    it('recovers: verifies the ledger reversal, never re-calls the RPC, creates the missing record', async () => {
+      const { log } = makeRetryDb({ id: 'ledger-1' });
+      const res = await POST(makeRequest(coinOrder.id), routeContext);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      expect(body.status).toBe('REFUNDED');
+      // The reversal RPC must NOT be called again for a REFUNDED order: its
+      // eligibility check precedes its idempotency check, so a second call
+      // would return NOT_ELIGIBLE rather than "already reversed".
+      expect(mocks.rpc).not.toHaveBeenCalledWith('rf_coin_release_order_payment', expect.anything());
+      expect(log.tables).toContain('rf_coin_ledger');
+      expect(log.tables).toContain('refunds');
+    });
+
+    it('never credits coins twice: no second reversal is attempted even on repeated retries', async () => {
+      // First retry creates the record; a further retry returns the existing
+      // record without any insert or RPC call.
+      makeRetryDb({ id: 'ledger-1' });
+      const existing = { reference: 'RFD-FIRST', status: 'REFUNDED' };
+      let inserts = 0;
+      mocks.from.mockImplementation((table: string) => {
+        const cfg = table === 'refunds'
+          ? { maybeSingle: existing }
+          : table === 'orders'
+            ? { maybeSingle: refundedCoinOrder }
+            : table === 'rf_coin_ledger'
+              ? { maybeSingle: { id: 'ledger-1' } }
+              : {};
+        const builder: Record<string, unknown> = {};
+        const chain = () => builder;
+        builder.select = chain;
+        builder.eq = chain;
+        builder.order = chain;
+        builder.limit = chain;
+        builder.maybeSingle = () =>
+          Promise.resolve({ data: (cfg as { maybeSingle?: unknown }).maybeSingle ?? null, error: null });
+        builder.insert = () => {
+          inserts += 1;
+          return Promise.resolve({ data: null, error: null });
+        };
+        return builder;
+      });
+      const res = await POST(makeRequest(coinOrder.id), routeContext);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.reference).toBe('RFD-FIRST');
+      expect(inserts).toBe(0);
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unrelated REFUNDED coin order with no ledger reversal (no auto-reversal)', async () => {
+      const { log } = makeRetryDb(null);
+      const res = await POST(makeRequest(coinOrder.id), routeContext);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('without a wallet reversal');
+      expect(log.tables).not.toContain('refunds');
+      expect(mocks.rpc).not.toHaveBeenCalledWith('rf_coin_release_order_payment', expect.anything());
+    });
+  });
 });
