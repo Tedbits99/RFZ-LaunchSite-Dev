@@ -43,8 +43,8 @@ Compatible-runner procedure: use a GitHub Actions Linux runner or owner-managed 
 
 ## Additional read-only checks
 
-- Repository/top-level/main/origin identity and matching remote HEAD verified at `8330aaf6f5a3a6a167a53b106d6d5f33e2b27266`.
-- Documentation-only push validation: GitHub Actions run `39314389301` completed successfully for `8330aaf`; the job summary reports 47 passing test files and 826 passing tests with 1 skipped. This does not establish hosted Supabase deployment or production readiness.
+- Repository/top-level/main/origin identity and matching remote HEAD verified at `995556e5ec1b8573b0032e1fcc96c0e3126db6a1`.
+- Documentation-only push validation: GitHub Actions run `39315729700` completed successfully for `995556e`; the job ran the serialized application suite, TypeScript, lint, production build, Edge Function checks, and isolated database security tests, ending with `PASS: RunFazone database security integration tests completed.` This does not establish hosted Supabase deployment or production readiness.
 - GitHub branch endpoint: protected=false; rulesets: []; deployments: []; hooks: HTTP 403. The last result blocks proof of safe push side effects.
 - All 396 source/config inventory files read for structural/risk markers; source hashes and routes/admin controls recorded.
 - 914 reachable Git text blobs scanned heuristically for selected token/private-key patterns; zero candidates, with explicit limits in [security findings](SECURITY_FINDINGS.md).

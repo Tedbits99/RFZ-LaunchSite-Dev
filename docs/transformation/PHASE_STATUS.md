@@ -9,10 +9,10 @@
 | Current phase | 0 — Full system audit |
 | Phase status | BLOCKED |
 | Next phase allowed | NO |
-| HEAD at current evidence update | 8330aaf6f5a3a6a167a53b106d6d5f33e2b27266 |
+| HEAD at current evidence update | 995556e5ec1b8573b0032e1fcc96c0e3126db6a1 |
 | Remote reconciliation | `origin/main` verified at HEAD after the documentation push |
-| Commit | `docs: record live Supabase reconciliation` |
-| Pushed to dev main | YES — GitHub Actions run 39314389301 completed successfully; deployment mapping remains unverified because hooks API returned HTTP 403 |
+| Commit | `docs: reconcile phase 0 backend evidence` |
+| Pushed to dev main | YES — commit `995556e` is on `origin/main`; GitHub Actions run `39315729700` completed successfully. Deployment mapping remains unverified because hooks API returned HTTP 403 |
 | Production changes | NONE |
 
 ## Completed audit work
