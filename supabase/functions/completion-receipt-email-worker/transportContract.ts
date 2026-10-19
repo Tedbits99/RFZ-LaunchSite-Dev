@@ -1,4 +1,4 @@
-import type { CompletionReceipt } from '../../../lib/completionReceiptCore.ts';
+import type { CompletionReceipt } from '../_shared/completionReceiptCore.ts';
 
 /** Contract only: E5.3A deliberately provides no concrete or network transport. */
 export type CompletionReceiptMessage = CompletionReceipt & {

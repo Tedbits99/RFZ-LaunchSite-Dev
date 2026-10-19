@@ -235,9 +235,19 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
     expect(schemaSql).not.toMatch(/POLICY .* ON rf_coin_fulfillment_handoffs/);
   });
 
-  it('schedules the fulfillment-handoff worker via pg_cron with a cron secret', () => {
-    expect(schemaSql).toMatch(/'fulfillment_handoff_secret'/);
+  it('cron activation is explicit: no hardcoded secret, no automatic schedule', () => {
+    // Only executable (non-comment) SQL counts: the migration must NOT embed
+    // a secret or auto-schedule the worker. Activation is a separate operator
+    // step with a generated secret, documented in the migration comments.
+    const executable = schemaSql
+      .split('\n')
+      .filter((line) => !/^\s*--/.test(line))
+      .join('\n');
+    expect(executable).not.toMatch(/INSERT INTO public\._cron_secrets/);
+    expect(executable).not.toMatch(/cron\.schedule/);
+    expect(executable).not.toMatch(/rfz_fhnd_/);
+    // The trigger function exists; the operator activation steps are documented.
     expect(schemaSql).toMatch(/trigger_fulfillment_handoff\(\)/);
-    expect(schemaSql).toMatch(/cron\.schedule\(\s*\n?\s*'fulfillment-handoff',\s*\n?\s*'\*\/3 \* \* \* \*'/);
+    expect(schemaSql).toMatch(/ACTIVATION \(EXPLICIT OPERATOR STEP/);
   });
 });

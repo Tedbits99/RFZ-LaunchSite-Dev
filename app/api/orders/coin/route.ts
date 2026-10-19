@@ -13,10 +13,13 @@ import { RF_COIN_PAYMENT_METHOD, rfCoinErrorMessage } from '@/lib/rfCoins';
   2. create_order RPC on the customer-JWT client (same as normal checkout;
      the browser price is never trusted). The ownership trigger derives
      customer_user_id from the JWT and creates the capability record itself.
-  3. rf_coin_settle_order_payment on the SAME client: computes coins from the
-     order's own total_cents, locks the wallet row, debits exactly once
+  3. rf_coin_settle_order_payment_and_enqueue on the SAME client: computes
+     coins from the order's own total_cents, locks the wallet row, debits
+     exactly once, and enqueues the durable fulfillment handoff in the SAME
+     database transaction — a crash after settlement can never leave a paid
+     order without queued fulfillment.
   4. On settlement failure the just-created order is marked CANCELLED by the
-     service-role client and the coins stay untouched (release-on-failure)
+     service-role client and the coins stay untouched (release-on-failure).
 */
 
 export async function POST(req: NextRequest) {
@@ -113,15 +116,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: row?.out_error || 'Could not create your order.' }, { status: 400 });
     }
 
-    // Atomic wallet debit on the customer-JWT client (row-locked, idempotent).
-    const { data: settle, error: settleError } = await customerClient.rpc('rf_coin_settle_order_payment', {
-      p_order_id: row.out_order_id,
-      p_user_id: user.id,
-    });
+    // Atomic wallet debit + durable fulfillment handoff enqueue, ONE
+    // transaction on the customer-JWT client (row-locked, idempotent). If
+    // either half fails the whole settlement rolls back: coins untouched and
+    // the order stays in its pre-call state, so a retried checkout either
+    // fully succeeds or fully fails.
+    const { data: settle, error: settleError } = await customerClient.rpc(
+      'rf_coin_settle_order_payment_and_enqueue',
+      {
+        p_order_id: row.out_order_id,
+        p_user_id: user.id,
+      },
+    );
     const settleRow = Array.isArray(settle) ? settle[0] : settle;
-    if (settleError || !settleRow || settleRow.out_error || !settleRow.out_coins) {
+    if (settleError || !settleRow || settleRow.out_error || !settleRow.out_coins || !settleRow.out_handoff_id) {
       // Release on failure: cancel the just-created order, coins stay untouched.
       const cancelCode = settleRow?.out_error || 'SETTLEMENT_FAILED';
+      if (!settleRow?.out_error) {
+        console.error('coin checkout: settle+enqueue returned without error payload',
+          { hasError: Boolean(settleError), hasHandoff: Boolean(settleRow?.out_handoff_id) });
+      }
       const { error: cancelError } = await adminSupabase!
         .from('orders')
         .update({ status: 'CANCELLED' })
@@ -134,27 +148,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: friendly }, { status: 400 });
     }
 
-    // Durable handoff: enqueue exactly one fulfillment handoff row (idempotent,
-    // service-role RPC) so the scheduled fulfillment-handoff worker drives the
-    // existing pipeline (atomic complete_fulfillment claim + supplier
-    // transaction idempotency keys). The checkout request no longer carries
-    // fulfillment: an enqueued-but-uncleaned order is retried by the worker
-    // until DONE, and the order also stays recoverable via admin start/retry.
-    const { data: handoff, error: handoffError } = await adminSupabase!.rpc(
-      'rf_coin_enqueue_fulfillment',
-      { p_order_id: row.out_order_id },
-    );
-    const handoffRow = Array.isArray(handoff) ? handoff[0] : handoff;
-    if (handoffError || !handoffRow || handoffRow.out_error) {
-      console.error('coin checkout: fulfillment handoff enqueue failed (order stays recoverable via admin retry)',
-        handoffError || handoffRow?.out_error);
-    }
-
     const response = NextResponse.json({
       reference: row.out_reference,
       totalCents: row.out_total_cents,
       coinsCharged: settleRow.out_coins,
       balanceAfter: settleRow.out_balance_after,
+      handoffQueued: true,
     });
     response.cookies.set(orderCapabilityCookieName(row.out_reference), capability, {
       httpOnly: true,

@@ -1,7 +1,7 @@
 import {
   validateCanonicalAppOrigin,
   type CompletionReceiptRenderInput,
-} from '../../../lib/completionReceiptCore.ts';
+} from '../_shared/completionReceiptCore.ts';
 
 const E51_FIELDS = [
   'reference',

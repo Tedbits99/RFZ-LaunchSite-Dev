@@ -1,4 +1,4 @@
-import { validateCanonicalAppOrigin } from '../../../lib/completionReceiptCore.ts';
+import { validateCanonicalAppOrigin } from '../_shared/completionReceiptCore.ts';
 import type { CompletionReceiptTransport } from './transportContract.ts';
 
 export type WorkerConfig = {

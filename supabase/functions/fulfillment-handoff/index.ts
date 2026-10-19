@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { hasValidReconciliationSecret } from "../../../lib/reconciliationSecurity.ts";
+import { hasValidReconciliationSecret } from "../_shared/reconciliationSecurity.ts";
 
 /*
   Durable fulfillment handoff worker for RF Coins orders.
@@ -41,11 +41,11 @@ const CLAIM_BATCH_LIMIT = 10;
 const LEASE_SECONDS = 300;
 
 type HandoffRow = {
-  id: string;
-  order_id: string;
-  attempt_count: number;
-  lease_token: string;
-  lease_until: string;
+  out_id: string;
+  out_order_id: string;
+  out_attempt_count: number;
+  out_lease_token: string;
+  out_lease_until: string;
 };
 
 async function fazercardsCreateOrder(
@@ -305,14 +305,14 @@ Deno.serve(async (req: Request) => {
     let rejected = 0;
 
     for (const row of rows) {
-      if (!row?.id || !row?.order_id || !row?.lease_token) {
+      if (!row?.out_id || !row?.out_order_id || !row?.out_lease_token) {
         rejected++;
         continue;
       }
-      const result = await runFulfillmentForOrder(db, row.order_id);
+      const result = await runFulfillmentForOrder(db, row.out_order_id);
       const { data: ack, error: ackError } = await db.rpc("rf_coin_ack_fulfillment_handoff", {
-        p_id: row.id,
-        p_lease_token: row.lease_token,
+        p_id: row.out_id,
+        p_lease_token: row.out_lease_token,
         p_error: result.error,
       });
       const ackRow = Array.isArray(ack) ? ack[0] : ack;

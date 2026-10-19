@@ -414,9 +414,8 @@ DROP POLICY IF EXISTS "_cron_secrets_insert" ON public._cron_secrets;
 DROP POLICY IF EXISTS "_cron_secrets_update" ON public._cron_secrets;
 DROP POLICY IF EXISTS "_cron_secrets_delete" ON public._cron_secrets;
 
-INSERT INTO public._cron_secrets (key, value)
-VALUES ('fulfillment_handoff_secret', 'rfz_fhnd_k4m8w2x6q9b3c5d7e1f0a8s4g6h2j4l6')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+-- No secret is inserted here. The operator must insert a separately generated
+-- secret (see ACTIVATION below) before the cron trigger can authenticate.
 
 CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()
 RETURNS void
@@ -453,8 +452,22 @@ $function$;
 
 GRANT EXECUTE ON FUNCTION public.trigger_fulfillment_handoff() TO postgres;
 
-SELECT cron.schedule(
-  'fulfillment-handoff',
-  '*/3 * * * *',
-  $$SELECT public.trigger_fulfillment_handoff()$$
-);
+-- ============ ACTIVATION (EXPLICIT OPERATOR STEP — NOT AUTOMATIC) ============
+-- Do NOT schedule the cron automatically when migrations are applied. Fulfillment
+-- activation is a production decision requiring a separately generated secret.
+-- After applying this migration, an operator with database access must run BOTH:
+--
+--   1. Insert a securely generated secret (e.g. openssl rand -hex 32):
+--      INSERT INTO public._cron_secrets (key, value)
+--      VALUES ('fulfillment_handoff_secret', '<generated-secret>');
+--
+--   2. Schedule the trigger:
+--      SELECT cron.schedule(
+--        'fulfillment-handoff',
+--        '*/3 * * * *',
+--        $$SELECT public.trigger_fulfillment_handoff()$$
+--      );
+--
+-- Until both steps are done, no cron trigger exists and the worker endpoint
+-- rejects every request (the Edge Function 503s when no secret row is found).
+-- To deactivate later: SELECT cron.unschedule('fulfillment-handoff');

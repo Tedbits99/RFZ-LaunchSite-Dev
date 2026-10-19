@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { hasAuthorizedTransactionalEmailRequest } from "../../../lib/transactionalEmailAuth.ts";
+import { hasAuthorizedTransactionalEmailRequest } from "../_shared/transactionalEmailAuth.ts";
 
 /*
   Shared transactional email sender for RunFazone.

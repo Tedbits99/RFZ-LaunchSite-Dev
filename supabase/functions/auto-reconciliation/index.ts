@@ -4,7 +4,7 @@ import {
   getReconciliationDecision,
   isInFlightSupplierTransactionStatus,
   isEnabledFazerCardsSupplier,
-} from "../../../lib/reconciliationSecurity.ts";
+} from "../_shared/reconciliationSecurity.ts";
 
 /*
   Auto-reconciliation worker: polls FazerCards for supplier orders that are

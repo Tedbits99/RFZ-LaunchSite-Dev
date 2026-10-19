@@ -589,11 +589,12 @@ describe('rf coins real SQL behavior', () => {
     await sql(`UPDATE rf_coin_fulfillment_handoffs SET next_attempt_at = now() - interval '1 second'
                WHERE id = $1`, [mine!.out_id]);
     await asRole('service_role');
-    const c3 = await sql<{ out_id: string; out_attempt_count: number }>(
+    const c3 = await sql<{ out_id: string; out_attempt_count: number; out_lease_token: string }>(
       `SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
     const reclaim = c3.find((r) => r.out_id === mine!.out_id);
     expect(reclaim).toBeTruthy();
     expect(Number(reclaim!.out_attempt_count)).toBe(2);
+    const reclaimToken = reclaim!.out_lease_token;
 
     // Wrong lease token is rejected (lease guard).
     const badAck = await sql<{ out_status: string }>(
@@ -604,7 +605,7 @@ describe('rf coins real SQL behavior', () => {
     // Success ack marks DONE.
     const ack = await sql<{ out_status: string; out_next_attempt_at: string | null }>(
       `SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, NULL)`,
-      [mine!.out_id, reclaim!.out_lease_token]);
+      [mine!.out_id, reclaimToken]);
     await resetRole();
     expect(ack[0].out_status).toBe('DONE');
     const done = await sql<{ status: string }>(
@@ -649,8 +650,8 @@ describe('rf coins real SQL behavior', () => {
     const handoffId = enq2[0].out_handoff_id;
 
     for (let attempt = 1; attempt <= 5; attempt++) {
-      const c = await sql<{ out_id: string; out_lease_token: string; out_status: string }>(
-        `SELECT out_id, out_lease_token, out_status FROM rf_coin_claim_fulfillment_handoffs(100, 300)
+      const c = await sql<{ out_id: string; out_lease_token: string }>(
+        `SELECT out_id, out_lease_token FROM rf_coin_claim_fulfillment_handoffs(100, 300)
          WHERE out_id = $1`, [handoffId]);
       if (c.length === 0) break;
       await sql(`SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, 'still failing')`,
@@ -668,5 +669,100 @@ describe('rf coins real SQL behavior', () => {
     const reclaimed = await sql<{ out_id: string }>(
       `SELECT * FROM rf_coin_claim_fulfillment_handoffs(100, 300)`);
     expect(reclaimed.find((r) => r.out_id === handoffId)).toBeUndefined();
+  });
+
+  it('atomic settle+enqueue: paid order always has a queued fulfillment, crash-safe', async () => {
+    // The combined RPC debits the wallet, verifies payment, and enqueues the
+    // durable fulfillment handoff inside ONE transaction.
+    const orderId = 'aaaaaaaa-0000-0000-0000-000000000010';
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });
+    await createWallet(CUSTOMER, 1000); // 500 coins needed
+
+    await asRole('authenticated', CUSTOMER);
+    const res = await sql<{ out_coins: number; out_balance_after: string; out_handoff_id: string | null; out_error: string | null }>(
+      `SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
+    expect(res[0].out_error).toBeNull();
+    expect(res[0].out_coins).toBe(500);
+    expect(String(res[0].out_balance_after)).toBe('500');
+    expect(res[0].out_handoff_id).toBeTruthy();
+    await resetRole();
+
+    // Wallet debited once, order verified, exactly one handoff row exists.
+    const bal = await sql<{ balance_coins: string }>(
+      `SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
+    expect(Number(bal[0].balance_coins)).toBe(500);
+    const order = await sql<{ status: string; payment_status: string }>(
+      `SELECT status, payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(order[0].status).toBe('PAYMENT_VERIFIED');
+    expect(order[0].payment_status).toBe('VERIFIED');
+    const handoffs = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    expect(Number(handoffs[0].n)).toBe(1);
+
+    // Idempotent retry (e.g. client retry after a dropped response) returns
+    // the same handoff without a second debit.
+    await asRole('authenticated', CUSTOMER);
+    const res2 = await sql<{ out_coins: number; out_handoff_id: string | null; out_error: string | null }>(
+      `SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
+    await resetRole();
+    expect(res2[0].out_error).toBeNull();
+    expect(res2[0].out_coins).toBe(500);
+    expect(res2[0].out_handoff_id).toBe(res[0].out_handoff_id);
+    const ledgerCount = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_ledger WHERE reference_id = $1 AND kind = 'order_payment'`, [orderId]);
+    expect(Number(ledgerCount[0].n)).toBe(1);
+
+    // Failure path: a wallet that cannot cover the order rolls the whole
+    // settlement back — order stays unpaid, no handoff row, coins untouched.
+    const poorOrder = 'aaaaaaaa-0000-0000-0000-000000000011';
+    await insertOrder({ id: poorOrder, userId: CUSTOMER2, totalCents: 50000 });
+    await createWallet(CUSTOMER2, 10); // 500 needed, 10 available
+    await asRole('authenticated', CUSTOMER2);
+    const resFail = await sql<{ out_error: string | null }>(
+      `SELECT out_error FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [poorOrder, CUSTOMER2]);
+    await resetRole();
+    expect(resFail[0].out_error).toBe('RF_COIN_INSUFFICIENT_BALANCE');
+    const poorOrderRow = await sql<{ status: string; payment_status: string }>(
+      `SELECT status, payment_status FROM orders WHERE id = $1`, [poorOrder]);
+    expect(poorOrderRow[0].status).toBe('WAITING_PAYMENT');
+    expect(poorOrderRow[0].payment_status).toBe('UNPAID');
+    const poorHandoffs = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [poorOrder]);
+    expect(Number(poorHandoffs[0].n)).toBe(0);
+  });
+
+  it('worker response contract: claim + ack return exactly the out_* fields the worker reads', async () => {
+    // Mirror of supabase/functions/fulfillment-handoff/index.ts: the worker
+    // reads out_id, out_order_id, out_lease_token from claim, and out_status
+    // from ack. Renaming any of these columns must fail this test.
+    const orderId = 'aaaaaaaa-0000-0000-0000-000000000012';
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });
+    await sql(`UPDATE orders SET status = 'PAYMENT_VERIFIED', payment_status = 'VERIFIED' WHERE id = $1`, [orderId]);
+    await asRole('service_role');
+    const enq = await sql<{ out_handoff_id: string }>(
+      `SELECT out_handoff_id FROM rf_coin_enqueue_fulfillment($1)`, [orderId]);
+    const handoffId = enq[0].out_handoff_id;
+
+    const claimed = await sql<Record<string, unknown>>(
+      `SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    const mine = claimed.find((r) => r.out_id === handoffId) as Record<string, unknown> | undefined;
+    await resetRole();
+    expect(mine).toBeTruthy();
+    // Exact column names the worker dereferences after db.rpc(...)
+    expect(Object.keys(mine!)).toEqual(
+      expect.arrayContaining(['out_id', 'out_order_id', 'out_lease_token', 'out_attempt_count', 'out_lease_until']));
+    expect(typeof mine!.out_lease_token).toBe('string');
+
+    // Ack returns out_status ('DONE' on success, 'rejected' on a bad lease).
+    await asRole('service_role');
+    const ack = await sql<{ out_status: string }>(
+      `SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, NULL)`,
+      [mine!.out_id, mine!.out_lease_token]);
+    const badAck = await sql<{ out_status: string }>(
+      `SELECT * FROM rf_coin_ack_fulfillment_handoff($1, $2, 'err')`,
+      [mine!.out_id, '00000000-0000-0000-0000-000000000000']);
+    await resetRole();
+    expect(ack[0].out_status).toBe('DONE');
+    expect(badAck[0].out_status).toBe('rejected');
   });
 });

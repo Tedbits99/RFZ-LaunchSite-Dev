@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderCompletionReceiptFromSnapshot, validateCanonicalAppOrigin } from '../../../lib/completionReceiptCore';
+import { renderCompletionReceiptFromSnapshot, validateCanonicalAppOrigin } from '../_shared/completionReceiptCore';
 import { createCompletionReceiptWorkerHandler, type WorkerConfig } from './handler';
 import { mapE51ReceiptSnapshot } from './receiptSnapshot';
 import type { CompletionReceiptMessage } from './transportContract';
