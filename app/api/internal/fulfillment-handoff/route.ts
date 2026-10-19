@@ -55,10 +55,10 @@ export async function POST(req: NextRequest) {
   try {
     const result: BatchResult = await processFulfillmentHandoffBatch(adminSupabase);
     return NextResponse.json(result);
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Fulfillment batch failed' },
-      { status: 500 },
-    );
+  } catch {
+    // Internal error details (DB messages, stack traces) must never reach the
+    // response body. The queue's lease expires and the row is retried or
+    // dead-lettered by the existing ack/lease machinery, so no state is lost.
+    return NextResponse.json({ error: 'Fulfillment batch failed.' }, { status: 500 });
   }
 }

@@ -141,6 +141,167 @@ describe('batch execution (mocked database, mocked supplier fetch)', () => {
     );
   }
 
+  function ambiguous5xxResponse() {
+    return new Response(JSON.stringify({ error: 'internal supplier error' }), { status: 502 });
+  }
+
+  it('classifies an explicit supplier failure (terminal status + reason) as definitive, order FAILED', async () => {
+    const db = claimedDb(verifiedOrder);
+    process.env.SUPPLIER_FAZERCARDS_API_KEY = 'key-123';
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ order: { status: 'failed', fail_reason: 'invalid player id' } }),
+      { status: 200 },
+    ));
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(result).toEqual({ claimed: 1, fulfilled: 0, failed: 1, rejected: 0 });
+    expect(db.rpc).toHaveBeenCalledWith('complete_fulfillment', expect.objectContaining({
+      p_fulfillment_status: 'FAILED',
+    }));
+    expect(db.rpc).toHaveBeenCalledWith('rf_coin_ack_fulfillment_handoff', expect.objectContaining({
+      p_error: 'invalid player id',
+    }));
+  });
+
+  it('classifies an HTTP 5xx as ambiguous: tx stays pending, order never FAILED, bounded retry ack', async () => {
+    const db = claimedDb(verifiedOrder);
+    process.env.SUPPLIER_FAZERCARDS_API_KEY = 'key-123';
+    const fetchImpl = vi.fn().mockResolvedValue(ambiguous5xxResponse());
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(result.failed).toBe(1);
+    expect(result.fulfilled).toBe(0);
+    // The tx update must set status pending, never failed.
+    const updateCall = db.update.mock.calls.find(
+      (c: unknown[]) => c[0] && typeof c[0] === 'object' && 'status' in (c[0] as object),
+    );
+    expect(updateCall).toBeTruthy();
+    expect((updateCall![0] as Record<string, unknown>).status).toBe('pending');
+    expect(db.rpc).toHaveBeenCalledWith('complete_fulfillment', expect.not.objectContaining({
+      p_fulfillment_status: 'FAILED',
+    }));
+    expect(db.rpc).toHaveBeenCalledWith('rf_coin_ack_fulfillment_handoff', expect.objectContaining({
+      p_error: 'FazerCards: HTTP 502',
+    }));
+  });
+
+  it('classifies a 2xx response without an order reference as ambiguous (not success, not failure)', async () => {
+    const db = claimedDb(verifiedOrder);
+    process.env.SUPPLIER_FAZERCARDS_API_KEY = 'key-123';
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      { status: 200 },
+    ));
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(result.failed).toBe(1);
+    expect(db.rpc).toHaveBeenCalledWith('complete_fulfillment', expect.not.objectContaining({
+      p_fulfillment_status: 'FAILED',
+    }));
+  });
+
+  it('does not ack DONE while the order is PROCESSING (crash stranding stays retryable)', async () => {
+    const db = makeDb({
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: { ...verifiedOrder, fulfillment_status: 'PROCESSING' },
+        error: null,
+      }),
+      rpc: vi.fn().mockImplementation((fn: string) => {
+        if (fn === 'rf_coin_claim_fulfillment_handoffs') return Promise.resolve({ data: [handoffRow], error: null });
+        return Promise.resolve({ data: [{ out_status: 'PENDING' }], error: null });
+      }),
+    });
+    const fetchImpl = vi.fn();
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.fulfilled).toBe(0);
+    expect(db.rpc).toHaveBeenCalledWith('rf_coin_ack_fulfillment_handoff', expect.objectContaining({
+      p_error: expect.stringContaining('PROCESSING'),
+    }));
+  });
+
+  it('surfaces a pending tx with no supplier reference operator-visibly and keeps the queue row retryable', async () => {
+    const mapping = {
+      id: 'map-1',
+      enabled: true,
+      metadata: { category_id: 'cat-1', offer_id: 'offer-1' },
+      suppliers: { id: 'sup-1', enabled: true, code: 'fazercards', adapter: 'custom' },
+    };
+    const db = makeDb({
+      maybeSingle: vi.fn()
+        .mockResolvedValueOnce({ data: verifiedOrder, error: null })
+        .mockResolvedValueOnce({ data: mapping, error: null })
+        .mockResolvedValueOnce({ data: { id: 'tx-stuck', status: 'pending', supplier_reference: null }, error: null }),
+      update: vi.fn().mockReturnThis(),
+      rpc: vi.fn().mockImplementation((fn: string) => {
+        if (fn === 'rf_coin_claim_fulfillment_handoffs') return Promise.resolve({ data: [handoffRow], error: null });
+        if (fn === 'complete_fulfillment') return Promise.resolve({ data: [{ out_transitioned: true }], error: null });
+        return Promise.resolve({ data: [{ out_status: 'PENDING' }], error: null });
+      }),
+    });
+    const fetchImpl = vi.fn();
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.fulfilled).toBe(0);
+    const txUpdate = db.update.mock.calls.find(
+      (c: unknown[]) => c[0] && typeof c[0] === 'object' && 'error_message' in (c[0] as object),
+    );
+    expect(txUpdate).toBeTruthy();
+    expect(String((txUpdate![0] as Record<string, unknown>).error_message)).toContain('controlled retry');
+    expect(db.rpc).toHaveBeenCalledWith('rf_coin_ack_fulfillment_handoff', expect.objectContaining({
+      p_error: expect.stringContaining('Ambiguous'),
+    }));
+  });
+
+  it('blocks a non-FazerCards supplier mapping before any supplier request and preserves history', async () => {
+    const mapping = {
+      id: 'map-other',
+      enabled: true,
+      metadata: { category_id: 'cat-1', offer_id: 'offer-1' },
+      suppliers: { id: 'sup-other', enabled: true, code: 'other_supplier', adapter: 'other' },
+    };
+    const db = makeDb({
+      maybeSingle: vi.fn()
+        .mockResolvedValueOnce({ data: verifiedOrder, error: null })
+        .mockResolvedValueOnce({ data: mapping, error: null }),
+      rpc: vi.fn().mockImplementation((fn: string) => {
+        if (fn === 'rf_coin_claim_fulfillment_handoffs') return Promise.resolve({ data: [handoffRow], error: null });
+        if (fn === 'complete_fulfillment') return Promise.resolve({ data: [{ out_transitioned: true }], error: null });
+        return Promise.resolve({ data: [{ out_status: 'PENDING' }], error: null });
+      }),
+    });
+    const fetchImpl = vi.fn();
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(result.failed).toBe(1);
+    expect(db.rpc).toHaveBeenCalledWith('complete_fulfillment', expect.objectContaining({
+      p_fulfillment_status: 'FAILED',
+    }));
+  });
+
+  it('fails closed before any supplier request when the FazerCards API key is missing', async () => {
+    const db = claimedDb(verifiedOrder);
+    delete process.env.SUPPLIER_FAZERCARDS_API_KEY;
+    const fetchImpl = vi.fn();
+
+    const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.failed).toBe(1);
+    const txUpdate = db.update.mock.calls.find(
+      (c: unknown[]) => c[0] && typeof c[0] === 'object' && 'status' in (c[0] as object),
+    );
+    expect(txUpdate).toBeTruthy();
+    expect((txUpdate![0] as Record<string, unknown>).status).toBe('failed');
+    expect(String((txUpdate![0] as Record<string, unknown>).error_message)).toContain('no supplier request was sent');
+    expect(db.rpc).toHaveBeenCalledWith('complete_fulfillment', expect.objectContaining({
+      p_fulfillment_status: 'FAILED',
+    }));
+  });
+
   it('claims exactly one row per invocation with a 300s lease', async () => {
     const db = makeDb({
       rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
@@ -224,7 +385,7 @@ describe('batch execution (mocked database, mocked supplier fetch)', () => {
       id: 'map-1',
       enabled: true,
       metadata: { category_id: 'cat-1', offer_id: 'offer-1' },
-      suppliers: { id: 'sup-1', enabled: true },
+      suppliers: { id: 'sup-1', enabled: true, code: 'fazercards', adapter: 'custom' },
     };
     const db = makeDb({
       maybeSingle: vi.fn()
@@ -245,7 +406,7 @@ describe('batch execution (mocked database, mocked supplier fetch)', () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 
-  it('treats a concurrent transaction insert (unique violation) as already-claimed, no supplier call', async () => {
+  it('keeps the queue row retryable after a concurrent insert unique violation (no DONE ack)', async () => {
     const mapping = {
       id: 'map-1',
       enabled: true,
@@ -261,17 +422,18 @@ describe('batch execution (mocked database, mocked supplier fetch)', () => {
       rpc: vi.fn().mockImplementation((fn: string) => {
         if (fn === 'rf_coin_claim_fulfillment_handoffs') return Promise.resolve({ data: [handoffRow], error: null });
         if (fn === 'complete_fulfillment') return Promise.resolve({ data: [{ out_transitioned: true }], error: null });
-        return Promise.resolve({ data: [{ out_status: 'DONE' }], error: null });
+        return Promise.resolve({ data: [{ out_status: 'PENDING' }], error: null });
       }),
     });
     const fetchImpl = vi.fn();
 
     const result = await processFulfillmentHandoffBatch(db, fetchImpl as unknown as typeof fetch);
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(result.fulfilled).toBe(1);
+    expect(result.fulfilled).toBe(0);
+    expect(result.failed).toBe(1);
   });
 
-  it('marks a definitive supplier failure FAILED and records it in the ack', async () => {
+  it('marks a 400-with-reason response FAILED and records the reason in the ack', async () => {
     const db = claimedDb(verifiedOrder);
     process.env.SUPPLIER_FAZERCARDS_API_KEY = 'key-123';
     const fetchImpl = vi.fn().mockResolvedValue(new Response(
@@ -284,7 +446,6 @@ describe('batch execution (mocked database, mocked supplier fetch)', () => {
     expect(db.rpc).toHaveBeenCalledWith('rf_coin_ack_fulfillment_handoff', expect.objectContaining({
       p_error: 'invalid player id',
     }));
-    // The order is moved to FAILED via complete_fulfillment.
     expect(db.rpc).toHaveBeenCalledWith('complete_fulfillment', expect.objectContaining({
       p_fulfillment_status: 'FAILED',
     }));
@@ -364,8 +525,8 @@ describe('FazerCards-only supplier client', () => {
     const promise = fazercardsCreateOrder('key', 'cat', 'offer', {}, 'idem', fetchImpl as unknown as typeof fetch);
     vi.advanceTimersByTime(30_001);
     const result = await promise;
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('aborted');
+    expect(result.kind).toBe('ambiguous');
+    expect(result.kind === 'ambiguous' && result.error).toContain('aborted');
     vi.useRealTimers();
   });
 });
