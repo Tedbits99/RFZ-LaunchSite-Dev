@@ -58,7 +58,7 @@ SET completed_at = stamped.completed_at,
       'game_name', games.name,
       'package_name', packages.name,
       'quantity', orders.quantity,
-      'masked_player_identifier', '****1234',
+      'masked_player_identifier', '****',
       'completed_at', stamped.completed_at
     )
 FROM stamped
