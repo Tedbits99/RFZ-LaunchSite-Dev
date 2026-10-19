@@ -5,6 +5,12 @@ import {
   isInFlightSupplierTransactionStatus,
   isEnabledFazerCardsSupplier,
 } from "../_shared/reconciliationSecurity.ts";
+import {
+  processFulfillmentHandoffBatch,
+  getFulfillmentHandoffSecret,
+  isAuthorizedFulfillmentHandoffRequest,
+  json as handoffJson,
+} from "../_shared/fulfillmentHandoffWorker.ts";
 
 /*
   Auto-reconciliation worker: polls FazerCards for supplier orders that are
@@ -39,6 +45,60 @@ const json = (body: unknown, status = 200) =>
 const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const POLL_BATCH_LIMIT = 25;
 
+/*
+  Fulfillment handoff dispatch route (behind this function's cron secret).
+
+  The platform edge router never registered the dedicated fulfillment-handoff
+  slugs despite successful deployments, so the handoff worker is also served
+  here at POST ?dispatch=fulfillment-handoff. Strictly gated: this
+  auto-reconciliation secret first, then the fulfillment handoff secret on
+  top. Behavior of the scheduled reconciliation path is unchanged; with no
+  query string this function behaves exactly as before.
+
+  This dispatch NEVER creates supplier orders on its own; it drives the same
+  canonical fulfillment pipeline (verified-payment gate, atomic
+  complete_fulfillment claim, supplier transaction idempotency) as the
+  reviewed handoff worker.
+*/
+async function handleFulfillmentHandoffDispatch(req: Request): Promise<Response | null> {
+  const url = new URL(req.url);
+  if (url.searchParams.get("dispatch") !== "fulfillment-handoff") return null;
+
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    return handoffJson({ error: "Service unavailable." }, 503);
+  }
+  const db = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  // Gate 1: this function's own cron secret (unchanged requirement).
+  const { data: reconSecretRow } = await db
+    .from("_cron_secrets")
+    .select("value")
+    .eq("key", "auto_recon_secret")
+    .maybeSingle();
+  const reconSecret = typeof reconSecretRow?.value === "string" ? reconSecretRow.value : null;
+  if (!hasValidReconciliationSecret(req.headers.get("X-Cron-Secret"), reconSecret)) {
+    return handoffJson({ error: "Unauthorized." }, 401);
+  }
+
+  // Gate 2: the fulfillment handoff cron secret on top (defense in depth).
+  const handoffSecret = await getFulfillmentHandoffSecret(db);
+  if (!handoffSecret) {
+    return handoffJson({ error: "Service unavailable." }, 503);
+  }
+  if (!isAuthorizedFulfillmentHandoffRequest(req.headers.get("X-Cron-Secret"), handoffSecret)) {
+    return handoffJson({ error: "Unauthorized." }, 401);
+  }
+
+  // Authenticated health probe: zero queue claims, zero supplier requests.
+  if (url.searchParams.get("health") === "1") {
+    return handoffJson({ ok: true, worker: "auto-reconciliation:fulfillment-handoff", claimed: 0 });
+  }
+
+  return await processFulfillmentHandoffBatch(db);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -48,6 +108,9 @@ Deno.serve(async (req: Request) => {
     if (req.method !== "POST") {
       return json({ error: "Method not allowed." }, 405);
     }
+
+    const dispatchResponse = await handleFulfillmentHandoffDispatch(req);
+    if (dispatchResponse) return dispatchResponse;
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");

@@ -19,9 +19,18 @@ describe('fulfillment-handoff-v2 health-check safety contract', () => {
     expect(entry![1]).toContain('verify_jwt = false');
   });
 
+  it('imports and delegates the batch processing to the shared worker module', () => {
+    expect(source).toContain('processFulfillmentHandoffBatch');
+    const sharedWorker = readFileSync(
+      new URL('../_shared/fulfillmentHandoffWorker.ts', import.meta.url),
+      'utf8',
+    );
+    expect(sharedWorker).toContain('rf_coin_claim_fulfillment_handoffs');
+  });
+
   it('answers the health check only after the X-Cron-Secret validation', () => {
     const serve = serveBlock();
-    const authIndex = serve.indexOf('hasValidReconciliationSecret(');
+    const authIndex = serve.indexOf('isAuthorizedFulfillmentHandoffRequest(');
     const healthIndex = serve.indexOf('"health"');
     expect(authIndex).toBeGreaterThan(0);
     expect(healthIndex).toBeGreaterThan(authIndex);
@@ -30,7 +39,7 @@ describe('fulfillment-handoff-v2 health-check safety contract', () => {
   it('health check returns HTTP 200, zero claims, and never claims the queue', () => {
     const serve = serveBlock();
     const healthStart = serve.indexOf('"health"');
-    const claimRpcIndex = serve.indexOf('rf_coin_claim_fulfillment_handoffs');
+    const claimRpcIndex = serve.indexOf('processFulfillmentHandoffBatch(db)');
     expect(claimRpcIndex).toBeGreaterThan(healthStart);
     expect(serve.slice(healthStart, claimRpcIndex)).toContain('claimed: 0');
     expect(serve.slice(healthStart, claimRpcIndex)).not.toContain('fetch(');
@@ -38,10 +47,14 @@ describe('fulfillment-handoff-v2 health-check safety contract', () => {
   });
 
   it('keeps the same cron secret key and constant-time comparator as the reviewed worker', () => {
-    expect(source).toContain('"fulfillment_handoff_secret"');
-    expect(source).toContain("hasValidReconciliationSecret(req.headers.get(\"X-Cron-Secret\"), configuredSecret)");
-    expect(source).toContain('rf_coin_claim_fulfillment_handoffs');
-    expect(source).toContain('rf_coin_ack_fulfillment_handoff');
+    const sharedWorker = readFileSync(
+      new URL('../_shared/fulfillmentHandoffWorker.ts', import.meta.url),
+      'utf8',
+    );
+    expect(sharedWorker).toContain('"fulfillment_handoff_secret"');
+    expect(sharedWorker).toContain('hasValidReconciliationSecret(providedSecret, configuredSecret)');
+    expect(sharedWorker).toContain('rf_coin_claim_fulfillment_handoffs');
+    expect(sharedWorker).toContain('rf_coin_ack_fulfillment_handoff');
   });
 });
 
