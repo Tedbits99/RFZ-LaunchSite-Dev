@@ -26,14 +26,14 @@ VALUES (
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,
   subtotal_cents, discount_cents, fee_cents, total_cents, payment_method,
-  status, payment_status, fulfillment_status
+  status, payment_status, fulfillment_status, quantity
 )
 VALUES (
   '00000000-0000-0000-0000-000000000504', 'RECEIPT-CONTRACT-1',
   'receipt-contract@example.invalid', 'Receipt Contract Test',
   '00000000-0000-0000-0000-000000000502', '00000000-0000-0000-0000-000000000503',
   jsonb_build_object('user_id', '123456789', 'server_id', '9999', '__rfz_order_access_hash', repeat('a', 64)),
-  23456, 0, 0, 23456, 'gcash', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+  23456, 0, 0, 23456, 'gcash', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
 );
 
 DO $$
@@ -99,10 +99,6 @@ BEGIN
   SELECT * INTO v_outbox FROM public.order_email_outbox
   WHERE order_id = '00000000-0000-0000-0000-000000000504'
     AND template = 'completion_receipt';
-
-  RAISE NOTICE 'receipt contract diagnostic: outcome=%, count=%, status=%, recipient=%, snapshot=%',
-    v_result.out_outcome, v_count, v_outbox.status, v_outbox.recipient_email,
-    v_outbox.receipt_snapshot;
 
   IF v_result.out_outcome <> 'applied' OR v_count <> 1
      OR v_outbox.status <> 'pending'

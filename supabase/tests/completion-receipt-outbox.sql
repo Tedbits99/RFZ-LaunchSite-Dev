@@ -25,7 +25,7 @@ VALUES (
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,
   subtotal_cents, discount_cents, fee_cents, total_cents, payment_method,
-  status, payment_status, fulfillment_status
+  status, payment_status, fulfillment_status, quantity
 )
 VALUES
   (
@@ -33,70 +33,70 @@ VALUES
     'receipt-complete-1@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('user_id', '123456789', '__rfz_order_access_hash', repeat('1', 64)),
-    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
   ),
   (
     '00000000-0000-0000-0000-000000000406', 'RECEIPT-PROCESSING',
     'receipt-processing@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('2', 64)),
-    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
   ),
   (
     '00000000-0000-0000-0000-000000000408', 'RECEIPT-FAILED',
     'receipt-failed@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('3', 64)),
-    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
   ),
   (
     '00000000-0000-0000-0000-000000000410', 'RECEIPT-PAYMENT-ONLY',
     'receipt-payment-only@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('4', 64)),
-    12345, 0, 0, 12345, 'manual', 'PAYMENT_VERIFIED', 'VERIFIED', 'NOT_STARTED'
+    12345, 0, 0, 12345, 'manual', 'PAYMENT_VERIFIED', 'VERIFIED', 'NOT_STARTED', 1
   ),
   (
     '00000000-0000-0000-0000-000000000412', 'RECEIPT-CANCELLED',
     'receipt-cancelled@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('5', 64)),
-    12345, 0, 0, 12345, 'manual', 'CANCELLED', 'REFUNDED', 'NOT_STARTED'
+    12345, 0, 0, 12345, 'manual', 'CANCELLED', 'REFUNDED', 'NOT_STARTED', 1
   ),
   (
     '00000000-0000-0000-0000-000000000414', 'RECEIPT-REFUNDED',
     'receipt-refunded@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('6', 64)),
-    12345, 0, 0, 12345, 'manual', 'REFUNDED', 'REFUNDED', 'NOT_STARTED'
+    12345, 0, 0, 12345, 'manual', 'REFUNDED', 'REFUNDED', 'NOT_STARTED', 1
   ),
   (
     '00000000-0000-0000-0000-000000000416', 'RECEIPT-EXPIRED',
     'receipt-expired@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('7', 64)),
-    12345, 0, 0, 12345, 'manual', 'EXPIRED', 'FAILED', 'NOT_STARTED'
+    12345, 0, 0, 12345, 'manual', 'EXPIRED', 'FAILED', 'NOT_STARTED', 1
   ),
   (
     '00000000-0000-0000-0000-000000000418', 'RECEIPT-COMPLETE-2',
     'receipt-complete-2@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('user_id', '223456789', '__rfz_order_access_hash', repeat('8', 64)),
-    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
   ),
   (
     '00000000-0000-0000-0000-000000000420', 'RECEIPT-ROLLBACK',
     'receipt-rollback@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('9', 64)),
-    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
+    12345, 0, 0, 12345, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING', 1
   ),
   (
     '00000000-0000-0000-0000-000000000422', 'RECEIPT-UNVERIFIED',
     'receipt-unverified@example.invalid', 'Receipt Test',
     '00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000403',
     jsonb_build_object('__rfz_order_access_hash', repeat('a', 64)),
-    12345, 0, 0, 12345, 'manual', 'WAITING_PAYMENT', 'UNPAID', 'NOT_STARTED'
+    12345, 0, 0, 12345, 'manual', 'WAITING_PAYMENT', 'UNPAID', 'NOT_STARTED', 1
   );
 
 INSERT INTO public.supplier_transactions (
