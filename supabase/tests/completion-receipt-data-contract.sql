@@ -100,6 +100,10 @@ BEGIN
   WHERE order_id = '00000000-0000-0000-0000-000000000504'
     AND template = 'completion_receipt';
 
+  RAISE NOTICE 'receipt contract diagnostic: outcome=%, count=%, status=%, recipient=%, snapshot=%',
+    v_result.out_outcome, v_count, v_outbox.status, v_outbox.recipient_email,
+    v_outbox.receipt_snapshot;
+
   IF v_result.out_outcome <> 'applied' OR v_count <> 1
      OR v_outbox.status <> 'pending'
      OR v_outbox.recipient_email <> 'receipt-contract@example.invalid'
