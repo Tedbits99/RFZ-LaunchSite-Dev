@@ -335,7 +335,7 @@ describe('rf coins real SQL behavior', () => {
     await createWallet(CUSTOMER, 1000); // 50000 cents / 100 = 500 coins needed
 
     await asRole('authenticated', CUSTOMER);
-    const res = await sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`,
+    const res = await sql(`SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`,
       [orderId, CUSTOMER]);
     expect(res[0].out_error).toBeNull();
     expect(res[0].out_coins).toBe(500);
@@ -350,7 +350,7 @@ describe('rf coins real SQL behavior', () => {
 
     // Double settlement returns the original result — no second debit.
     await asRole('authenticated', CUSTOMER);
-    const res2 = await sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`, [orderId, CUSTOMER]);
+    const res2 = await sql(`SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
     await resetRole();
     expect(res2[0].out_error).toBeNull();
     expect(res2[0].out_coins).toBe(500);
@@ -371,7 +371,7 @@ describe('rf coins real SQL behavior', () => {
     await createWallet(CUSTOMER, 1000);
 
     await asRole('authenticated', CUSTOMER);
-    const res = await sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`, [orderId, CUSTOMER]);
+    const res = await sql(`SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
     await resetRole();
     expect(res[0].out_error).toBe('RF_COIN_ORDER_WRONG_METHOD');
     const order = await sql<{ status: string }>(`SELECT status FROM orders WHERE id = $1`, [orderId]);
@@ -387,7 +387,7 @@ describe('rf coins real SQL behavior', () => {
     await createWallet(CUSTOMER2, 1000);
 
     await asRole('authenticated', CUSTOMER2);
-    const res = await sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`, [orderId, CUSTOMER2]);
+    const res = await sql(`SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER2]);
     await resetRole();
     expect(['RF_COIN_FORBIDDEN', 'RF_COIN_INSUFFICIENT_BALANCE']).toContain(res[0].out_error);
   });
@@ -492,7 +492,10 @@ describe('rf coins real SQL behavior', () => {
 
     // Customer-callable + admin RPCs → authenticated; webhook RPCs → service_role.
     expect(has('rf_coin_create_topup', 'authenticated')).toBe(true);
-    expect(has('rf_coin_settle_order_payment', 'authenticated')).toBe(true);
+    // Legacy direct settlement is locked down: only the atomic wrapper is
+    // customer-callable, so settlement can never bypass the handoff enqueue.
+    expect(has('rf_coin_settle_order_payment', 'authenticated')).toBe(false);
+    expect(has('rf_coin_settle_order_payment_and_enqueue', 'authenticated')).toBe(true);
     expect(has('rf_coin_request_adjustment', 'authenticated')).toBe(true);
     expect(has('rf_coin_decide_adjustment', 'authenticated')).toBe(true);
     expect(has('rf_coin_set_settings', 'authenticated')).toBe(true);
@@ -505,6 +508,9 @@ describe('rf coins real SQL behavior', () => {
     expect(has('rf_coin_assert_super_admin', 'authenticated')).toBe(false);
     expect(has('rf_coin_assert_super_admin', 'service_role')).toBe(false);
     expect(has('rf_coin_get_settings', 'authenticated')).toBe(false);
+    // Legacy settlement is not executable by any client or service identity.
+    expect(has('rf_coin_settle_order_payment', 'anon')).toBe(false);
+    expect(has('rf_coin_settle_order_payment', 'service_role')).toBe(false);
   });
 
   it('webhook RPCs are denied to authenticated even though granted roles differ', async () => {
@@ -513,6 +519,82 @@ describe('rf coins real SQL behavior', () => {
       ['00000000-0000-0000-0000-00000000dead']))
       .rejects.toThrow(/permission denied/i);
     await resetRole();
+  });
+
+  it('legacy direct settlement RPC is blocked for every client identity (Codex fix 1)', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-000000000020';
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });
+    await createWallet(CUSTOMER, 1000);
+
+    // Authenticated customers can no longer call the legacy settlement RPC.
+    await asRole('authenticated', CUSTOMER);
+    await expect(sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`, [orderId, CUSTOMER]))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+
+    // Anon and service_role are also denied.
+    await asRole('anon');
+    await expect(sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`, [orderId, CUSTOMER]))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+    await asRole('service_role');
+    await expect(sql(`SELECT * FROM rf_coin_settle_order_payment($1, $2)`, [orderId, CUSTOMER]))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+
+    // No debit, no verification, no handoff: nothing moved.
+    const order = await sql<{ status: string; payment_status: string }>(
+      `SELECT status, payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(order[0].status).toBe('WAITING_PAYMENT');
+    expect(order[0].payment_status).toBe('UNPAID');
+    const bal = await sql<{ balance_coins: string }>(
+      `SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
+    expect(Number(bal[0].balance_coins)).toBe(1000);
+    const handoffs = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    expect(Number(handoffs[0].n)).toBe(0);
+  });
+
+  it('atomic settle+enqueue wrapper works and always produces the handoff (Codex fix 1)', async () => {
+    // The only customer settlement path: debits, verifies, and enqueues in
+    // ONE transaction — no settlement without its fulfillment handoff.
+    const orderId = 'aaaaaaaa-0000-0000-0000-000000000021';
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });
+    await createWallet(CUSTOMER, 1000);
+
+    await asRole('authenticated', CUSTOMER);
+    const res = await sql<{ out_coins: number; out_balance_after: string; out_handoff_id: string | null; out_error: string | null }>(
+      `SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
+    await resetRole();
+    expect(res[0].out_error).toBeNull();
+    expect(res[0].out_coins).toBe(500);
+    expect(res[0].out_handoff_id).toBeTruthy();
+
+    const order = await sql<{ status: string; payment_status: string }>(
+      `SELECT status, payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(order[0].status).toBe('PAYMENT_VERIFIED');
+    expect(order[0].payment_status).toBe('VERIFIED');
+    const handoffs = await sql<{ n: string }>(
+      `SELECT count(*) AS n FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    expect(Number(handoffs[0].n)).toBe(1);
+  });
+
+  it('cron trigger is executable by postgres only (Codex fix 2)', async () => {
+    await asRole('authenticated', CUSTOMER);
+    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+
+    await asRole('anon');
+    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+
+    // postgres retains execution; it performs no HTTP call because no secret
+    // row exists (the trigger returns early with a NOTICE).
+    await db.exec(`SET ROLE postgres`);
+    await sql(`SELECT public.trigger_fulfillment_handoff()`);
+    await db.exec(`RESET ROLE`);
   });
 
   it('customer settings row is invisible to clients (fail-closed RLS)', async () => {

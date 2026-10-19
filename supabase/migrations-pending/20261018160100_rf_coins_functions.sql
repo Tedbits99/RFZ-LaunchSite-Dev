@@ -1054,7 +1054,11 @@ REVOKE ALL ON FUNCTION rf_coin_get_or_create_wallet(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION rf_coin_create_topup(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION rf_coin_credit_paid_topup(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION rf_coin_mark_topup_status(uuid, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_settle_order_payment(uuid, uuid) FROM PUBLIC;
+-- Legacy direct settlement is locked down (Codex review): the atomic
+-- settle+enqueue wrapper is the ONLY customer entry point, so a settled
+-- order can never bypass its fulfillment handoff enqueue.
+REVOKE ALL ON FUNCTION rf_coin_settle_order_payment(uuid, uuid)
+  FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION rf_coin_release_order_payment(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION rf_coin_request_adjustment(uuid, text, integer, text, text, text) FROM PUBLIC;
@@ -1067,7 +1071,6 @@ REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff(uuid, uuid, text) FROM PU
 
 -- Customer-callable functions (identity checked against auth.uid() inside).
 GRANT EXECUTE ON FUNCTION rf_coin_create_topup(uuid, uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) TO authenticated;
 
 -- Admin mutation RPCs: callable by authenticated admins whose JWT the API

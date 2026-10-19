@@ -146,17 +146,21 @@ describe('grants and schema', () => {
       'rf_coin_assert_super_admin()',
       'rf_coin_get_settings()',
       'rf_coin_create_topup(uuid, uuid)',
-      'rf_coin_settle_order_payment(uuid, uuid)',
+      'rf_coin_settle_order_payment(uuid, uuid)\n  FROM PUBLIC, anon, authenticated',
       'rf_coin_request_adjustment(uuid, text, integer, text, text, text)',
       'rf_coin_decide_adjustment(uuid, boolean, text)',
     ]) {
-      expect(grants).toContain(`REVOKE ALL ON FUNCTION ${fnName} FROM PUBLIC`);
+      expect(grants).toContain(`REVOKE ALL ON FUNCTION ${fnName}${fnName.includes('\n') ? '' : ' FROM PUBLIC'}`);
     }
   });
 
   it('grants EXECUTE to customer-callable functions; admin RPCs gated inside; webhook RPCs to service_role', () => {
     expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_create_topup\(uuid, uuid\) TO authenticated/);
-    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment\(uuid, uuid\) TO authenticated/);
+    // Codex fix 1: legacy direct settlement has NO client grant — the atomic
+    // settle+enqueue wrapper is the only customer settlement entry point.
+    expect(functionsSql).not.toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment\(uuid, uuid\) TO authenticated/);
+    expect(functionsSql).toMatch(/REVOKE ALL ON FUNCTION rf_coin_settle_order_payment\(uuid, uuid\)\s*\n\s*FROM PUBLIC, anon, authenticated/);
+    expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment_and_enqueue\(uuid, uuid\) TO authenticated/);
     // Admin RPCs are granted to authenticated but each independently verifies
     // SUPER_ADMIN internally; webhook RPCs go to service_role only.
     expect(functionsSql).toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_request_adjustment\(uuid, text, integer, text, text, text\) TO authenticated/);
@@ -249,5 +253,11 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
     // The trigger function exists; the operator activation steps are documented.
     expect(schemaSql).toMatch(/trigger_fulfillment_handoff\(\)/);
     expect(schemaSql).toMatch(/ACTIVATION \(EXPLICIT OPERATOR STEP/);
+  });
+
+  it('cron trigger is executable by postgres only (Codex fix 2)', () => {
+    expect(schemaSql).toMatch(/REVOKE EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\)\s*\n\s*FROM PUBLIC, anon, authenticated/);
+    expect(schemaSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO postgres/);
+    expect(schemaSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO (?!postgres)/);
   });
 });

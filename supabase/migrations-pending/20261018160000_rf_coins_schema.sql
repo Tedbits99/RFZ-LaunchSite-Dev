@@ -450,6 +450,12 @@ BEGIN
 END;
 $function$;
 
+-- Cron trigger lockdown (Codex review): SECURITY DEFINER functions default
+-- to EXECUTE for PUBLIC, so revoke every client role explicitly. Only the
+-- postgres role (which pg_cron jobs run as) may execute it. Scheduling stays
+-- DISABLED until the documented operator activation steps are run.
+REVOKE EXECUTE ON FUNCTION public.trigger_fulfillment_handoff()
+  FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.trigger_fulfillment_handoff() TO postgres;
 
 -- ============ ACTIVATION (EXPLICIT OPERATOR STEP — NOT AUTOMATIC) ============
