@@ -4,6 +4,12 @@ set -euo pipefail
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 local_api_port=54321
 local_db_port=54322
+upgrade_mode=false
+
+if [ "${1:-}" = "--existing-schema-upgrade" ]; then
+  upgrade_mode=true
+  shift
+fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "ERROR: Node.js is required to validate disposable connection URLs." >&2
@@ -116,6 +122,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-outbox.sql|\
           supabase/tests/completion-receipt-data-contract.sql|\
           supabase/tests/completion-receipt-outbox-worker.sql|\
+          supabase/tests/database/existing-schema-upgrade.sql|\
           supabase/tests/customer-confirmation-resend-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-setup.sql|\
           supabase/tests/reconciliation-concurrency-assertion.sql|\
@@ -322,6 +329,28 @@ fi
 
 while IFS= read -r migration; do
   basename="$(basename "$migration")"
+
+  if [ "$upgrade_mode" = true ]; then
+    # Reproduce the observed hosted starting point exactly. The post-baseline
+    # sequence is copied only after this baseline has been reset and checked.
+    case "$basename" in
+      20260927062024_runfazone_core_catalog.sql|\
+      20260927063133_runfazone_vouchers_promos.sql|\
+      20260927064634_runfazone_mlbb_packages.sql|\
+      20260928042134_runfazone_games_update_policy.sql|\
+      20260928051223_admin_games_rpc.sql|\
+      20260928055204_20260928_apply_games_rpc.sql.sql|\
+      20260928055236_20260928_games_with_package_counts_rpc.sql.sql|\
+      20260928060956_20260928_order_fulfillment_payment.sql.sql|\
+      20260928061342_20260928_order_fulfillment_rls.sql.sql|\
+      20260928062007_20260928_fix_order_status_rpc.sql.sql|\
+      20260928062039_20260928_update_orders_status_check.sql.sql)
+        cp "$migration" "$test_root/supabase/migrations/$basename"
+        ;;
+    esac
+    continue
+  fi
+
   case "$basename" in
     "$excluded_scheduler"|"$excluded_incomplete_fulfillment"|"$excluded_ambiguous_status_rpc"|"$excluded_hardcoded_hok_uid")
       echo "Excluding reviewed historical migration from disposable baseline: $basename"
@@ -357,7 +386,7 @@ while IFS= read -r migration; do
   fi
 done < <(find "$project_root/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort)
 
-if [ "$excluded_count" -ne 4 ]; then
+if [ "$upgrade_mode" = false ] && [ "$excluded_count" -ne 4 ]; then
   echo "ERROR: Expected exactly four reviewed baseline exclusions; found $excluded_count." >&2
   exit 3
 fi
@@ -382,6 +411,8 @@ cp "$project_root/supabase/tests/completion-receipt-data-contract.sql" \
   "$test_root/supabase/tests/completion-receipt-data-contract.sql"
 cp "$project_root/supabase/tests/completion-receipt-outbox-worker.sql" \
   "$test_root/supabase/tests/completion-receipt-outbox-worker.sql"
+cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
+  "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
   "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
@@ -441,7 +472,64 @@ psql() {
     "$psql_bin" --no-psqlrc "$db_url" "$@"
 }
 echo "Applying the isolated migration baseline..."
-supabase_local db reset
+if [ "$upgrade_mode" = true ]; then
+  supabase_local db reset
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --command "DO \$\$ BEGIN
+      IF (SELECT count(*) FROM supabase_migrations.schema_migrations) <> 11 THEN
+        RAISE EXCEPTION 'LEGACY_BASELINE_MIGRATION_COUNT_INVALID';
+      END IF;
+      IF to_regclass('public.order_email_outbox') IS NOT NULL
+         OR to_regclass('public.suppliers') IS NOT NULL THEN
+        RAISE EXCEPTION 'LEGACY_BASELINE_CONTAINS_POST_BASELINE_OBJECT';
+      END IF;
+    END \$\$;"
+
+  echo "Preparing canonical post-baseline upgrade sequence..."
+  upgrade_count=0
+  while IFS= read -r migration_name; do
+    [ -n "$migration_name" ] || continue
+    case "$migration_name" in
+      20260927062024_runfazone_core_catalog.sql|\
+      20260927063133_runfazone_vouchers_promos.sql|\
+      20260927064634_runfazone_mlbb_packages.sql|\
+      20260928042134_runfazone_games_update_policy.sql|\
+      20260928051223_admin_games_rpc.sql|\
+      20260928055204_20260928_apply_games_rpc.sql.sql|\
+      20260928055236_20260928_games_with_package_counts_rpc.sql.sql|\
+      20260928060956_20260928_order_fulfillment_payment.sql.sql|\
+      20260928061342_20260928_order_fulfillment_rls.sql.sql|\
+      20260928062007_20260928_fix_order_status_rpc.sql.sql|\
+      20260928062039_20260928_update_orders_status_check.sql.sql)
+        continue
+        ;;
+    esac
+    source_migration="$project_root/supabase/migrations/$migration_name"
+    [ -f "$source_migration" ] || {
+      echo "ERROR: Canonical upgrade migration is missing: $migration_name" >&2
+      exit 13
+    }
+    if grep -Eiq '(cron\.schedule|net\.http|http_post|http_get|https://[^[:space:]]+/functions/)' "$source_migration"; then
+      echo "ERROR: Canonical upgrade sequence contains an unsafe outbound/scheduled migration: $migration_name" >&2
+      exit 13
+    fi
+    cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
+    upgrade_count=$((upgrade_count + 1))
+  done < <(awk -F'|' '/\| INCLUDE \|/ {gsub(/`/, "", $4); gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")
+
+  if [ "$upgrade_count" -ne 85 ]; then
+    echo "ERROR: Expected 85 canonical post-baseline migrations; found $upgrade_count." >&2
+    exit 13
+  fi
+  supabase_local migration up
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/existing-schema-upgrade.sql
+  # A second migration-up must be a no-op. This is separate from db reset so
+  # forward-only and duplicate-history behavior are exercised.
+  supabase_local migration up
+else
+  supabase_local db reset
+fi
 
 echo "Executing database security integration assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \

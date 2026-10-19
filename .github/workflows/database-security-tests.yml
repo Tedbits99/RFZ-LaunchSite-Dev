@@ -117,3 +117,6 @@ jobs:
 
       - name: Run isolated database security tests
         run: bash scripts/test-github-actions-database-security.sh
+
+      - name: Run legacy-to-current upgrade tests
+        run: bash scripts/test-github-actions-database-security.sh --existing-schema-upgrade
