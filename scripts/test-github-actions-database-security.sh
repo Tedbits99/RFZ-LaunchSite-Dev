@@ -495,6 +495,17 @@ if [ "$upgrade_mode" = true ]; then
       END IF;
     END \$\$;"
 
+  echo "LEGACY_UPGRADE_PHASE=historical-fulfillment-compatibility"
+  # The hosted deployment logs showed the historical fulfillment migration
+  # being attempted directly from this baseline. Exercise it transactionally
+  # before the canonical replacement sequence; the rollback guarantees that
+  # this probe cannot alter the disposable fixture used by the real upgrade.
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --command 'BEGIN' \
+    --file "$project_root/supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql" \
+    --command 'ROLLBACK'
+  echo "LEGACY_UPGRADE_HISTORICAL_FULFILLMENT_COMPATIBILITY=PASS"
+
   echo "Preparing canonical post-baseline upgrade sequence..."
   upgrade_count=0
   while IFS= read -r migration_name; do
