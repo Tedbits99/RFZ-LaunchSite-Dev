@@ -126,7 +126,8 @@ validate_psql_invocation() {
           supabase/tests/customer-confirmation-resend-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-setup.sql|\
           supabase/tests/reconciliation-concurrency-assertion.sql|\
-          supabase/tests/reconciliation-concurrency-cleanup.sql) ;;
+          supabase/tests/reconciliation-concurrency-cleanup.sql|\
+          supabase/tests/database/historical-fulfillment-compatibility.sql) ;;
           *) return 1 ;;
         esac
         seen_file=1
@@ -500,10 +501,13 @@ if [ "$upgrade_mode" = true ]; then
   # being attempted directly from this baseline. Exercise it transactionally
   # before the canonical replacement sequence; the rollback guarantees that
   # this probe cannot alter the disposable fixture used by the real upgrade.
+  {
+    printf '%s\n' 'BEGIN;'
+    cat "$project_root/supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql"
+    printf '%s\n' 'ROLLBACK;'
+  } > "$test_root/supabase/tests/database/historical-fulfillment-compatibility.sql"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
-    --command 'BEGIN' \
-    --command "\\i '$project_root/supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql'" \
-    --command 'ROLLBACK'
+    --file supabase/tests/database/historical-fulfillment-compatibility.sql
   echo "LEGACY_UPGRADE_HISTORICAL_FULFILLMENT_COMPATIBILITY=PASS"
 
   echo "Preparing canonical post-baseline upgrade sequence..."
