@@ -39,6 +39,9 @@ jobs:
           node-version: 22.12.0
           cache: npm
 
+      - name: Verify canonical migration manifest
+        run: node scripts/verify-canonical-migration-manifest.mjs
+
       - name: Install Node.js dependencies
         run: npm ci
 
