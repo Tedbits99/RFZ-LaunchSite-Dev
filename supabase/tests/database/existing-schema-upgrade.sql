@@ -101,7 +101,7 @@ DECLARE
 BEGIN
   SELECT * INTO v_result
   FROM public.finalize_supplier_reconciliation(
-    '00000000-0000-0000-0000-000000000705', 'completed', 'upgrade-test', NULL
+    '00000000-0000-0000-0000-000000000705', 'completed', 'auto-reconciliation', NULL
   );
   IF v_result.out_outcome <> 'applied' THEN
     RAISE EXCEPTION 'UPGRADE_SYNTHETIC_COMPLETION_FAILED';
@@ -109,7 +109,7 @@ BEGIN
 
   SELECT * INTO v_result
   FROM public.finalize_supplier_reconciliation(
-    '00000000-0000-0000-0000-000000000705', 'completed', 'upgrade-test', NULL
+    '00000000-0000-0000-0000-000000000705', 'completed', 'auto-reconciliation', NULL
   );
   IF v_result.out_outcome <> 'already-finalized' THEN
     RAISE EXCEPTION 'UPGRADE_IDEMPOTENCY_FAILED';
