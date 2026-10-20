@@ -61,7 +61,13 @@ describe('register page SSR render (executed render check)', () => {
     expect(html).toContain('name="name"');
     expect(html).toContain('name="email"');
     expect(html).toContain('name="password"');
+    expect(html).toContain('name="confirmPassword"');
     expect(html).toContain('Create Account');
+  });
+
+  it('checks the confirmation password before calling the API', () => {
+    expect(source).toContain("if (password !== confirmPassword)");
+    expect(source).toContain('Passwords do not match.');
   });
 
   it('does not pre-render the success or error panels in the idle state', () => {

@@ -20,6 +20,12 @@ export default function ResetPasswordPage() {
     setError('');
 
     const password = String(new FormData(event.currentTarget).get('password') ?? '');
+    const confirmPassword = String(new FormData(event.currentTarget).get('confirmPassword') ?? '');
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      setState('error');
+      return;
+    }
 
     try {
       // The password change happens server-side: the endpoint re-verifies the
@@ -69,6 +75,13 @@ export default function ResetPasswordPage() {
                 <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
                   <Lock size={15} className="text-slate-500" />
                   <input name="password" type="password" autoComplete="new-password" required minLength={8} maxLength={128} className="w-full bg-transparent py-2.5 text-sm outline-none" />
+                </div>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-400">Confirm new password</span>
+                <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
+                  <Lock size={15} className="text-slate-500" />
+                  <input name="confirmPassword" type="password" autoComplete="new-password" required minLength={8} maxLength={128} className="w-full bg-transparent py-2.5 text-sm outline-none" />
                 </div>
               </label>
               {state === 'error' && error ? (
