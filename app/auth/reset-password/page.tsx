@@ -85,7 +85,7 @@ export default function ResetPasswordPage() {
                 </div>
               </label>
               {state === 'error' && error ? (
-                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert">{error}</div>
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert" aria-live="polite">{error}</div>
               ) : null}
               <button type="submit" disabled={state === 'pending'} className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 py-3 text-sm font-semibold disabled:opacity-50">
                 {state === 'pending' ? 'Updating…' : 'Update password'}
