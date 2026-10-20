@@ -3,7 +3,7 @@ import { adminSupabase } from '@/lib/supabaseAdmin';
 import { requireAdmin } from '@/lib/adminGuard';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const EDGE_URL = `${SUPABASE_URL}/functions/v1/fazercards-test`;
 
 const ML_GAME_SLUGS = ['mobile-legends', 'mlbb'];
@@ -40,14 +40,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const categoryId = (body.category_id as string) || ML_CATEGORY_ID;
 
-    if (!SUPABASE_URL || !ANON_KEY) {
+    if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
       return NextResponse.json({ error: 'Server not configured' }, { status: 503 });
     }
 
     // Fetch offers from FazerCards via edge function
     const res = await fetch(
       `${EDGE_URL}/offers?category_id=${encodeURIComponent(categoryId)}`,
-      { headers: { Authorization: `Bearer ${ANON_KEY}` } },
+      { headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, apikey: SERVICE_ROLE_KEY } },
     );
     const json = await res.json().catch(() => null);
     if (!res.ok || !json?.success) {

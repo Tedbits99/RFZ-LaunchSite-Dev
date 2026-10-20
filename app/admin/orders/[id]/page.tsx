@@ -1,6 +1,6 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
-import { getAdminSession } from '@/lib/adminGuard';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import AdminOrderDetailClient from './AdminOrderDetailClient';
 
 export const dynamic = 'force-dynamic';
@@ -77,6 +77,7 @@ type SupplierTransaction = {
 };
 
 export default async function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const adminSession = await requireAdminPageSession();
   const { id } = await params;
   const db = adminSupabase || supabase;
   if (!db) {
@@ -135,9 +136,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
 
   const supplierTransaction = supplierTxData as unknown as SupplierTransaction | null;
 
-  // Resolve the signed-in admin's email from the real auth session
-  const adminSession = await getAdminSession();
-  const adminEmail = adminSession?.email || 'admin';
+  const adminEmail = adminSession.email || 'admin';
 
   return (
     <AdminOrderDetailClient

@@ -1,5 +1,6 @@
 import { adminSupabase } from '@/lib/supabaseAdmin'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import PackagesManager from './PackagesManager'
@@ -24,6 +25,7 @@ type PackageRecord = {
 }
 
 export default async function AdminGamePackagesPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdminPageSession()
   const { id } = await params
   let db: Awaited<ReturnType<typeof createSupabaseServerClient>>
   try {

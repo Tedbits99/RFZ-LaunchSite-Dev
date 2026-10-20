@@ -1,3 +1,6 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { isActiveAdmin, mayCreateSupplierOrder, mayUseServiceCredential } from "./authorization.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -25,9 +28,58 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
+  const authorization = req.headers.get("Authorization") || "";
+  const accessToken = authorization.replace(/^Bearer\s+/i, "");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!accessToken || !supabaseUrl || !anonKey || !serviceRoleKey) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const path = new URL(req.url).pathname.replace("/fazercards-test", "");
+  const isOrderRequest = path === "/order" && req.method === "POST";
+  if (accessToken === serviceRoleKey) {
+    // The server key may call read/sync paths, but never authorizes a supplier order.
+    if (!mayUseServiceCredential(isOrderRequest)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  } else {
+    const authClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: { user }, error: authError } = await authClient.auth.getUser(accessToken);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: admin, error: adminError } = await adminClient
+      .from("admins")
+      .select("role, is_active")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (adminError || !isActiveAdmin(admin)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (isOrderRequest && !mayCreateSupplierOrder(admin)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
   try {
     const url = new URL(req.url);
-    const path = url.pathname.replace("/fazercards-test", "");
     const apiKey = Deno.env.get("SUPPLIER_FAZERCARDS_API_KEY");
 
     if (!apiKey) {
@@ -110,8 +162,8 @@ Deno.serve(async (req: Request) => {
     // Body: { category_id, offer_id, fields, idempotency_key }
     if (path === "/order" && req.method === "POST") {
       const body = await req.json().catch(() => null);
-      if (!body || !body.category_id || !body.offer_id || !body.fields || !body.idempotency_key) {
-        return new Response(JSON.stringify({ error: "Missing required fields: category_id, offer_id, fields, idempotency_key" }), {
+      if (!body || !body.category_id || !body.offer_id || !body.fields || !body.idempotency_key || body.confirmed !== true) {
+        return new Response(JSON.stringify({ error: "Missing required fields or explicit confirmation" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }

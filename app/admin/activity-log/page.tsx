@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { Activity } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminActivityLogPage() {
+  await requireAdminPageSession();
   let orders: Array<{ id: string; reference: string; status: string; email: string; created_at: string }> = [];
   let dbReady = false;
   if (adminSupabase) { dbReady = true; const { data } = await adminSupabase.from('orders').select('id, reference, status, email, created_at').order('created_at', { ascending: false }).limit(30); orders = (data || []) as typeof orders; }

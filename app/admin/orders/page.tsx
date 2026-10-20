@@ -1,7 +1,7 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
 import OrdersManager from './OrdersManager';
-import { getAdminSession } from '@/lib/adminGuard';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +20,7 @@ type OrderRow = {
 };
 
 export default async function AdminOrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; date?: string; archived?: string }> }) {
+  await requireAdminPageSession();
   const resolvedSearchParams = await searchParams;
   let orders: OrderRow[] = [];
   let dbReady = false;
@@ -28,17 +29,6 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
   const db = adminSupabase || supabase;
   if (db) {
     dbReady = true;
-
-    // Archival mutates orders. Run it only for an authenticated, active admin.
-    const adminSession = await getAdminSession();
-    if (adminSession && adminSupabase) {
-      try {
-        const { error: archiveError } = await adminSupabase.rpc('archive_old_unpaid_orders');
-        if (archiveError && process.env.NODE_ENV !== 'production') console.warn('Order archival RPC failed.');
-      } catch {
-        if (process.env.NODE_ENV !== 'production') console.warn('Order archival RPC failed.');
-      }
-    }
 
     const showArchived = resolvedSearchParams.archived === '1';
 

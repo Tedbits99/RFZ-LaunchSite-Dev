@@ -1,4 +1,5 @@
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { formatCurrency, formatNumber } from '@/lib/format'
@@ -9,6 +10,7 @@ export const dynamic = 'force-dynamic'
 type Order = { id: string; reference: string; total_cents: number; status: string; payment_method: string }
 
 export default async function AdminReconciliationPage() {
+  await requireAdminPageSession()
   let orders: Order[] = []
   let dbReady = false
   if (adminSupabase) {

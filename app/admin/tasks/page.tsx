@@ -1,4 +1,5 @@
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { CalendarClock, Plus } from 'lucide-react'
@@ -30,6 +31,7 @@ const priorityColor: Record<string, string> = {
 }
 
 export default async function AdminTasksPage() {
+  await requireAdminPageSession()
   let tasks: Task[] = []
   let dbReady = false
   if (adminSupabase) {

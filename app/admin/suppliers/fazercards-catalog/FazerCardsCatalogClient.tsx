@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import {
   Loader2, Search, ChevronRight, ArrowLeft, RefreshCw,
   DollarSign, AlertTriangle, Check, Package, Tag, Eye,
@@ -43,6 +44,15 @@ interface OffersResponse {
   note: string | null;
 }
 
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+async function edgeAuthHeaders(): Promise<Record<string, string>> {
+  const client = getSupabaseBrowserClient();
+  const { data: { session } } = client ? await client.auth.getSession() : { data: { session: null } };
+  if (!session?.access_token) throw new Error('Admin session required');
+  return { Authorization: `Bearer ${session.access_token}`, apikey: SUPABASE_ANON_KEY || '' };
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function FazerCardsCatalogClient() {
@@ -64,7 +74,6 @@ export default function FazerCardsCatalogClient() {
   const [loadingBalance, setLoadingBalance] = useState(false);
 
   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const EDGE_URL = `${SUPABASE_URL}/functions/v1/fazercards-test`;
 
   const fetchCategories = useCallback(async (cursor?: string) => {
@@ -74,9 +83,7 @@ export default function FazerCardsCatalogClient() {
       const url = cursor
         ? `${EDGE_URL}/categories?cursor=${encodeURIComponent(cursor)}`
         : `${EDGE_URL}/categories`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${ANON_KEY}` },
-      });
+      const res = await fetch(url, { headers: await edgeAuthHeaders() });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to fetch categories');
       const data = json.data as CategoriesResponse;
@@ -87,13 +94,13 @@ export default function FazerCardsCatalogClient() {
     } finally {
       setLoadingCats(false);
     }
-  }, [EDGE_URL, ANON_KEY]);
+  }, [EDGE_URL]);
 
   const fetchBalance = useCallback(async () => {
     setLoadingBalance(true);
     try {
       const res = await fetch(`${EDGE_URL}/balance`, {
-        headers: { Authorization: `Bearer ${ANON_KEY}` },
+        headers: await edgeAuthHeaders(),
       });
       const json = await res.json();
       if (json.success) {
@@ -106,7 +113,7 @@ export default function FazerCardsCatalogClient() {
     } finally {
       setLoadingBalance(false);
     }
-  }, [EDGE_URL, ANON_KEY]);
+  }, [EDGE_URL]);
 
   useEffect(() => {
     fetchCategories();
@@ -122,7 +129,7 @@ export default function FazerCardsCatalogClient() {
     setOffersLatency(null);
     try {
       const res = await fetch(`${EDGE_URL}/offers?category_id=${encodeURIComponent(cat.category_id)}`, {
-        headers: { Authorization: `Bearer ${ANON_KEY}` },
+        headers: await edgeAuthHeaders(),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to fetch offers');

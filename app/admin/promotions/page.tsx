@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Megaphone } from 'lucide-react'
@@ -28,6 +29,7 @@ type Promotion = {
 type GameOption = { id: string; name: string }
 
 export default async function AdminPromotionsPage() {
+  await requireAdminPageSession()
   let promos: Promotion[] = []
   let games: GameOption[] = []
   let dbReady = false

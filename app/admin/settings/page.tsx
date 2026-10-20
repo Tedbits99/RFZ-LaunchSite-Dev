@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { Settings } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
-export default function AdminSettingsPage() {
+export default async function AdminSettingsPage() {
+  await requireAdminPageSession();
   const settings = [
     { key: 'NEXT_PUBLIC_APP_URL', label: 'Store URL', value: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000', editable: false },
     { key: 'PAYMENT_PROVIDER', label: 'Payment Provider', value: process.env.PAYMENT_PROVIDER || 'mock', editable: false },

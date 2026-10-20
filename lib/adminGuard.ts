@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { notFound } from 'next/navigation'
 
 export type AdminSession = {
   userId: string
@@ -22,19 +23,19 @@ export async function getAdminSession(): Promise<AdminSession | null> {
   }
 
   let name = ''
-  let role = 'ADMIN'
+  let role = ''
 
   // Try to enrich with admins table data. Use service-role client if available,
   // otherwise fall back to the cookie-authenticated server client.
   const client = adminSupabase || supabase
-  const { data: admin } = await client
+  const { data: admin, error: adminError } = await client
     .from('admins')
     .select('email, name, role, is_active')
     .eq('id', user.id)
     .maybeSingle()
-  if (admin?.is_active) {
+  if (!adminError && admin?.is_active === true && ['STAFF', 'ADMIN', 'SUPER_ADMIN'].includes(admin.role)) {
     name = admin.name || ''
-    role = admin.role || 'ADMIN'
+    role = admin.role
   } else {
     return null
   }
@@ -45,6 +46,17 @@ export async function getAdminSession(): Promise<AdminSession | null> {
     name,
     role,
   }
+}
+
+/**
+ * Guard privileged server-page data reads at the page boundary as well as in
+ * the shared admin layout. App Router may render route segments concurrently,
+ * so a parent layout alone must not be the only check before service-role IO.
+ */
+export async function requireAdminPageSession(...allowedRoles: string[]): Promise<AdminSession> {
+  const session = await getAdminSession()
+  if (!session || (allowedRoles.length > 0 && !allowedRoles.includes(session.role))) notFound()
+  return session
 }
 
 function createRequestClient(req: NextRequest) {
@@ -75,6 +87,7 @@ function jsonError(status: number, message: string): Response {
 
 export async function requireAdmin(
   req: NextRequest,
+  allowedRoles?: readonly string[],
 ): Promise<{ ok: true; session: AdminSession; client: Awaited<ReturnType<typeof createSupabaseServerClient>> } | { ok: false; response: Response }> {
   let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
   try {
@@ -93,20 +106,23 @@ export async function requireAdmin(
     }
 
     let name = ''
-    let role = 'ADMIN'
+    let role = ''
 
     const client = adminSupabase || supabase
-    const { data: admin } = await client
+    const { data: admin, error: adminError } = await client
       .from('admins')
       .select('email, name, role, is_active')
       .eq('id', user.id)
       .maybeSingle()
-    if (!admin || !admin.is_active) {
+    if (adminError || !admin || admin.is_active !== true || !['STAFF', 'ADMIN', 'SUPER_ADMIN'].includes(admin.role)) {
       return { ok: false, response: jsonError(403, 'Forbidden.') }
     }
 
     name = admin.name || ''
-    role = admin.role || 'ADMIN'
+    role = admin.role
+    if (allowedRoles && !allowedRoles.includes(role)) {
+      return { ok: false, response: jsonError(403, 'Forbidden.') }
+    }
 
     return {
       ok: true,

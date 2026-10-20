@@ -1,4 +1,5 @@
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Bell } from 'lucide-react'
@@ -25,6 +26,7 @@ const typeColor: Record<string, string> = {
 }
 
 export default async function AdminNotificationsPage() {
+  await requireAdminPageSession()
   let notifications: Notification[] = []
   let dbReady = false
   if (adminSupabase) {

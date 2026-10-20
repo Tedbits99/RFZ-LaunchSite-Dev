@@ -17,7 +17,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 }));
 vi.mock('@/lib/supabase', () => ({ supabase: { __anonClient: true } }));
 
-import { POST } from './route';
+import { GET, POST } from './route';
 
 function makeRequestClient() {
   return { rpc: mocks.rpc } as unknown as ReturnType<typeof Object>;
@@ -30,11 +30,7 @@ describe('/api/admin/rf-coins authorization', () => {
   });
 
   it('rejects admins without the SUPER_ADMIN role before touching the database', async () => {
-    mocks.requireAdmin.mockResolvedValue({
-      ok: true,
-      session: { userId: 'a1', email: 'admin@example.invalid', name: 'A', role: 'ADMIN' },
-      client: makeRequestClient(),
-    });
+    mocks.requireAdmin.mockResolvedValue({ ok: false, response: new Response('denied', { status: 403 }) });
     const req = new NextRequest('http://localhost/api/admin/rf-coins', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -42,7 +38,16 @@ describe('/api/admin/rf-coins authorization', () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(403);
+    expect(mocks.requireAdmin).toHaveBeenCalledWith(req, ['SUPER_ADMIN']);
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('denies ordinary admins access to wallet and ledger data before querying', async () => {
+    mocks.requireAdmin.mockResolvedValue({ ok: false, response: new Response('denied', { status: 403 }) });
+    const req = new NextRequest('http://localhost/api/admin/rf-coins');
+    const res = await GET(req);
+    expect(res.status).toBe(403);
+    expect(mocks.requireAdmin).toHaveBeenCalledWith(req, ['SUPER_ADMIN']);
   });
 
   it('rejects unauthenticated callers', async () => {

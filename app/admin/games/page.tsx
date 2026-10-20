@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Gamepad2, Plus, Package as PackageIcon } from 'lucide-react'
@@ -21,6 +22,7 @@ type Game = {
 }
 
 export default async function AdminGamesPage() {
+  await requireAdminPageSession()
   let games: Game[] = []
   let dbReady = false
   let loadError: string | null = null

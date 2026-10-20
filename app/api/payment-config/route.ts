@@ -4,7 +4,7 @@ import { requireAdmin } from '@/lib/adminGuard';
 import { getPaymentAdapter, buildProviderConfig, listAvailableProviders } from '@/lib/paymentProviderAdapters';
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdmin(req, ['ADMIN', 'SUPER_ADMIN']);
   if (!auth.ok) return auth.response;
 
   const db = adminSupabase || auth.client;
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdmin(req, ['ADMIN', 'SUPER_ADMIN']);
   if (!auth.ok) {
     return auth.response;
   }
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdmin(req, ['ADMIN', 'SUPER_ADMIN']);
   if (!auth.ok) {
     return auth.response;
   }
@@ -139,7 +139,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdmin(req, ['ADMIN', 'SUPER_ADMIN']);
   if (!auth.ok) {
     return auth.response;
   }

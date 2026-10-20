@@ -1,5 +1,5 @@
 [build]
-command = "npx next build"
+command = "npx next build --webpack"
 publish = ".next"
 
 [[plugins]]

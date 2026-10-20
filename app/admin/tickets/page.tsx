@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { Ticket } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminTicketsPage() {
+  await requireAdminPageSession();
   let tickets: Array<{ id: string; reference: string; email: string; subject: string; status: string; priority: string; created_at: string }> = [];
   let dbReady = false;
   if (adminSupabase) { dbReady = true; const { data } = await adminSupabase.from('support_tickets').select('*').order('updated_at', { ascending: false }).limit(50); tickets = (data || []) as typeof tickets; }

@@ -14,7 +14,7 @@ import { rfCoinErrorMessage } from '@/lib/rfCoins';
   const db = () => adminSupabase || supabase;
 
 export async function GET(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdmin(req, ['SUPER_ADMIN']);
   if (!session.ok) return session.response;
   const client = db();
   if (!client) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
@@ -65,15 +65,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdmin(req, ['SUPER_ADMIN']);
   if (!session.ok) return session.response;
   // rf_coin_* mutation RPCs verify the SUPER_ADMIN role inside Postgres via
   // rf_coin_assert_super_admin(), which needs the CALLER's JWT — the
   // service-role client has no auth.uid(). requireAdmin's client carries the
   // admin's own session cookies, so run every mutation through it.
-  if (session.session.role !== 'SUPER_ADMIN') {
-    return NextResponse.json({ error: 'Super admin role required.' }, { status: 403 });
-  }
   const adminClient = session.client;
 
   try {

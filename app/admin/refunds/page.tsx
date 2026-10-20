@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { RotateCcw } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminRefundsPage() {
+  await requireAdminPageSession();
   let refunds: Array<{ id: string; reference: string; status: string; total_cents: number; email: string; created_at: string }> = [];
   let dbReady = false;
   if (adminSupabase) { dbReady = true; const { data } = await adminSupabase.from('orders').select('id, reference, status, total_cents, email, created_at').in('status', ['REFUND_REQUESTED','REFUNDED']).order('created_at', { ascending: false }); refunds = (data || []) as typeof refunds; }

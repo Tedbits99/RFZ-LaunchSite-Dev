@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import GamesVisibilityPanel from './GamesVisibilityPanel';
 import Link from 'next/link';
 import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, Package, ShoppingCart, Users, XCircle } from 'lucide-react';
@@ -49,6 +50,7 @@ async function getMetrics(): Promise<{
 
 const fmtP = (cents: number) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 export default async function AdminDashboard() {
+  await requireAdminPageSession();
   const data = await getMetrics();
   const { orders, games, packages, error } = data;
   const uniqueCustomers = new Set(data.customerEmails);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import {
   Loader2, AlertTriangle, Check, ArrowLeft, Shield, Zap,
   Package, RefreshCw, Clock,
@@ -77,6 +78,13 @@ const ML_CATEGORY_IDS = [
   'mobile_legends_ru',
 ];
 
+async function edgeAuthHeaders(): Promise<Record<string, string>> {
+  const client = getSupabaseBrowserClient();
+  const { data: { session } } = client ? await client.auth.getSession() : { data: { session: null } };
+  if (!session?.access_token) throw new Error('Admin session required');
+  return { Authorization: `Bearer ${session.access_token}`, apikey: ANON_KEY || '' };
+}
+
 type Step = 'loading' | 'ready' | 'offers' | 'confirm' | 'submitting' | 'result';
 
 function maskValue(key: string, value: string): string {
@@ -150,9 +158,7 @@ export default function ControlledTestOrderClient() {
     setError(null);
     try {
       const [catsRes] = await Promise.all([
-        fetch(`${EDGE_URL}/categories?limit=305`, {
-          headers: { Authorization: `Bearer ${ANON_KEY}` },
-        }),
+        fetch(`${EDGE_URL}/categories?limit=305`, { headers: await edgeAuthHeaders() }),
         fetchTestRuns(),
       ]);
 
@@ -165,24 +171,13 @@ export default function ControlledTestOrderClient() {
       );
       setCategories(mlCats);
 
-      const dbRes = await fetch('/api/orders?game=mobile-legends&limit=10');
+      const dbRes = await fetch('/api/admin/test-order-candidates?limit=10');
       let dbOrders: ExistingOrder[] = [];
       if (dbRes.ok) {
         const dbJson = await dbRes.json();
         dbOrders = (dbJson.data ?? dbJson.orders ?? []).filter(
           (o: ExistingOrder) => o.player_inputs && (o.player_inputs.user_id || o.player_inputs.player_id)
         );
-      }
-      if (dbOrders.length === 0) {
-        const directRes = await fetch(`${SUPABASE_URL}/rest/v1/orders?select=id,reference,player_inputs,status,game_id,package_id&player_inputs->>user_id=not.is.null&order=created_at.desc&limit=10`, {
-          headers: {
-            apikey: ANON_KEY as string,
-            Authorization: `Bearer ${ANON_KEY}`,
-          },
-        });
-        if (directRes.ok) {
-          dbOrders = await directRes.json();
-        }
       }
       setExistingOrders(dbOrders);
 
@@ -206,7 +201,7 @@ export default function ControlledTestOrderClient() {
     setError(null);
     try {
       const res = await fetch(`${EDGE_URL}/offers?category_id=${encodeURIComponent(cat.category_id)}`, {
-        headers: { Authorization: `Bearer ${ANON_KEY}` },
+        headers: await edgeAuthHeaders(),
       });
       const json = await res.json();
       if (!json.success) throw new Error('Failed to fetch offers');
@@ -283,7 +278,7 @@ export default function ControlledTestOrderClient() {
       const res = await fetch(`${EDGE_URL}/order`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${ANON_KEY}`,
+          ...(await edgeAuthHeaders()),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -291,6 +286,7 @@ export default function ControlledTestOrderClient() {
           offer_id: selectedOffer.offer_id,
           fields: orderFields,
           idempotency_key: idempotencyKey,
+          confirmed: true,
         }),
       });
       const json = await res.json();
@@ -321,7 +317,7 @@ export default function ControlledTestOrderClient() {
           setPollingStatus(true);
           try {
             const statusRes = await fetch(`${EDGE_URL}/order-status?supplier_ref=${encodeURIComponent(supplierRef)}`, {
-              headers: { Authorization: `Bearer ${ANON_KEY}` },
+              headers: await edgeAuthHeaders(),
             });
             const statusJson = await statusRes.json();
             setStatusResult(statusJson.data ?? null);

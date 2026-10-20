@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { BarChart3, TrendingUp, Users, Wallet } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminAnalyticsPage() {
+  await requireAdminPageSession();
   let metrics = { totalOrders: 0, revenue: 0, avgOrder: 0, customers: 0, topGames: [] as Array<{ name: string; count: number }>, topPackages: [] as Array<{ name: string; count: number }> };
   let dbReady = false;
   if (adminSupabase) {

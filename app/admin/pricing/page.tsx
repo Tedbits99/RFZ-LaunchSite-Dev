@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { Megaphone } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminPromotionsPage() {
+  await requireAdminPageSession();
   let promos: Array<{ id: string; title: string; body: string; target_type: string; is_active: boolean; sort_order: number }> = [];
   let dbReady = false;
   if (adminSupabase) { dbReady = true; const { data } = await adminSupabase.from('promotions').select('*').order('sort_order'); promos = (data || []) as typeof promos; }

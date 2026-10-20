@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { Download } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminExportPage() {
+  await requireAdminPageSession();
   let count = 0;
   let dbReady = false;
   if (adminSupabase) { dbReady = true; const { count: c } = await adminSupabase.from('orders').select('*', { count: 'exact', head: true }); count = c || 0; }

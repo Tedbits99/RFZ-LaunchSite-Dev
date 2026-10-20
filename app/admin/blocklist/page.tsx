@@ -1,4 +1,5 @@
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Ban, Plus } from 'lucide-react'
@@ -22,6 +23,7 @@ const typeColor: Record<string, string> = {
 }
 
 export default async function AdminBlocklistPage() {
+  await requireAdminPageSession()
   let entries: BlockEntry[] = []
   let dbReady = false
   if (adminSupabase) {

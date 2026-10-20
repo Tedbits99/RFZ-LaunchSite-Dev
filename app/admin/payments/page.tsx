@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { adminSupabase } from '@/lib/supabaseAdmin'
+import { requireAdminPageSession } from '@/lib/adminGuard'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { formatCurrency } from '@/lib/format'
@@ -56,6 +57,7 @@ type EditorConfig = {
 }
 
 export default async function AdminPaymentsPage() {
+  await requireAdminPageSession('ADMIN', 'SUPER_ADMIN')
   let orders: Order[] = []
   let configs: EditorConfig[] = []
   let dbReady = false

@@ -1,9 +1,11 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { requireAdminPageSession } from '@/lib/adminGuard';
 import { Users } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminCustomersPage() {
+  await requireAdminPageSession();
   let customers: Array<{ email: string; order_count: number; total_spent: number; last_order: string }> = [];
   let dbReady = false;
   if (adminSupabase) {
