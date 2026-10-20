@@ -1,0 +1,31 @@
+name: Phase branch auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: phase-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  merge-eligible-phase:
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.event.pull_request.head.ref, 'codex/') ||
+      startsWith(github.event.pull_request.head.ref, 'feature/')) &&
+      contains(github.event.pull_request.labels.*.name, 'phase-ready') &&
+      vars.PHASE0_PRODUCTION_GATE_CLEARED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable squash auto-merge after required checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --auto --squash
