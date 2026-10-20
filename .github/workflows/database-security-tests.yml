@@ -1,0 +1,131 @@
+name: Development validation
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+      - 'feature/**'
+      - security/authorization-hardening
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-database-security:
+    name: Isolated Supabase RPC security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Check tracked files for high-confidence secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const fs = require('node:fs');
+
+          const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'buffer' })
+            .toString('utf8')
+            .split('\0')
+            .filter(Boolean);
+          const patterns = [
+            /-----BEGIN (?:RSA|EC|OPENSSH|PRIVATE) KEY-----/,
+            /\b(?:sk_live_|rk_live_)[A-Za-z0-9]{12,}/,
+            /(?:SUPABASE_SERVICE_ROLE_KEY|PAYMONGO_SECRET_KEY|FAZERCARDS_API_KEY)\s*=\s*["'`](?!REPLACE_WITH|YOUR_|TEST_|SYNTHETIC_|service-key|<|\$\{)[A-Za-z0-9._-]{8,}["'`]/,
+          ];
+          const hits = [];
+
+          for (const file of files) {
+            let content;
+            try {
+              const bytes = fs.readFileSync(file);
+              if (bytes.includes(0)) continue;
+              content = bytes.toString('utf8');
+            } catch {
+              continue;
+            }
+            if (patterns.some((pattern) => pattern.test(content))) hits.push(file);
+          }
+
+          if (hits.length > 0) {
+            console.error(`High-confidence secret pattern found in ${hits.length} tracked text file(s).`);
+            process.exit(1);
+          }
+          console.log('SECRET_SCAN_PASS');
+          NODE
+
+      - name: Audit production and development dependencies
+        run: npm audit --audit-level=low
+
+      - name: Run serialized application tests
+        run: npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
+
+      - name: Run TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run production build
+        run: npm run build
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.121.0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Run disposable backup and restore rehearsal
+        run: bash scripts/test-disposable-backup-restore.sh
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.46.3
+
+      - name: Check reconciliation Edge Functions
+        run: |
+          deno check supabase/functions/archive-old-orders/index.ts
+          deno check supabase/functions/auto-reconciliation/index.ts
+          deno check supabase/functions/create-qrph-payment/index.ts
+          deno check supabase/functions/fazercards-test/index.ts
+          deno test supabase/functions/fazercards-test/authorization_test.ts
+          deno check supabase/functions/payment-webhook/index.ts
+          deno check supabase/functions/send-transactional-email/index.ts
+          deno check supabase/functions/completion-receipt-email-worker/index.ts
+
+      - name: Run isolated database security tests
+        run: bash scripts/test-github-actions-database-security.sh
+
+      - name: Run legacy-to-current upgrade tests
+        run: bash scripts/test-github-actions-database-security.sh --existing-schema-upgrade

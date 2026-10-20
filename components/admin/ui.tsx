@@ -1,0 +1,56 @@
+import { ReactNode } from 'react';
+import { LucideIcon } from 'lucide-react';
+
+export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+  return (
+    <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[#1b2a45] pb-5 sm:flex-row sm:items-end">
+      <div>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-white">{title}</h1>
+        {subtitle && <p className="mt-1 max-w-2xl text-sm text-slate-400">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+export function StatusBadge({ status }: { status: string }) {
+  const tone = {
+    COMPLETED: 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/20',
+    PAID: 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/20',
+    PROCESSING: 'bg-blue-400/10 text-blue-300 ring-blue-400/20',
+    PENDING: 'bg-amber-400/10 text-amber-200 ring-amber-400/20',
+    PAYMENT_PENDING: 'bg-amber-400/10 text-amber-200 ring-amber-400/20',
+    FAILED: 'bg-rose-400/10 text-rose-300 ring-rose-400/20',
+    CANCELLED: 'bg-rose-400/10 text-rose-300 ring-rose-400/20',
+    REFUNDED: 'bg-slate-400/10 text-slate-300 ring-slate-400/20',
+    REFUND_REQUESTED: 'bg-orange-400/10 text-orange-300 ring-orange-400/20',
+  }[status] || 'bg-slate-400/10 text-slate-300 ring-slate-400/20';
+
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${tone}`}>{status.replaceAll('_', ' ')}</span>;
+}
+
+export function DbNotReady() {
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-300">
+      Database connection is not available. Please check your server configuration.
+    </div>
+  );
+}
+
+export function EmptyState({ icon: Icon, label, hint }: { icon: LucideIcon; label: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-[#1b2a45] bg-[#0b1225] py-16 text-center">
+      <Icon size={32} className="mb-3 text-slate-600" />
+      <p className="text-sm font-medium text-slate-400">{label}</p>
+      {hint && <p className="mt-1 text-xs text-slate-600">{hint}</p>}
+    </div>
+  );
+}
+
+export function ActiveBadge({ active }: { active: boolean }) {
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-400'}`}>
+      {active ? 'ACTIVE' : 'DISABLED'}
+    </span>
+  );
+}

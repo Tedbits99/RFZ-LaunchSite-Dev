@@ -1,0 +1,61 @@
+name: Phase branch auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  checks: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: phase-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  merge-eligible-phase:
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.event.pull_request.head.ref, 'codex/') ||
+      startsWith(github.event.pull_request.head.ref, 'feature/'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load gate verifier from the base branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPOSITORY/contents/scripts/verify-phase-pr-gates.sh?ref=$BASE_SHA" \
+            --jq '.content' | tr -d '\n' | base64 --decode > "$RUNNER_TEMP/verify-phase-pr-gates.sh"
+          chmod 700 "$RUNNER_TEMP/verify-phase-pr-gates.sh"
+          test -s "$RUNNER_TEMP/verify-phase-pr-gates.sh"
+
+      - name: Verify exact-head phase release gates
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PHASE0_PRODUCTION_GATE_CLEARED: ${{ vars.PHASE0_PRODUCTION_GATE_CLEARED }}
+        run: bash "$RUNNER_TEMP/verify-phase-pr-gates.sh"
+
+      - name: Re-read head and merge using the verified SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PHASE0_PRODUCTION_GATE_CLEARED: ${{ vars.PHASE0_PRODUCTION_GATE_CLEARED }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/verify-phase-pr-gates.sh"
+          current_sha="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
+          [ "$current_sha" = "$EXPECTED_SHA" ] || { echo "ERROR: PR head changed after gate verification" >&2; exit 1; }
+          merge_result="$(gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f sha="$EXPECTED_SHA" -f merge_method=squash -f commit_title="Merge verified phase PR #$PR_NUMBER")"
+          jq -e '.merged == true' <<<"$merge_result" >/dev/null || {
+            echo "ERROR: GitHub did not merge the verified SHA" >&2
+            exit 1
+          }

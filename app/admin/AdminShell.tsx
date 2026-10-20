@@ -1,0 +1,69 @@
+'use client'
+
+import { useState, type ReactNode } from 'react'
+import { Activity, LogOut, Menu } from 'lucide-react'
+import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import AdminNavigation from '@/components/admin/AdminNavigation'
+
+export default function AdminShell({ children }: { children: ReactNode }) {
+  const [navigationOpen, setNavigationOpen] = useState(false)
+
+  return (
+    <div className="min-h-screen bg-[#030718] text-slate-100">
+      <header className="sticky top-0 z-40 border-b border-[#1b2a45] bg-[#050a1b]/95 backdrop-blur-xl">
+        <div className="flex min-h-[73px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                aria-label="Open admin navigation"
+                aria-expanded={navigationOpen}
+                onClick={() => setNavigationOpen(true)}
+                className="rounded-lg border border-[#253451] p-2 text-slate-300 transition hover:border-cyan-300 hover:text-cyan-200 lg:hidden"
+              >
+                <Menu size={18} />
+              </button>
+              <img
+                src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1789837643/R_logo_1_au2g5c.png"
+                alt="RunFazone"
+                width={1701}
+                height={378}
+                className="h-10 w-auto object-contain"
+              />
+              <div className="hidden sm:block">
+                <p className="text-[10px] uppercase tracking-widest text-slate-500">
+                  Dashboard
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400 sm:gap-3">
+              <a
+                href="/"
+                className="rounded-lg border border-[#253451] px-3 py-2 transition hover:border-cyan-300 hover:text-cyan-200"
+              >
+                <span className="hidden sm:inline">View Store</span>
+                <span className="sm:hidden">Store</span>
+              </a>
+              <span className="hidden items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 sm:flex">
+                <Activity size={13} className="text-cyan-300" /> Admin
+              </span>
+              <button
+                onClick={async () => {
+                  const supabase = getSupabaseBrowserClient()
+                  if (supabase) await supabase.auth.signOut()
+                  window.location.href = '/secure-admin-login'
+                }}
+                className="flex items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-rose-400 hover:text-rose-200"
+              >
+                <LogOut size={13} /> Log out
+              </button>
+            </div>
+        </div>
+      </header>
+
+      <div className="flex min-w-0">
+        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} />
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
+    </div>
+  )
+}

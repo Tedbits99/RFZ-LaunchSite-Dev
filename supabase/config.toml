@@ -1,0 +1,32 @@
+[functions.verify-player]
+verify_jwt = false
+
+[functions.create-qrph-payment]
+verify_jwt = false
+
+[functions.fazercards-test]
+verify_jwt = false
+
+[functions.archive-old-orders]
+verify_jwt = false
+
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.auto-reconciliation]
+verify_jwt = false
+
+[functions.send-transactional-email]
+verify_jwt = false
+
+[functions.completion-receipt-email-worker]
+verify_jwt = false
+
+[functions.create-coin-topup-payment]
+verify_jwt = false
+
+[functions.fulfillment-handoff]
+verify_jwt = false
+
+[functions.fulfillment-handoff-v2]
+verify_jwt = false
