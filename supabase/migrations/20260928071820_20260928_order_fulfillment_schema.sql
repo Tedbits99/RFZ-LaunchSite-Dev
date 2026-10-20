@@ -125,7 +125,54 @@ CREATE TABLE IF NOT EXISTS public.payment_config (
 ALTER TABLE public.payment_config ENABLE ROW LEVEL SECURITY;
 
 -- =========================================================
--- 4. RLS policies for all fulfillment tables
+-- 4. Fulfillment tables required by the policies and RPC below
+-- =========================================================
+
+-- This historical migration was previously superseded by the later complete
+-- copy, but the hosted deployment path attempted it directly from the
+-- verified 11-migration baseline. Keep the file forward-compatible for that
+-- pending path: policy creation must not reference tables that this migration
+-- has not created yet.
+CREATE TABLE IF NOT EXISTS public.order_timeline (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  status text NOT NULL,
+  actor_email text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.refunds (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  reference text NOT NULL DEFAULT '',
+  amount_cents integer NOT NULL DEFAULT 0,
+  reason text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'PENDING',
+  approved_by text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.order_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  author_email text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.order_timeline ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.refunds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_order_timeline_order_id
+  ON public.order_timeline(order_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_order_id
+  ON public.refunds(order_id);
+
+-- =========================================================
+-- 5. RLS policies for all fulfillment tables
 -- =========================================================
 
 -- order_timeline: service role only (admin client bypasses RLS)
