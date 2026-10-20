@@ -4,15 +4,20 @@ on:
   push:
     branches:
       - main
+      - 'codex/**'
+      - 'feature/**'
       - security/authorization-hardening
-      - feature/customer-auth-phase1
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: database-security-${{ github.ref }}
+  group: database-security-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -98,6 +104,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
+
+      - name: Run disposable backup and restore rehearsal
+        run: bash scripts/test-disposable-backup-restore.sh
 
       - name: Install Deno
         uses: denoland/setup-deno@v2

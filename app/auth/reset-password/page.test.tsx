@@ -91,3 +91,11 @@ describe('reset password page SSR render (executed render check)', () => {
     expect(html).not.toContain('Updating…');
   });
 });
+
+describe('reset password confirmation', () => {
+  it('requires matching passwords before submitting the recovery session', () => {
+    expect(source).toContain('name="confirmPassword"');
+    expect(source).toContain('if (password !== confirmPassword)');
+    expect(source).toContain('Passwords do not match.');
+  });
+});

@@ -21,6 +21,13 @@ export default function Register() {
     const name = String(formData.get('name') ?? '');
     const email = String(formData.get('email') ?? '');
     const password = String(formData.get('password') ?? '');
+    const confirmPassword = String(formData.get('confirmPassword') ?? '');
+
+    if (password !== confirmPassword) {
+      setErrorMessage('Passwords do not match.');
+      setSubmitState('error');
+      return;
+    }
 
     setSubmitState('pending');
     setErrorMessage('');
@@ -84,11 +91,12 @@ export default function Register() {
             <h1 className="font-display text-2xl font-bold">Create account</h1>
             <p className="mt-1 text-sm text-slate-400">Join RunFazone for faster top-ups.</p>
             <form className="mt-6 space-y-3" onSubmit={handleSubmit} noValidate={false}>
-              <label className="block"><span className="mb-1 block text-xs text-slate-400">Full name</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><UserRound size={15} className="text-slate-500" /><input name="name" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
-              <label className="block"><span className="mb-1 block text-xs text-slate-400">Email</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Mail size={15} className="text-slate-500" /><input name="email" type="email" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
-              <label className="block"><span className="mb-1 block text-xs text-slate-400">Password</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Lock size={15} className="text-slate-500" /><input name="password" type="password" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
+              <label className="block"><span className="mb-1 block text-xs text-slate-400">Full name</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><UserRound size={15} className="text-slate-500" /><input name="name" autoComplete="name" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
+              <label className="block"><span className="mb-1 block text-xs text-slate-400">Email</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Mail size={15} className="text-slate-500" /><input name="email" type="email" autoComplete="email" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
+              <label className="block"><span className="mb-1 block text-xs text-slate-400">Password</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Lock size={15} className="text-slate-500" /><input name="password" type="password" autoComplete="new-password" minLength={8} maxLength={128} required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
+              <label className="block"><span className="mb-1 block text-xs text-slate-400">Confirm password</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Lock size={15} className="text-slate-500" /><input name="confirmPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
               {submitState === 'error' && errorMessage ? (
-                <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2.5 text-xs text-red-300" role="alert">
+                <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2.5 text-xs text-red-300" role="alert" aria-live="polite">
                   <AlertCircle size={15} className="mt-0.5 shrink-0 text-red-400" />
                   <span>{errorMessage}</span>
                 </div>

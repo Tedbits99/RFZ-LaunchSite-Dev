@@ -2,6 +2,7 @@ import SiteFooter from '@/components/SiteFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import WalletClient from './WalletClient';
+import AccountHeader from '@/components/account/AccountHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,7 @@ export default async function WalletPage() {
 
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto max-w-[1180px] px-5 py-4"><a href="/account" className="text-xs text-cyan-300">&larr; My Account</a></div></header>
+      <AccountHeader backHref="/account" backLabel="My Account" />
       <div className="mx-auto max-w-[1180px] px-5 py-10">
         <h1 className="font-display text-3xl font-bold">RF Coins Wallet</h1>
         <p className="mt-2 text-sm text-slate-400">Balance, coin packages and your transaction history.</p>

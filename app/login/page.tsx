@@ -68,7 +68,8 @@ export default function Login() {
             {submitting ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
-        {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-center text-sm text-rose-200">{error}</p>}
+        <p className="mt-3 text-center text-xs"><Link href="/forgot-password" className="text-cyan-300 hover:text-cyan-200">Forgot your password?</Link></p>
+        {error && <p role="alert" aria-live="polite" className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-center text-sm text-rose-200">{error}</p>}
         {awaitingConfirmation && (
           <p className="mt-3 text-center text-xs text-slate-400">
             Didn&apos;t get the email or the link expired?{' '}

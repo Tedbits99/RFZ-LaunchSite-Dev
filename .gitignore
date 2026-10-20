@@ -34,6 +34,11 @@ yarn-error.log*
 # netlify generated output
 /.netlify/
 
+# local logical backups and restore artifacts
+/.local-backups/
+*.dump
+*.dump.manifest
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

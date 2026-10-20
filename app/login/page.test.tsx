@@ -18,6 +18,11 @@ describe('login page source invariants (automated static checks)', () => {
     expect(source).toContain('setError(body.error ||');
   });
 
+  it('provides a password recovery entry point', () => {
+    expect(source).toContain('href="/forgot-password"');
+    expect(source).toContain('Forgot your password?');
+  });
+
   it('never logs credentials or tokens', () => {
     expect(source).not.toMatch(/console\.(log|error|warn|info|debug)/);
   });
