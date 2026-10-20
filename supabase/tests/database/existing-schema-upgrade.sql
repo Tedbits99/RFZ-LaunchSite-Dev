@@ -79,7 +79,7 @@ VALUES (
   '00000000-0000-0000-0000-000000000704', 'UPGRADE-TEST-ORDER',
   'upgrade-test@example.invalid', 'Upgrade Test',
   '00000000-0000-0000-0000-000000000701', '00000000-0000-0000-0000-000000000702',
-  jsonb_build_object('__rfz_order_access_hash', repeat('u', 64)),
+  jsonb_build_object('__rfz_order_access_hash', repeat('c', 64)),
   1, 0, 0, 1, 'manual', 'PROCESSING', 'VERIFIED', 'PROCESSING'
 )
 ON CONFLICT (id) DO NOTHING;
