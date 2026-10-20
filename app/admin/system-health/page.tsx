@@ -1,14 +1,17 @@
+import { requireAdminPageSession } from '@/lib/adminGuard';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { getOperationalHealth } from '@/lib/operationalHealth';
 import { Shield, Database, Mail, CreditCard, Server } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
-export default function AdminSystemHealthPage() {
+export default async function AdminSystemHealthPage() {
+  await requireAdminPageSession('ADMIN', 'SUPER_ADMIN');
+  const observed = await getOperationalHealth(adminSupabase);
   const services = [
-    { name: 'Database', icon: Database, status: 'Operational', color: 'text-emerald-300', detail: 'PostgreSQL connected via Supabase' },
-    { name: 'Payments', icon: CreditCard, status: 'Mock Mode', color: 'text-amber-300', detail: 'MockPaymentProvider active' },
-    { name: 'Email', icon: Mail, status: 'Not Configured', color: 'text-slate-500', detail: 'Set RESEND_API_KEY to enable' },
-    { name: 'Storage', icon: Server, status: 'Ready', color: 'text-emerald-300', detail: 'Supabase Storage available' },
-    { name: 'Application', icon: Shield, status: 'Running', color: 'text-emerald-300', detail: 'Next.js server operational' },
+    ...observed.map((signal) => ({ ...signal, icon: signal.name === 'Database' ? Database : Mail, color: signal.status === 'ok' ? 'text-emerald-300' : signal.status === 'degraded' ? 'text-amber-300' : 'text-slate-400' })),
+    ...[{ name: 'Payments', icon: CreditCard }, { name: 'Storage', icon: Server }, { name: 'Email delivery', icon: Mail }].map((service) => ({ ...service, status: 'unknown', color: 'text-slate-400', detail: 'No live provider probe configured.' })),
+    { name: 'Application', icon: Shield, status: 'ok', color: 'text-emerald-300', detail: 'This server request completed.' },
   ];
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">

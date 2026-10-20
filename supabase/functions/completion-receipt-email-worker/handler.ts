@@ -1,5 +1,5 @@
 import { validateCanonicalAppOrigin } from '../_shared/completionReceiptCore.ts';
-import type { CompletionReceiptTransport } from './transportContract.ts';
+import { processReceiptBatch, type ReceiptRpc, type IdempotentReceiptTransport } from './processBatch.ts';
 
 export type WorkerConfig = {
   enabled: string | null;
@@ -8,8 +8,9 @@ export type WorkerConfig = {
 };
 
 export type WorkerDependencies = {
-  /** A fake-only seam for tests; E5.3A never invokes it. */
-  transport?: CompletionReceiptTransport;
+  /** Explicit seams keep delivery testable without enabling a live provider. */
+  db?: ReceiptRpc;
+  deliveryTransport?: IdempotentReceiptTransport;
 };
 
 type FeatureState = 'disabled' | 'enabled' | 'invalid';
@@ -41,17 +42,17 @@ function exactBearerMatch(header: string | null, secret: string): boolean {
   return mismatch === 0;
 }
 
-function response(status: number, body: Record<string, string>): Response {
+function response(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 }
 
-/** E5.3A handler is intentionally incapable of claiming rows or delivering mail. */
+/** Delivery requires explicit adapters; production wiring remains disabled. */
 export function createCompletionReceiptWorkerHandler(
   config: WorkerConfig,
-  _dependencies: WorkerDependencies = {},
+  dependencies: WorkerDependencies = {},
 ): (request: Request) => Promise<Response> {
   return async (request: Request): Promise<Response> => {
     if (request.method !== 'POST') return response(405, { error: 'Method not allowed.' });
@@ -73,7 +74,14 @@ export function createCompletionReceiptWorkerHandler(
       return response(503, { error: 'Worker unavailable.' });
     }
 
-    // Deliberately no RPC, receipt processing, or transport implementation in E5.3A.
-    return response(503, { status: 'not_implemented' });
+    // No production adapter is installed by index.ts. Both explicit adapters
+    // are required before any durable claim or delivery can occur.
+    if (!dependencies.db || !dependencies.deliveryTransport) return response(503, { status: 'not_implemented' });
+    try {
+      const batch = await processReceiptBatch(dependencies.db, dependencies.deliveryTransport, config.appOrigin!);
+      return response(200, { status: batch.unknown || batch.rejected || batch.retryScheduled || batch.deadLetter ? 'degraded' : 'ok', ...batch });
+    } catch {
+      return response(503, { status: 'unknown', error: 'Receipt processing unavailable.' });
+    }
   };
 }
