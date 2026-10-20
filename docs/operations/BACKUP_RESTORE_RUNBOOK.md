@@ -52,3 +52,30 @@ Supabase dashboard before a hosted migration.
 
 The hosted `MIGRATIONS_FAILED` state remains unresolved. This runbook does not
 authorize a hosted repair, reset, restore, or migration push.
+
+## Supabase recovery limits
+
+A PostgreSQL logical dump covers database objects and rows selected by the
+dump process. It is not a complete Supabase project backup:
+
+- Managed schemas, extensions, Supabase-specific roles, grants, ownership and
+  platform defaults may require separate recreation or provider support.
+- RLS policies, functions and migration-ledger rows can be exported as SQL, but
+  their effective behavior still depends on roles, JWT claims, auth helpers,
+  extensions and provider configuration.
+- Auth users, identities, sessions, password-reset state and Auth configuration
+  are separate from application tables and require an owner-approved Auth
+  export/recovery procedure.
+- Storage metadata may be present in database tables, while Storage object
+  bytes are separate and are not restored by `pg_dump`.
+- Edge Function source/deployments, secrets, Vault contents, webhooks,
+  schedules, Realtime publication configuration and project settings require
+  independent inventory and recovery steps.
+- The migration ledger is checked by the rehearsal, but matching ledger rows
+  does not prove that the hosted provider applied identical checksums or that
+  the control-plane migration runner can recover from a failed branch.
+
+An owner-approved hosted export must use private operator-controlled storage,
+encryption at rest and in transit, short retention with verified cleanup,
+restricted access, and redacted logs. Credentials, customer data and dump
+contents must never enter Git, chat or ordinary CI artifacts.
