@@ -264,6 +264,8 @@ ON CONFLICT (method_key) DO NOTHING;
 -- 6. RPC: admin_change_order_status
 -- =========================================================
 
+DROP FUNCTION IF EXISTS public.admin_change_order_status(uuid, text, text, text);
+
 CREATE OR REPLACE FUNCTION public.admin_change_order_status(
   p_order_id uuid,
   p_new_status text,
