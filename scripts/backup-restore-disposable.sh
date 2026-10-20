@@ -88,14 +88,26 @@ EOF
 }
 
 restore_verify() {
-  require_command node; require_command pg_restore; require_command psql
+  require_command node; require_command jq; require_command pg_restore; require_command psql
   [ -n "$backup_file" ] || die "BACKUP_FILE is required"
   [ -f "$backup_file" ] || die "backup file does not exist"
   [ "${RFZ_DISPOSABLE_RESTORE_CONFIRM:-}" = "YES" ] || die "set RFZ_DISPOSABLE_RESTORE_CONFIRM=YES for a disposable restore"
   [ -n "${RESTORE_DATABASE_URL:-}" ] || die "RESTORE_DATABASE_URL is required"
+  [ -n "${RESTORE_PROOF_FILE:-}" ] || die "RESTORE_PROOF_FILE is required"
+  [ -f "$RESTORE_PROOF_FILE" ] || die "restore proof file does not exist"
   parse_database_url "$RESTORE_DATABASE_URL"
   is_loopback_host "$database_host" || die "restore target must be loopback"
-  [ "$database_name" = "postgres" ] || die "restore target database must be postgres"
+  local proof_instance proof_database proof_purpose proof_expires proof_epoch now_epoch
+  proof_instance="$(jq -r '.instance_id // ""' "$RESTORE_PROOF_FILE")"
+  proof_database="$(jq -r '.database // ""' "$RESTORE_PROOF_FILE")"
+  proof_purpose="$(jq -r '.purpose // ""' "$RESTORE_PROOF_FILE")"
+  proof_expires="$(jq -r '.expires_at // ""' "$RESTORE_PROOF_FILE")"
+  [ -n "$proof_instance" ] || die "restore proof has no disposable instance id"
+  [ "$proof_database" = "$database_name" ] || die "restore proof database does not match target"
+  [ "$proof_purpose" = "runfazone-disposable-restore" ] || die "restore proof purpose is invalid"
+  proof_epoch="$(date -u -d "$proof_expires" +%s 2>/dev/null || true)"
+  now_epoch="$(date -u +%s)"
+  [ -n "$proof_epoch" ] && [ "$proof_epoch" -gt "$now_epoch" ] || die "restore proof is missing or expired"
   local manifest="${backup_file}.manifest" expected actual
   [ -f "$manifest" ] || die "backup manifest is required"
   expected="$(awk -F= '$1 == "sha256" { print $2 }' "$manifest")"
