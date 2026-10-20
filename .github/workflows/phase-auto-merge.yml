@@ -47,8 +47,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PHASE0_PRODUCTION_GATE_CLEARED: ${{ vars.PHASE0_PRODUCTION_GATE_CLEARED }}
         run: |
           set -euo pipefail
+          bash "$RUNNER_TEMP/verify-phase-pr-gates.sh"
           current_sha="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
           [ "$current_sha" = "$EXPECTED_SHA" ] || { echo "ERROR: PR head changed after gate verification" >&2; exit 1; }
           merge_result="$(gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
