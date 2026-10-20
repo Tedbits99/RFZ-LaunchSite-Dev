@@ -59,9 +59,18 @@ fully verified merges. The repository workflow
 deliberately fail-closed: it requires the `phase-ready` label, a green pull
 request, a phase branch name, and the owner-controlled repository variable
 `PHASE0_PRODUCTION_GATE_CLEARED=true`. Until the production safety gate is
-cleared, it performs no merge. Do not bypass required checks or use this path
+cleared, it performs no merge. The verifier is loaded from the PR base SHA,
+not the proposed branch, and the merge request is pinned to the verified head
+SHA. Do not bypass required checks or use this path
 for resets, destructive migrations, irreversible data operations, or other
 exceptional production changes.
+
+The current GitHub connector cannot administer branch protection (`403`) and
+the repository has no rulesets. The owner must add a `main` ruleset or branch
+protection rule requiring the `Isolated Supabase RPC security tests` check and
+restricting direct pushes before enabling `PHASE0_PRODUCTION_GATE_CLEARED`.
+Until that control-plane action is complete, the base-SHA verifier remains the
+independent enforcement layer and missing or stale results fail the workflow.
 
 The existing `codex/phase0-migration-compatibility` and
 `feature/customer-auth-phase1` branches retain their unique work. Reconcile
