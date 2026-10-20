@@ -67,7 +67,7 @@ VALUES ('00000000-0000-0000-0000-000000000702', '00000000-0000-0000-0000-0000000
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.suppliers (id, name, code, adapter, enabled, environment)
-VALUES ('00000000-0000-0000-0000-000000000703', 'Upgrade Test Supplier', 'upgrade-test', 'mock', true, 'sandbox')
+VALUES ('00000000-0000-0000-0000-000000000703', 'Upgrade Test Supplier', 'fazercards', 'custom', true, 'sandbox')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.orders (
