@@ -54,6 +54,7 @@ export default async function AdminDashboard() {
   const uniqueCustomers = new Set(data.customerEmails);
   const revenue = orders.filter((o) => o.status === 'PAID' || o.status === 'COMPLETED' || o.status === 'PROCESSING').reduce((s, o) => s + o.total_cents, 0);
   const pending = orders.filter((o) => o.status === 'PENDING' || o.status === 'PAYMENT_PENDING').length;
+  const waiting = orders.filter((o) => o.status === 'WAITING_PAYMENT').length;
   const paid = orders.filter((o) => o.status === 'PAID').length;
   const completed = orders.filter((o) => o.status === 'COMPLETED').length;
   const cancelled = orders.filter((o) => o.status === 'CANCELLED').length;
@@ -91,6 +92,28 @@ export default async function AdminDashboard() {
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="font-display text-sm font-semibold">Order health</h2><p className="mt-1 text-xs text-slate-500">A quick view of the current fulfillment pipeline.</p></div><Link href="/admin/orders" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Review orders <span aria-hidden="true">→</span></Link></div>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-6">{[['Pending', pending, 'PENDING'], ['Paid', paid, 'PAID'], ['Processing', orders.filter((o) => o.status === 'PROCESSING').length, 'PROCESSING'], ['Completed', completed, 'COMPLETED'], ['Cancelled', cancelled, 'CANCELLED'], ['Failed', failed, 'FAILED']].map(([label, count, status]) => <div key={label as string} className="rounded-lg border border-[#1b2a45] bg-[#080f20] p-3"><StatusBadge status={status as string} /><p className="font-display mt-3 text-xl font-bold">{count as number}</p><p className="mt-1 text-[10px] text-slate-500">{label as string}</p></div>)}</div>
       </Surface>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        <Surface className="p-5 lg:col-span-2">
+          <div className="flex items-start justify-between gap-4">
+            <div><h2 className="font-display text-sm font-semibold">Operations queue</h2><p className="mt-1 text-xs text-slate-500">Prioritized shortcuts for the work most likely to need attention.</p></div>
+            <span className="rounded-full bg-cyan-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">Live data</span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <Link href="/admin/orders?status=WAITING_PAYMENT" className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 transition hover:border-amber-300/50"><p className="text-xs font-semibold text-amber-200">Payment review</p><p className="mt-2 font-display text-2xl font-bold text-white">{waiting}</p><p className="mt-1 text-[11px] text-slate-500">Orders waiting for payment</p></Link>
+            <Link href="/admin/orders?status=PROCESSING" className="rounded-xl border border-blue-400/20 bg-blue-400/5 p-4 transition hover:border-blue-300/50"><p className="text-xs font-semibold text-blue-200">Fulfillment queue</p><p className="mt-2 font-display text-2xl font-bold text-white">{orders.filter((o) => o.status === 'PROCESSING').length}</p><p className="mt-1 text-[11px] text-slate-500">Orders with active fulfillment</p></Link>
+            <Link href="/admin/orders?status=FAILED" className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 transition hover:border-rose-300/50"><p className="text-xs font-semibold text-rose-200">Failed orders</p><p className="mt-2 font-display text-2xl font-bold text-white">{failed}</p><p className="mt-1 text-[11px] text-slate-500">Needs investigation or recovery</p></Link>
+          </div>
+        </Surface>
+        <Surface className="p-5">
+          <h2 className="font-display text-sm font-semibold">Quick actions</h2>
+          <div className="mt-4 grid gap-2 text-xs">
+            <Link href="/admin/games" className="rounded-lg border border-[#1b2a45] px-3 py-3 text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200">Manage game visibility <span className="float-right">→</span></Link>
+            <Link href="/admin/pricing" className="rounded-lg border border-[#1b2a45] px-3 py-3 text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200">Review package pricing <span className="float-right">→</span></Link>
+            <Link href="/admin/system-health" className="rounded-lg border border-[#1b2a45] px-3 py-3 text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-200">Open system health <span className="float-right">→</span></Link>
+          </div>
+        </Surface>
+      </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <Surface className="p-4 sm:p-5 lg:col-span-2">
