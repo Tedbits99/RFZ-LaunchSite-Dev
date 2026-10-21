@@ -315,7 +315,16 @@ EOF
 excluded_scheduler="20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql"
 excluded_fulfillment_duplicate="20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql"
 excluded_ambiguous_status_rpc="20260928072329_20260928_fix_rpc_ambiguous_column.sql"
+excluded_ambiguous_status_rpc_v3="20260928072356_20260928_fix_rpc_ambiguous_v3.sql"
 excluded_hardcoded_hok_uid="20260928124803_honor_of_kings_uid_input_field.sql"
+excluded_ambiguous_status_rpc_duplicate="20260929131450_20260928072329_20260928_fix_rpc_ambiguous_column.sql.sql"
+excluded_announcement_duplicate="20260929131533_20260928102030_global_announcement.sql.sql"
+excluded_supplier_duplicate="20260929131616_20260928103235_supplier_management_schema.sql.sql"
+excluded_payment_duplicate="20260929131654_20260928111244_payment_system_enhancement.sql.sql"
+excluded_rls_duplicate="20260929131726_20260928112701_fix_missing_rls_policies.sql.sql"
+excluded_reference_duplicate="20260929131742_20260928112748_create_generate_order_reference.sql.sql"
+excluded_admin_status_duplicate="20260929131803_20260928120351_admin_manual_status_management.sql.sql"
+excluded_player_verification_duplicate="20260929131835_20260928121611_player_verification_tables.sql.sql"
 required_hok_uid_correction="20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql"
 rf_coins_outbound_migration="20261019014625_20261018160000_rf_coins_schema.sql.sql"
 rf_coins_hosted_url="https://ftbvxkxxzotwkdcdgaot.supabase.co/functions/v1/fulfillment-handoff"
@@ -352,7 +361,11 @@ while IFS= read -r migration; do
   fi
 
   case "$basename" in
-    "$excluded_scheduler"|"$excluded_fulfillment_duplicate"|"$excluded_ambiguous_status_rpc"|"$excluded_hardcoded_hok_uid")
+    "$excluded_scheduler"|"$excluded_fulfillment_duplicate"|"$excluded_ambiguous_status_rpc"|\
+    "$excluded_ambiguous_status_rpc_v3"|"$excluded_hardcoded_hok_uid"|\
+    "$excluded_ambiguous_status_rpc_duplicate"|"$excluded_announcement_duplicate"|\
+    "$excluded_supplier_duplicate"|"$excluded_payment_duplicate"|"$excluded_rls_duplicate"|\
+    "$excluded_reference_duplicate"|"$excluded_admin_status_duplicate"|"$excluded_player_verification_duplicate")
       echo "Excluding reviewed historical migration from disposable baseline: $basename"
       excluded_count=$((excluded_count + 1))
       continue
@@ -386,8 +399,8 @@ while IFS= read -r migration; do
   fi
 done < <(find "$project_root/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort)
 
-if [ "$upgrade_mode" = false ] && [ "$excluded_count" -ne 4 ]; then
-  echo "ERROR: Expected exactly four reviewed baseline exclusions; found $excluded_count." >&2
+if [ "$upgrade_mode" = false ] && [ "$excluded_count" -ne 13 ]; then
+  echo "ERROR: Expected exactly thirteen reviewed historical/duplicate exclusions; found $excluded_count." >&2
   exit 3
 fi
 

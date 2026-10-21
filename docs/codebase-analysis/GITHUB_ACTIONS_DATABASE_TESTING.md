@@ -21,7 +21,7 @@ The workflow:
 5. Installs only the PostgreSQL client needed for assertions.
 6. Copies the repository migrations into a temporary test project.
 7. Scans every migration for cron or outbound HTTP SQL before copying it.
-8. Excludes the known scheduler migration and the confirmed incomplete historical fulfillment migration, then fails closed if any other migration contains a matching outbound/scheduled pattern.
+8. Excludes the reviewed scheduler, superseded, and duplicate migrations recorded by the canonical sequence, then fails closed if any other migration contains a matching outbound/scheduled pattern.
 9. Starts a local Supabase stack using Docker on the runner.
 10. Applies the complete remaining migration baseline with `supabase db reset`.
 11. Executes real PostgreSQL role, privilege, RPC, SECURITY DEFINER, search-path, RLS, and public-catalog assertions.
@@ -34,13 +34,13 @@ The migration [20261008142813_20261008150000_schedule_auto_reconciliation.sql.sq
 
 The migration [20260928071820_20260928_order_fulfillment_schema.sql](../../supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql) was repaired in place after the hosted baseline evidence showed that version `20260928062039` is the latest applied migration. It now creates `public.order_timeline`, `public.refunds`, and `public.order_notes` before applying policies. The later duplicate [20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql](../../supabase/migrations/20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql) is excluded from the canonical disposable sequence so the logical change is applied once in migration order.
 
-The migration [20260928072329_20260928_fix_rpc_ambiguous_column.sql](../../supabase/migrations/20260928072329_20260928_fix_rpc_ambiguous_column.sql) is also excluded. It uses `CREATE OR REPLACE` to change `admin_change_order_status(uuid, text, text, text)` from `RETURNS TABLE (id uuid, status text)` to `RETURNS TABLE (id uuid, status text, updated_at timestamptz)`, which fails with PostgreSQL SQLSTATE 42P13. The immediately following migration [20260928072356_20260928_fix_rpc_ambiguous_v3.sql](../../supabase/migrations/20260928072356_20260928_fix_rpc_ambiguous_v3.sql) explicitly drops and recreates the function with the corrected output names, and remains in the test baseline. Later duplicate migrations preserve the corrected final schema and also remain included.
+The migration [20260928072329_20260928_fix_rpc_ambiguous_column.sql](../../supabase/migrations/20260928072329_20260928_fix_rpc_ambiguous_column.sql) is also excluded. It uses `CREATE OR REPLACE` to change `admin_change_order_status(uuid, text, text, text)` from `RETURNS TABLE (id uuid, status text)` to `RETURNS TABLE (id uuid, status text, updated_at timestamptz)`, which fails with PostgreSQL SQLSTATE 42P13. The repaired fulfillment migration now performs the required drop/recreate for the hosted baseline; the historical predecessor, its v3 duplicate, and later duplicate copies are excluded from the canonical sequence.
 
 This is a test-only baseline reconstruction. It does not rewrite or delete any historical migration. The excluded fulfillment copy is superseded by the corrected duplicate, and the excluded ambiguous-column copy is superseded by the explicit drop/recreate migration immediately after it. The retained migrations therefore provide the complete later schema and security behavior without replaying a known-invalid historical replacement.
 
 The migration [20260928124803_honor_of_kings_uid_input_field.sql](../../supabase/migrations/20260928124803_honor_of_kings_uid_input_field.sql) is excluded because it inserts a hardcoded game UUID that is not created by the catalog seed. The catalog migration [20260927062024_runfazone_core_catalog.sql](../../supabase/migrations/20260927062024_runfazone_core_catalog.sql) creates Honor of Kings by slug with `gen_random_uuid()`. The later corrected migration [20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql](../../supabase/migrations/20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql) resolves the game ID by slug, raises if the catalog record is absent, and remains included. A test fixture for the hardcoded UUID would conflict with the generated catalog identity and could alter catalog semantics, so the superseded historical copy is excluded instead.
 
-The baseline now has four explicit exclusions: the reconciliation scheduler, incomplete fulfillment schema, invalid status-RPC replacement, and hardcoded Honor of Kings UID migration. The wrapper also fails closed before database startup if the corrected slug-based Honor of Kings migration is missing. All other migrations are copied in timestamp order; the expected count check fails closed if an exclusion is missing or the filter is changed.
+The canonical baseline has thirteen explicit historical/duplicate exclusions: the reconciliation scheduler, superseded fulfillment and RPC copies, duplicate 20260929 copies, and hardcoded Honor of Kings UID migration. RF Coins migrations remain handled by the existing loopback-only rewrite path for compatibility testing. The wrapper also fails closed before database startup if the corrected slug-based Honor of Kings migration is missing. The expected count check fails closed if an exclusion is missing or the filter is changed.
 
 The wrapper scans all other migrations for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added without being explicitly reviewed and added to the exclusion policy, or if any expected baseline exclusion disappears, the workflow exits before starting the database.
 
@@ -88,7 +88,7 @@ Guaranteed by the workflow:
 - No Supabase project reference or remote database URL is configured.
 - No `supabase db push`, remote link, Edge Function deployment, or Bolt publishing command exists.
 - The database URL is checked to be loopback before `psql` runs.
-- The known reconciliation scheduler, incomplete fulfillment migration, invalid historical RPC replacement, and hardcoded Honor of Kings UID migration are explicitly excluded.
+- The reviewed scheduler, superseded historical migrations, duplicate copies, and hardcoded Honor of Kings UID migration are explicitly excluded.
 - Temporary Docker services and files are cleaned up on exit.
 
 Limitations:
