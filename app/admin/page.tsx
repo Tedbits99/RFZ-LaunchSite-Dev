@@ -56,7 +56,8 @@ export default async function AdminDashboard() {
   const pending = orders.filter((o) => o.status === 'PENDING' || o.status === 'PAYMENT_PENDING').length;
   const paid = orders.filter((o) => o.status === 'PAID').length;
   const completed = orders.filter((o) => o.status === 'COMPLETED').length;
-  const cancelled = orders.filter((o) => o.status === 'CANCELLED' || o.status === 'FAILED').length;
+  const cancelled = orders.filter((o) => o.status === 'CANCELLED').length;
+  const failed = orders.filter((o) => o.status === 'FAILED').length;
 
   const cards = [
     { label: 'Total Orders', value: orders.length, icon: ShoppingCart, tone: 'blue' as const },
@@ -66,6 +67,7 @@ export default async function AdminDashboard() {
     { label: 'Paid', value: paid, icon: CheckCircle2, tone: 'cyan' as const },
     { label: 'Completed', value: completed, icon: ArrowUpRight, tone: 'emerald' as const },
     { label: 'Cancelled', value: cancelled, icon: ArrowDownRight, tone: 'rose' as const },
+    { label: 'Failed', value: failed, icon: XCircle, tone: 'rose' as const },
     { label: 'Games', value: games.length, icon: Gamepad2, tone: 'blue' as const },
   ];
 
@@ -87,7 +89,7 @@ export default async function AdminDashboard() {
 
       <Surface className="mt-6 p-4 sm:p-5">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="font-display text-sm font-semibold">Order health</h2><p className="mt-1 text-xs text-slate-500">A quick view of the current fulfillment pipeline.</p></div><Link href="/admin/orders" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Review orders <span aria-hidden="true">→</span></Link></div>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">{[['Pending', pending, 'PENDING'], ['Paid', paid, 'PAID'], ['Processing', orders.filter((o) => o.status === 'PROCESSING').length, 'PROCESSING'], ['Completed', completed, 'COMPLETED'], ['Needs review', cancelled, 'FAILED']].map(([label, count, status]) => <div key={label as string} className="rounded-lg border border-[#1b2a45] bg-[#080f20] p-3"><StatusBadge status={status as string} /><p className="font-display mt-3 text-xl font-bold">{count as number}</p><p className="mt-1 text-[10px] text-slate-500">{label as string}</p></div>)}</div>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-6">{[['Pending', pending, 'PENDING'], ['Paid', paid, 'PAID'], ['Processing', orders.filter((o) => o.status === 'PROCESSING').length, 'PROCESSING'], ['Completed', completed, 'COMPLETED'], ['Cancelled', cancelled, 'CANCELLED'], ['Failed', failed, 'FAILED']].map(([label, count, status]) => <div key={label as string} className="rounded-lg border border-[#1b2a45] bg-[#080f20] p-3"><StatusBadge status={status as string} /><p className="font-display mt-3 text-xl font-bold">{count as number}</p><p className="mt-1 text-[10px] text-slate-500">{label as string}</p></div>)}</div>
       </Surface>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
@@ -122,6 +124,7 @@ export default async function AdminDashboard() {
               <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Gamepad2 size={14} className="text-cyan-300" /> Games</span><span className="font-display font-bold text-slate-200">{games.length}</span></div>
               <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Package size={14} className="text-violet-300" /> Packages</span><span className="font-display font-bold text-slate-200">{packages.length}</span></div>
               <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><XCircle size={14} className="text-rose-300" /> Cancelled</span><span className="font-display font-bold text-slate-200">{cancelled}</span></div>
+              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><XCircle size={14} className="text-rose-400" /> Failed</span><span className="font-display font-bold text-slate-200">{failed}</span></div>
             </div>
           </Surface>
           <GamesVisibilityPanel initialGames={games.map((g) => ({ id: g.id, name: g.name, slug: g.slug, is_active: g.is_active, is_featured: g.is_featured }))} />

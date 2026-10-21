@@ -108,5 +108,5 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     }
   }
 
-  return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} bannerUrl={detailBannerUrl} coinPaymentEnabled={Boolean(coinSettings)} />;
+  return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} paymentMethodsConfigured={payConfigs !== null} bannerUrl={detailBannerUrl} coinPaymentEnabled={Boolean(coinSettings)} />;
 }

@@ -8,6 +8,17 @@ const fields = [
 ];
 
 describe('firstMissingTopUpField', () => {
+  it.each([1, 2, 3, 4])('validates all %s required player fields', (count) => {
+    const requiredFields = Array.from({ length: count }, (_, index) => ({
+      label: `Field ${index + 1}`,
+      field_key: `field_${index + 1}`,
+      is_required: true,
+    }));
+    const incompleteValues = Object.fromEntries(requiredFields.slice(0, -1).map((field) => [field.field_key, 'entered']));
+    expect(firstMissingTopUpField(requiredFields, incompleteValues)?.field_key).toBe(requiredFields.at(-1)?.field_key);
+    expect(firstMissingTopUpField(requiredFields, Object.fromEntries(requiredFields.map((field) => [field.field_key, 'entered'])))).toBeNull();
+  });
+
   it('returns the first required field that is blank', () => {
     expect(firstMissingTopUpField(fields, { user_id: '123' })?.label).toBe('Zone ID');
   });
