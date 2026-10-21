@@ -312,21 +312,6 @@ enabled = false
 enabled = false
 EOF
 
-excluded_scheduler="20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql"
-excluded_incomplete_fulfillment="20260928071820_20260928_order_fulfillment_schema.sql"
-excluded_ambiguous_status_rpc="20260928072329_20260928_fix_rpc_ambiguous_column.sql"
-excluded_hardcoded_hok_uid="20260928124803_honor_of_kings_uid_input_field.sql"
-required_hok_uid_correction="20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql"
-rf_coins_outbound_migration="20261019014625_20261018160000_rf_coins_schema.sql.sql"
-rf_coins_hosted_url="https://ftbvxkxxzotwkdcdgaot.supabase.co/functions/v1/fulfillment-handoff"
-rf_coins_loopback_url="http://127.0.0.1:9/blocked/fulfillment-handoff"
-excluded_count=0
-
-if [ ! -f "$project_root/supabase/migrations/$required_hok_uid_correction" ]; then
-  echo "ERROR: Required corrected Honor of Kings migration is missing: $required_hok_uid_correction" >&2
-  exit 3
-fi
-
 while IFS= read -r migration; do
   basename="$(basename "$migration")"
 
@@ -351,33 +336,6 @@ while IFS= read -r migration; do
     continue
   fi
 
-  case "$basename" in
-    "$excluded_scheduler"|"$excluded_incomplete_fulfillment"|"$excluded_ambiguous_status_rpc"|"$excluded_hardcoded_hok_uid")
-      echo "Excluding reviewed historical migration from disposable baseline: $basename"
-      excluded_count=$((excluded_count + 1))
-      continue
-      ;;
-    "$rf_coins_outbound_migration")
-      # Preserve the production migration's schema and function semantics in
-      # the disposable baseline, but redirect its explicit outbound target to
-      # an unused loopback port. This prevents an accidental test invocation
-      # from contacting any hosted Supabase or supplier endpoint.
-      if ! grep -Fq "$rf_coins_hosted_url" "$migration"; then
-        echo "ERROR: RF Coins migration no longer contains its reviewed hosted URL; inspect before testing: $basename" >&2
-        exit 3
-      fi
-      sed "s|$rf_coins_hosted_url|$rf_coins_loopback_url|g" "$migration" \
-        > "$test_root/supabase/migrations/$basename"
-      if grep -Fq "$rf_coins_hosted_url" "$test_root/supabase/migrations/$basename" \
-        || grep -Eiq 'https://[^[:space:]]+/functions/' "$test_root/supabase/migrations/$basename"; then
-        echo "ERROR: Disposable RF Coins migration still contains a hosted function URL: $basename" >&2
-        exit 3
-      fi
-      echo "Rewriting reviewed RF Coins outbound target to loopback in disposable baseline: $basename"
-      continue
-      ;;
-  esac
-
   if grep -Eiq '(cron\.schedule|net\.http|http_post|http_get|https://[^[:space:]]+/functions/)' "$migration"; then
     echo "ERROR: Found an unapproved outbound/scheduled migration: $basename" >&2
     exit 3
@@ -385,11 +343,6 @@ while IFS= read -r migration; do
     cp "$migration" "$test_root/supabase/migrations/$basename"
   fi
 done < <(find "$project_root/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort)
-
-if [ "$upgrade_mode" = false ] && [ "$excluded_count" -ne 4 ]; then
-  echo "ERROR: Expected exactly four reviewed baseline exclusions; found $excluded_count." >&2
-  exit 3
-fi
 
 cp "$project_root/supabase/tests/database/privileged-rpc-security.sql" \
   "$test_root/supabase/tests/database/privileged-rpc-security.sql"

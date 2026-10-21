@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 */
 
 const remediationSql = readFileSync(
-  'supabase/migrations/20261019023739_20261019020000_rf_coins_security_remediation.sql.sql',
+  'supabase/migrations-archive/unapplied-replaced-20261021/20261019023739_20261019020000_rf_coins_security_remediation.sql.sql',
   'utf8',
 );
 
