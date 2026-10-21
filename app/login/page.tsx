@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { FormEvent, useState } from 'react';
-import { Lock, Mail } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { Button, TextInput } from '@/components/ui';
 
 export default function Login() {
   const router = useRouter();
@@ -45,28 +45,16 @@ export default function Login() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#030718] px-5 text-slate-100">
-      <div className="w-full max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
+    <main className="grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
+      <div className="surface w-full max-w-sm p-6 sm:p-8">
         <h1 className="font-display text-2xl font-bold">Sign in</h1>
         <p className="mt-1 text-sm text-slate-400">Access your RunFazone account and order history.</p>
         <form className="mt-6 space-y-3" onSubmit={submit}>
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-400">Email</span>
-            <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
-              <Mail size={15} className="text-slate-500" />
-              <input name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={submitting} className="w-full bg-transparent py-2.5 text-sm outline-none" />
-            </div>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-400">Password</span>
-            <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
-              <Lock size={15} className="text-slate-500" />
-              <input name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} disabled={submitting} className="w-full bg-transparent py-2.5 text-sm outline-none" />
-            </div>
-          </label>
-          <button type="submit" disabled={submitting} className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 py-3 text-sm font-semibold disabled:opacity-50">
+          <TextInput label="Email" name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={submitting} placeholder="you@example.com" />
+          <TextInput label="Password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} disabled={submitting} placeholder="Your password" />
+          <Button type="submit" disabled={submitting} className="w-full">
             {submitting ? 'Signing in…' : 'Sign In'}
-          </button>
+          </Button>
         </form>
         {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-center text-sm text-rose-200">{error}</p>}
         {awaitingConfirmation && (
