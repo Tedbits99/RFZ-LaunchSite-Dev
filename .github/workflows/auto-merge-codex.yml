@@ -36,11 +36,17 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
-          RULESET_READ_TOKEN: ${{ secrets.CODEX_RULESET_READ_TOKEN }}
         run: |
           set -euo pipefail
           # Load the verifier only from the trusted default branch; PR code
           # cannot replace the privileged merge policy.
           gh api "repos/$GITHUB_REPOSITORY/contents/scripts/verify-auto-merge-gates.sh?ref=main" --jq .content | base64 --decode > "$RUNNER_TEMP/verify.sh"
           bash "$RUNNER_TEMP/verify.sh"
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" -f sha="$EXPECTED_SHA" -f merge_method=squash --jq 'select(.merged == true) | "MERGED " + .sha'
+          # Request GitHub's protected native auto-merge. This never bypasses
+          # rules, and sha pins the request to the exact verified PR head.
+          response="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/auto-merge" -f sha="$EXPECTED_SHA" -f merge_method=squash)"
+          jq -e '(.auto_merge != null) or (.merged == true)' <<<"$response" >/dev/null || {
+            echo "BLOCKED: GitHub did not enable native auto-merge for the verified head" >&2
+            exit 1
+          }
+          echo "NATIVE_AUTO_MERGE_ENABLED sha=$EXPECTED_SHA"
