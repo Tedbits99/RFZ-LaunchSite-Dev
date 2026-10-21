@@ -1,17 +1,17 @@
 # Canonical disposable migration sequence
 
-**Status:** generated selection for an unlinked disposable Supabase instance only. This artifact does not alter any historical migration and is not authorization to apply anything to `ketdhcmwowzztcdlmris`.
+**Status:** reviewed executable migration manifest for an unlinked disposable Supabase instance and the repository's deployable `supabase/migrations/` directory. This artifact does not alter any historical migration and is not authorization to apply anything to `ketdhcmwowzztcdlmris`.
 
-**Source set:** 115 active SQL files under `supabase/migrations/`; **selected:** 96; **excluded:** 19. Files are ordered by the numeric migration prefix using `sort -V`. Each selected row depends on the immediately preceding selected row, so the sequence is deterministic; the disposition column records semantic replacement/defer gates. SHA-256 values make the selection auditable.
+**Source history:** 115 SQL files were previously present; **executable:** 96; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
 
 ## Selection rules
 
-1. Copy only rows marked **INCLUDE** into a clean temporary `supabase/migrations/` directory, preserving the listed order and filenames.
-2. Exclude the four historical defects: the superseded fulfillment duplicate, ambiguous RPC predecessor, superseded v3 predecessor, and hard-coded Honor of Kings UUID. The original fulfillment migration is now ordered correctly and is the canonical selection for this sequence.
-3. Exclude duplicate 20260929 copies where the canonical earlier migration remains selected; do not replay both histories.
-4. Exclude the auto-reconciliation scheduler and every RF Coins migration. Development must have no `pg_cron`, `pg_net`, payment, supplier, SMTP, webhook, or external HTTP activity.
+1. Apply every SQL file present in the executable `supabase/migrations/` directory; there are no hidden test-only exclusions.
+2. Preserve the active filenames and numeric order. The 19 superseded, duplicate, scheduler, and owner-approved RF Coins files remain outside the executable directory in the archive and are never replayed implicitly.
+3. The corrected fulfillment, RPC, and slug-based Honor of Kings migrations are the executable replacements for their archived predecessors.
+4. Fail closed if an executable migration contains an external scheduler or HTTP target. Development must have no `pg_cron`, `pg_net`, payment, supplier, SMTP, webhook, or external HTTP activity.
 5. Treat Vault/provider migrations as schema-only with synthetic values; no secrets or external endpoints may be inherited. Verify RLS, grants, `SECURITY DEFINER` authorization, ownership, payment boundaries, supplier reconciliation, receipt outbox, and concurrency after reset.
-6. The existing CI harness is a baseline. A fresh-install PASS requires the complete selected set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
+6. A fresh-install PASS requires the complete 96-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
 
 ## Generated file selection
 

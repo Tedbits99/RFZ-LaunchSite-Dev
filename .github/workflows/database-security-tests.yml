@@ -131,18 +131,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Fail closed for migration-affecting changes without external evidence
+      - name: Verify executable migration sequence
         run: |
-          set -euo pipefail
-          pending_count="$(find supabase/migrations-pending -maxdepth 1 -type f -name '*.sql' -print | wc -l | tr -d ' ')"
-          if [ "$pending_count" -gt 0 ]; then
-            echo "BLOCKED: repository contains $pending_count explicitly pending migration file(s)." >&2
-            echo 'A frontend/CI-only diff does not prove that the hosted deployment will not process these migrations.' >&2
-            exit 1
-          fi
-          if grep -Rqs --exclude-dir=.git 'MIGRATIONS_FAILED' docs supabase .github; then
-            echo 'BLOCKED: repository evidence still records an unresolved hosted MIGRATIONS_FAILED state.' >&2
-            echo 'Require current read-only hosted ledger/failure evidence, backup/restore verification, and isolated recovery rehearsal.' >&2
-            exit 1
-          fi
-          echo 'PASS: no pending migrations or unresolved hosted migration failure evidence.'
+          bash scripts/verify-deployable-migrations.sh
