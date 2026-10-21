@@ -13,6 +13,22 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   );
 }
 
+export function Surface({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <section className={`surface ${className}`}>{children}</section>;
+}
+
+export function MetricCard({ label, value, icon: Icon, tone = 'cyan', detail }: { label: string; value: ReactNode; icon: LucideIcon; tone?: 'blue' | 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose'; detail?: string }) {
+  const tones = {
+    blue: 'from-blue-500/20 to-blue-600/5 text-blue-300',
+    cyan: 'from-cyan-500/20 to-cyan-600/5 text-cyan-300',
+    emerald: 'from-emerald-500/20 to-emerald-600/5 text-emerald-300',
+    amber: 'from-amber-500/20 to-amber-600/5 text-amber-300',
+    violet: 'from-violet-500/20 to-violet-600/5 text-violet-300',
+    rose: 'from-rose-500/20 to-rose-600/5 text-rose-300',
+  }[tone];
+  return <div className={`rounded-xl border border-[#1b2a45] bg-gradient-to-br ${tones} p-4 shadow-lg shadow-black/5`}><div className="flex items-center justify-between gap-3"><span className="text-[11px] uppercase tracking-wider text-slate-400">{label}</span><Icon size={16} aria-hidden="true" /></div><p className="font-display mt-3 text-2xl font-bold tracking-tight text-white">{value}</p>{detail && <p className="mt-1 text-[10px] text-slate-500">{detail}</p>}</div>;
+}
+
 export function StatusBadge({ status }: { status: string }) {
   const tone = {
     COMPLETED: 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/20',
