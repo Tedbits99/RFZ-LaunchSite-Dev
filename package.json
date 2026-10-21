@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
+    "cloudflare:build": "mkdir -p ${XDG_CONFIG_HOME:-/tmp/rfz-xdg} && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} opennextjs-cloudflare build",
+    "cloudflare:dev": "npm run cloudflare:build && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} wrangler dev",
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run"
@@ -29,12 +31,14 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10",
+    "@opennextjs/cloudflare": "^1.20.13",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "globals": "^17.13.0",
     "typescript-eslint": "^8.71.2",
     "vite": "^6.4.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "wrangler": "^4.151.3"
   },
   "overrides": {
     "@types/node": "^22.0.0"
