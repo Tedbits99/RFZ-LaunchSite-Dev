@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { Activity, LogOut, Menu } from 'lucide-react'
+import { Activity, Bell, LogOut, Menu, Search } from 'lucide-react'
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 import AdminNavigation from '@/components/admin/AdminNavigation'
 
@@ -36,6 +36,21 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               </div>
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-400 sm:gap-3">
+              <a
+                href="/admin/orders"
+                aria-label="Search and manage orders"
+                className="hidden items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-cyan-300 hover:text-cyan-200 md:flex"
+              >
+                <Search size={13} /> <span>Orders</span>
+              </a>
+              <a
+                href="/admin/notifications"
+                aria-label="Open admin notifications"
+                className="relative rounded-lg border border-[#253451] p-2 transition hover:border-cyan-300 hover:text-cyan-200"
+              >
+                <Bell size={14} />
+                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-cyan-300" aria-hidden="true" />
+              </a>
               <a
                 href="/"
                 className="rounded-lg border border-[#253451] px-3 py-2 transition hover:border-cyan-300 hover:text-cyan-200"

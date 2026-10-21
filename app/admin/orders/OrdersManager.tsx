@@ -320,7 +320,30 @@ export default function OrdersManager({
         {!dbReady ? (
           <p className="mt-8 text-sm text-slate-500">Database not configured. Orders will appear here once connected.</p>
         ) : (
-          <div className="mt-6 overflow-x-auto rounded-xl border border-[#1b2a45] bg-[#0b1225]">
+          <>
+          <div className="mt-6 space-y-3 md:hidden">
+            {liveOrders.length === 0 && <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-8 text-center text-sm text-slate-600">No orders found.</div>}
+            {liveOrders.map((o) => (
+              <article key={`mobile-${o.id}`} className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4 shadow-lg shadow-black/10">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-xs text-cyan-300">{o.reference}</p>
+                    <p className="mt-1 text-sm font-medium text-slate-200">{o.games?.name || 'Game order'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{o.email}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${statusBadge[o.status] || 'bg-slate-500/20 text-slate-400'}`}>{o.status.replaceAll('_', ' ')}</span>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-3 border-t border-[#172541] pt-3 text-xs">
+                  <div><p className="text-[10px] uppercase tracking-wide text-slate-600">Payment</p><p className="mt-1 text-slate-300">{o.payment_status || '—'}</p></div>
+                  <div><p className="text-[10px] uppercase tracking-wide text-slate-600">Fulfillment</p><p className="mt-1 text-slate-300">{o.fulfillment_status || '—'}</p></div>
+                  <div className="text-right"><p className="text-[10px] uppercase tracking-wide text-slate-600">Total</p><p className="mt-1 font-semibold text-cyan-200">{fmtP(o.total_cents)}</p></div>
+                </div>
+                <button type="button" onClick={() => { setNewStatus(''); setStatusNote(''); setSaveMessage(''); setSaveError(''); openOrder(o.id); }} className="mt-4 w-full rounded-lg border border-cyan-400/30 bg-cyan-400/5 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-400/10">Open order details</button>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-6 hidden overflow-x-auto rounded-xl border border-[#1b2a45] bg-[#0b1225] md:block">
             <table className="w-full text-left text-xs">
               <thead className="text-slate-500">
                 <tr className="border-b border-[#1b2a45]">
@@ -363,6 +386,7 @@ export default function OrdersManager({
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         {detail && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setDetail(null)}>
