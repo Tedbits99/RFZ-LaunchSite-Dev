@@ -27,7 +27,7 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          pr="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/pulls" --arg repository "$REPOSITORY" --jq '[.[] | select(.state == "open" and .base.ref == "main" and .head.repo.full_name == $repository and (.head.ref | startswith("codex/")) and .draft == false)] | first | .number // empty')"
+          pr="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/pulls" | jq -r --arg repository "$REPOSITORY" '[.[] | select(.state == "open" and .base.ref == "main" and .head.repo.full_name == $repository and (.head.ref | startswith("codex/")) and .draft == false)] | first | .number // empty')"
           test -n "$pr" || exit 0
           echo "number=$pr" >> "$GITHUB_OUTPUT"
       - if: steps.pr.outputs.number != ''
