@@ -68,14 +68,20 @@ expected_sha="${EXPECTED_SHA:?EXPECTED_SHA is required}"
 pr_json="$(gh api "repos/$repo/pulls/$pr_number")"
 verify_pr_json "$pr_json" "$expected_sha" "$repo" || die "PR identity, trust, draft, mergeability, or exact-head check failed"
 
-ruleset_ids="$(gh api --paginate "repos/$repo/rulesets?includes_parents=true&per_page=100" | jq -s 'add // [] | .[].id')" || die "cannot read repository rulesets"
+# Ruleset inspection requires repository Administration: read, which is not a
+# permission that can be granted to the default Actions token. Keep the merge
+# token separate and fail closed when the owner has not supplied the narrowly
+# scoped inspection credential.
+ruleset_token="${RULESET_READ_TOKEN:-${GH_TOKEN:-}}"
+ruleset_api() { GH_TOKEN="$ruleset_token" gh api "$@"; }
+ruleset_ids="$(ruleset_api --paginate "repos/$repo/rulesets?includes_parents=true&per_page=100" | jq -s 'add // [] | .[].id')" || die "cannot read repository rulesets; configure CODEX_RULESET_READ_TOKEN with Administration: read"
 matched_ruleset=false
 while IFS= read -r ruleset_id; do
   [ -n "$ruleset_id" ] || continue
-  ruleset_json="$(gh api "repos/$repo/rulesets/$ruleset_id")" || die "cannot read ruleset $ruleset_id"
+  ruleset_json="$(ruleset_api "repos/$repo/rulesets/$ruleset_id")" || die "cannot read ruleset $ruleset_id; configure CODEX_RULESET_READ_TOKEN with Administration: read"
   if verify_ruleset_json "$ruleset_json"; then matched_ruleset=true; break; fi
 done <<<"$ruleset_ids"
-[ "$matched_ruleset" = true ] || die "no active main ruleset enforces PRs, zero reviews, required strict checks, no bypass, no force pushes, and no deletion"
+[ "$matched_ruleset" = true ] || die "no active main ruleset was inspectable with trustworthy bypass data; configure CODEX_RULESET_READ_TOKEN with Administration: read or correct the ruleset"
 
 checks_json="$(gh api --paginate "repos/$repo/commits/$expected_sha/check-runs?per_page=100" | jq -s '{check_runs: map(.check_runs[])}')" || die "cannot read exact-head checks"
 verify_checks_json "$checks_json" "$expected_sha" || die "required check missing or unsuccessful for exact head SHA"

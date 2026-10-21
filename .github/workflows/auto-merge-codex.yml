@@ -36,6 +36,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          RULESET_READ_TOKEN: ${{ secrets.CODEX_RULESET_READ_TOKEN }}
         run: |
           set -euo pipefail
           # Load the verifier only from the trusted default branch; PR code
