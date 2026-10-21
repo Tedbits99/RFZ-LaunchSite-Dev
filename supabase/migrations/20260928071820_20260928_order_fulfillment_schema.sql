@@ -122,10 +122,89 @@ CREATE TABLE IF NOT EXISTS public.payment_config (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- The hosted baseline already has payment_config from 20260928060956. When
+-- that table exists, CREATE TABLE IF NOT EXISTS does not add the newer
+-- provider columns needed by the seed below. Add them conditionally so both
+-- a fresh database and the recorded hosted baseline are compatible.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'provider_name'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN provider_name text NOT NULL DEFAULT 'manual';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'provider_type'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN provider_type text NOT NULL DEFAULT 'manual';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'api_url'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN api_url text NOT NULL DEFAULT '';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'is_test_mode'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN is_test_mode boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
 ALTER TABLE public.payment_config ENABLE ROW LEVEL SECURITY;
 
 -- =========================================================
--- 4. RLS policies for all fulfillment tables
+-- 4. Fulfillment tables referenced by the policies and RPC below
+-- =========================================================
+
+-- This migration is the first unapplied migration after the hosted
+-- 20260928062039 baseline. Keep the object creation before every policy and
+-- function that references these tables. The later 20260929131301 file is a
+-- historical corrected duplicate, but it is too late in migration order to
+-- repair this migration when the hosted ledger is still at 20260928062039.
+CREATE TABLE IF NOT EXISTS public.order_timeline (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  status text NOT NULL,
+  actor_email text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.order_timeline ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.refunds (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  reference text NOT NULL DEFAULT '',
+  amount_cents integer NOT NULL DEFAULT 0,
+  reason text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'PENDING',
+  approved_by text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.refunds ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.order_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  author_email text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.order_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_order_timeline_order_id ON public.order_timeline(order_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON public.refunds(order_id);
+
+-- =========================================================
+-- 5. RLS policies for all fulfillment tables
 -- =========================================================
 
 -- order_timeline: service role only (admin client bypasses RLS)
@@ -171,7 +250,7 @@ CREATE POLICY "service_all_payment_config"
   USING (true) WITH CHECK (true);
 
 -- =========================================================
--- 5. Seed default payment configs
+-- 6. Seed default payment configs
 -- =========================================================
 
 INSERT INTO public.payment_config (method_key, display_name, account_name, account_number, instructions, sort_order, provider_name, provider_type)
@@ -183,8 +262,13 @@ VALUES
 ON CONFLICT (method_key) DO NOTHING;
 
 -- =========================================================
--- 6. RPC: admin_change_order_status
+-- 7. RPC: admin_change_order_status
 -- =========================================================
+
+-- The hosted baseline contains the earlier two-column return shape from
+-- 20260928062007. PostgreSQL cannot replace a function when its OUT return
+-- type changes, so remove that signature before defining the final shape.
+DROP FUNCTION IF EXISTS public.admin_change_order_status(uuid, text, text, text);
 
 CREATE OR REPLACE FUNCTION public.admin_change_order_status(
   p_order_id uuid,
