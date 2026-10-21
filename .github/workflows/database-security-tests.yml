@@ -1,6 +1,7 @@
 name: Development validation
 
 on:
+  pull_request:
   push:
     branches:
       - main
@@ -120,3 +121,16 @@ jobs:
 
       - name: Run legacy-to-current upgrade tests
         run: bash scripts/test-github-actions-database-security.sh --existing-schema-upgrade
+
+  production-release-safety:
+    name: Production release safety
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify executable migration sequence
+        run: |
+          bash scripts/verify-deployable-migrations.sh
