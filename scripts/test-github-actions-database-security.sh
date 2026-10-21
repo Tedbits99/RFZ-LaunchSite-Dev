@@ -313,7 +313,7 @@ enabled = false
 EOF
 
 excluded_scheduler="20261008142813_20261008150000_schedule_auto_reconciliation.sql.sql"
-excluded_incomplete_fulfillment="20260928071820_20260928_order_fulfillment_schema.sql"
+excluded_fulfillment_duplicate="20260929131301_20260928071820_20260928_order_fulfillment_schema.sql.sql"
 excluded_ambiguous_status_rpc="20260928072329_20260928_fix_rpc_ambiguous_column.sql"
 excluded_hardcoded_hok_uid="20260928124803_honor_of_kings_uid_input_field.sql"
 required_hok_uid_correction="20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql"
@@ -352,7 +352,7 @@ while IFS= read -r migration; do
   fi
 
   case "$basename" in
-    "$excluded_scheduler"|"$excluded_incomplete_fulfillment"|"$excluded_ambiguous_status_rpc"|"$excluded_hardcoded_hok_uid")
+    "$excluded_scheduler"|"$excluded_fulfillment_duplicate"|"$excluded_ambiguous_status_rpc"|"$excluded_hardcoded_hok_uid")
       echo "Excluding reviewed historical migration from disposable baseline: $basename"
       excluded_count=$((excluded_count + 1))
       continue

@@ -511,7 +511,7 @@ Content hashes identify the audited working tree, including pre-existing uncommi
 | [supabase/migrations/20260928061342_20260928_order_fulfillment_rls.sql.sql](../../supabase/migrations/20260928061342_20260928_order_fulfillment_rls.sql.sql) | 18 | `af16daf46570` |
 | [supabase/migrations/20260928062007_20260928_fix_order_status_rpc.sql.sql](../../supabase/migrations/20260928062007_20260928_fix_order_status_rpc.sql.sql) | 52 | `b292aef6e685` |
 | [supabase/migrations/20260928062039_20260928_update_orders_status_check.sql.sql](../../supabase/migrations/20260928062039_20260928_update_orders_status_check.sql.sql) | 28 | `682a1849f974` |
-| [supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql](../../supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql) | 252 | `951257596c6c` |
+| [supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql](../../supabase/migrations/20260928071820_20260928_order_fulfillment_schema.sql) | 299 | `61061cf69637` |
 | [supabase/migrations/20260928072329_20260928_fix_rpc_ambiguous_column.sql](../../supabase/migrations/20260928072329_20260928_fix_rpc_ambiguous_column.sql) | 69 | `56281769edcd` |
 | [supabase/migrations/20260928072356_20260928_fix_rpc_ambiguous_v3.sql](../../supabase/migrations/20260928072356_20260928_fix_rpc_ambiguous_v3.sql) | 66 | `102e1747c760` |
 | [supabase/migrations/20260928102030_global_announcement.sql](../../supabase/migrations/20260928102030_global_announcement.sql) | 61 | `05e818e48674` |

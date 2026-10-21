@@ -125,7 +125,54 @@ CREATE TABLE IF NOT EXISTS public.payment_config (
 ALTER TABLE public.payment_config ENABLE ROW LEVEL SECURITY;
 
 -- =========================================================
--- 4. RLS policies for all fulfillment tables
+-- 4. Fulfillment tables referenced by the policies and RPC below
+-- =========================================================
+
+-- This migration is the first unapplied migration after the hosted
+-- 20260928062039 baseline. Keep the object creation before every policy and
+-- function that references these tables. The later 20260929131301 file is a
+-- historical corrected duplicate, but it is too late in migration order to
+-- repair this migration when the hosted ledger is still at 20260928062039.
+CREATE TABLE IF NOT EXISTS public.order_timeline (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  status text NOT NULL,
+  actor_email text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.order_timeline ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.refunds (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  reference text NOT NULL DEFAULT '',
+  amount_cents integer NOT NULL DEFAULT 0,
+  reason text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'PENDING',
+  approved_by text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.refunds ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.order_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  author_email text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.order_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_order_timeline_order_id ON public.order_timeline(order_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON public.refunds(order_id);
+
+-- =========================================================
+-- 5. RLS policies for all fulfillment tables
 -- =========================================================
 
 -- order_timeline: service role only (admin client bypasses RLS)
@@ -171,7 +218,7 @@ CREATE POLICY "service_all_payment_config"
   USING (true) WITH CHECK (true);
 
 -- =========================================================
--- 5. Seed default payment configs
+-- 6. Seed default payment configs
 -- =========================================================
 
 INSERT INTO public.payment_config (method_key, display_name, account_name, account_number, instructions, sort_order, provider_name, provider_type)
@@ -183,7 +230,7 @@ VALUES
 ON CONFLICT (method_key) DO NOTHING;
 
 -- =========================================================
--- 6. RPC: admin_change_order_status
+-- 7. RPC: admin_change_order_status
 -- =========================================================
 
 CREATE OR REPLACE FUNCTION public.admin_change_order_status(
