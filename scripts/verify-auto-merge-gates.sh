@@ -12,12 +12,21 @@ verify_ruleset_json() {
     and (([.rules[]?.type] | index("required_status_checks")) != null)
     and (([.rules[]?.type] | index("non_fast_forward")) != null)
     and (([.rules[]?.type] | index("deletion")) != null)
-    and has("bypass_actors")
-    and (.bypass_actors | type == "array" and length == 0)
     and ([.rules[] | select(.type == "pull_request") | .parameters.required_approving_review_count] | any(. == 0))
     and ([.rules[] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy] | any(. == true))
     and ([.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]?.context] | contains(["Next.js checks", "Isolated Supabase RPC security tests", "Production release safety"]))
-  ' <<<"$ruleset_json" >/dev/null
+  ' <<<"$ruleset_json" >/dev/null || return 1
+
+  # GitHub intentionally omits bypass_actors for callers without ruleset
+  # write access.  Omission is UNKNOWN, never evidence that the list is
+  # empty.  Native auto-merge does not bypass rules, so it is safe to proceed
+  # only after rejecting an explicitly visible bypass actor.
+  if jq -e 'has("bypass_actors")' <<<"$ruleset_json" >/dev/null; then
+    jq -e '.bypass_actors | type == "array" and length == 0' <<<"$ruleset_json" >/dev/null || return 1
+    RULESET_BYPASS_STATUS=EMPTY
+  else
+    RULESET_BYPASS_STATUS=UNAVAILABLE
+  fi
 }
 
 verify_pr_json() {
@@ -43,7 +52,7 @@ self_test() {
   assert_fail() { if "$@"; then die "self-test unexpectedly accepted invalid fixture"; fi; }
   assert_pass verify_ruleset_json "$ruleset"
   assert_fail verify_ruleset_json '{}'
-  assert_fail verify_ruleset_json "$ruleset_without_bypass"
+  assert_pass verify_ruleset_json "$ruleset_without_bypass"
   assert_fail verify_ruleset_json "${ruleset/\"enforcement\":\"active\"/\"enforcement\":\"disabled\"}"
   assert_fail verify_ruleset_json "${ruleset/\"refs\/heads\/main\"/\"refs\/heads\/release\"}"
   assert_fail verify_ruleset_json "${ruleset/\"bypass_actors\":\[\]/\"bypass_actors\":[{\"actor_type\":\"OrganizationAdmin\"}]}"
@@ -68,15 +77,22 @@ expected_sha="${EXPECTED_SHA:?EXPECTED_SHA is required}"
 pr_json="$(gh api "repos/$repo/pulls/$pr_number")"
 verify_pr_json "$pr_json" "$expected_sha" "$repo" || die "PR identity, trust, draft, mergeability, or exact-head check failed"
 
-ruleset_ids="$(gh api --paginate "repos/$repo/rulesets?includes_parents=true&per_page=100" | jq -s 'add // [] | .[].id')" || die "cannot read repository rulesets"
+# The default GITHUB_TOKEN is deliberately the only credential used here.
+# Ruleset responses may omit bypass_actors for this caller; verify_ruleset_json
+# records that limitation and never treats omission as an empty list.
+ruleset_ids="$(gh api --paginate "repos/$repo/rulesets?includes_parents=true&per_page=100" | jq -s 'add // [] | .[].id')" || die "cannot read repository rulesets with the workflow token"
 matched_ruleset=false
 while IFS= read -r ruleset_id; do
   [ -n "$ruleset_id" ] || continue
-  ruleset_json="$(gh api "repos/$repo/rulesets/$ruleset_id")" || die "cannot read ruleset $ruleset_id"
-  if verify_ruleset_json "$ruleset_json"; then matched_ruleset=true; break; fi
+  ruleset_json="$(gh api "repos/$repo/rulesets/$ruleset_id")" || die "cannot read ruleset $ruleset_id with the workflow token"
+  if verify_ruleset_json "$ruleset_json"; then
+    matched_ruleset=true
+    matched_bypass_status="$RULESET_BYPASS_STATUS"
+    break
+  fi
 done <<<"$ruleset_ids"
-[ "$matched_ruleset" = true ] || die "no active main ruleset enforces PRs, zero reviews, required strict checks, no bypass, no force pushes, and no deletion"
+[ "$matched_ruleset" = true ] || die "no active main ruleset with the required visible rules was inspectable"
 
 checks_json="$(gh api --paginate "repos/$repo/commits/$expected_sha/check-runs?per_page=100" | jq -s '{check_runs: map(.check_runs[])}')" || die "cannot read exact-head checks"
 verify_checks_json "$checks_json" "$expected_sha" || die "required check missing or unsuccessful for exact head SHA"
-echo "PASS: effective main ruleset and exact-head auto-merge gates satisfied for $expected_sha"
+echo "PASS: effective main ruleset and exact-head auto-merge gates satisfied for $expected_sha (bypass_actors=$matched_bypass_status; omitted means unknown, not empty)"
