@@ -122,6 +122,38 @@ CREATE TABLE IF NOT EXISTS public.payment_config (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- The hosted baseline already has payment_config from 20260928060956. When
+-- that table exists, CREATE TABLE IF NOT EXISTS does not add the newer
+-- provider columns needed by the seed below. Add them conditionally so both
+-- a fresh database and the recorded hosted baseline are compatible.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'provider_name'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN provider_name text NOT NULL DEFAULT 'manual';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'provider_type'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN provider_type text NOT NULL DEFAULT 'manual';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'api_url'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN api_url text NOT NULL DEFAULT '';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'payment_config' AND column_name = 'is_test_mode'
+  ) THEN
+    ALTER TABLE public.payment_config ADD COLUMN is_test_mode boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
 ALTER TABLE public.payment_config ENABLE ROW LEVEL SECURITY;
 
 -- =========================================================
