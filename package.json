@@ -6,6 +6,7 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "cloudflare:build": "mkdir -p ${XDG_CONFIG_HOME:-/tmp/rfz-xdg} && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} opennextjs-cloudflare build",
+    "cloudflare": "npm run cloudflare:build && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} wrangler deploy",
     "cloudflare:dev": "npm run cloudflare:build && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} wrangler dev",
     "start": "next start",
     "lint": "eslint .",
