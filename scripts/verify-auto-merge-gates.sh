@@ -39,6 +39,7 @@ self_test() {
   assert_pass() { "$@" || die "self-test unexpectedly rejected valid fixture"; }
   assert_fail() { if "$@"; then die "self-test unexpectedly accepted invalid fixture"; fi; }
   assert_pass verify_ruleset_json "$ruleset"
+  assert_fail verify_ruleset_json '{}'
   assert_fail verify_ruleset_json "${ruleset/\"enforcement\":\"active\"/\"enforcement\":\"disabled\"}"
   assert_fail verify_ruleset_json "${ruleset/\"refs\/heads\/main\"/\"refs\/heads\/release\"}"
   assert_fail verify_ruleset_json "${ruleset/\"bypass_actors\":\[\]/\"bypass_actors\":[{\"actor_type\":\"OrganizationAdmin\"}]}"
