@@ -265,6 +265,11 @@ ON CONFLICT (method_key) DO NOTHING;
 -- 7. RPC: admin_change_order_status
 -- =========================================================
 
+-- The hosted baseline contains the earlier two-column return shape from
+-- 20260928062007. PostgreSQL cannot replace a function when its OUT return
+-- type changes, so remove that signature before defining the final shape.
+DROP FUNCTION IF EXISTS public.admin_change_order_status(uuid, text, text, text);
+
 CREATE OR REPLACE FUNCTION public.admin_change_order_status(
   p_order_id uuid,
   p_new_status text,
