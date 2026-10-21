@@ -132,15 +132,17 @@ jobs:
         with:
           fetch-depth: 0
       - name: Fail closed for migration-affecting changes without external evidence
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-          if grep -Eq '^(supabase/migrations/|supabase/migrations-pending/|supabase/config\.toml$)' <<<"$changed"; then
-            echo 'BLOCKED: hosted migration safety evidence is unavailable.' >&2
-            echo 'Required: reconciled history, verified backup/recovery, isolated upgrade rehearsal, and repeatable non-destructive production migration evidence.' >&2
+          pending_count="$(find supabase/migrations-pending -maxdepth 1 -type f -name '*.sql' -print | wc -l | tr -d ' ')"
+          if [ "$pending_count" -gt 0 ]; then
+            echo "BLOCKED: repository contains $pending_count explicitly pending migration file(s)." >&2
+            echo 'A frontend/CI-only diff does not prove that the hosted deployment will not process these migrations.' >&2
             exit 1
           fi
-          echo 'PASS: no migration-affecting files changed.'
+          if grep -Rqs --exclude-dir=.git 'MIGRATIONS_FAILED' docs supabase .github; then
+            echo 'BLOCKED: repository evidence still records an unresolved hosted MIGRATIONS_FAILED state.' >&2
+            echo 'Require current read-only hosted ledger/failure evidence, backup/restore verification, and isolated recovery rehearsal.' >&2
+            exit 1
+          fi
+          echo 'PASS: no pending migrations or unresolved hosted migration failure evidence.'
