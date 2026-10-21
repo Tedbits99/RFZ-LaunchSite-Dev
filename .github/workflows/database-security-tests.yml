@@ -1,6 +1,7 @@
 name: Development validation
 
 on:
+  pull_request:
   push:
     branches:
       - main
@@ -120,3 +121,26 @@ jobs:
 
       - name: Run legacy-to-current upgrade tests
         run: bash scripts/test-github-actions-database-security.sh --existing-schema-upgrade
+
+  production-release-safety:
+    name: Production release safety
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail closed for migration-affecting changes without external evidence
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          if grep -Eq '^(supabase/migrations/|supabase/migrations-pending/|supabase/config\.toml$)' <<<"$changed"; then
+            echo 'BLOCKED: hosted migration safety evidence is unavailable.' >&2
+            echo 'Required: reconciled history, verified backup/recovery, isolated upgrade rehearsal, and repeatable non-destructive production migration evidence.' >&2
+            exit 1
+          fi
+          echo 'PASS: no migration-affecting files changed.'
