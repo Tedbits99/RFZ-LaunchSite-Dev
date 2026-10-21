@@ -3,6 +3,7 @@ import { ChevronRight, Package } from 'lucide-react';
 import SiteFooter from '@/components/SiteFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
+import { getOrderPresentation } from '@/lib/orderPresentation';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,17 +15,6 @@ type Order = {
   created_at: string;
   games?: { name: string } | null;
   packages?: { name: string } | null;
-};
-
-const statusColor: Record<string, string> = {
-  WAITING_PAYMENT: 'text-amber-300',
-  PAID: 'text-emerald-300',
-  PROCESSING: 'text-blue-300',
-  COMPLETED: 'text-emerald-400',
-  DELIVERED: 'text-cyan-300',
-  CANCELLED: 'text-rose-300',
-  REFUND_PENDING: 'text-orange-300',
-  REFUNDED: 'text-slate-400',
 };
 
 export default async function AccountOrders() {
@@ -65,7 +55,9 @@ export default async function AccountOrders() {
             No orders found for this email. <Link href="/" className="text-cyan-300">Browse games</Link> to place your first order.
           </div>
         ) : (
-          <div className="mt-6 overflow-x-auto rounded-xl border border-[#1b2a45] bg-[#0b1225]">
+          <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225]">
+            <div className="divide-y divide-[#0f1b31] md:hidden">{orders.map((o) => { const presentation = getOrderPresentation(o.status); return <Link key={o.id} href={`/account/orders/${o.id}`} className="block p-4 transition hover:bg-[#0f1a33]"><div className="flex items-start justify-between gap-3"><div><p className="font-mono text-sm text-cyan-300">{o.reference}</p><p className="mt-1 text-xs text-slate-400">{o.games?.name || 'Game'} · {o.packages?.name || 'Package'}</p></div><span className={`rounded-full border px-2 py-1 text-[10px] font-medium ${presentation.tone}`}>{presentation.label}</span></div><div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">{new Date(o.created_at).toLocaleDateString()}</span><span className="font-semibold text-slate-200">{fmtP(o.total_cents)}</span></div><p className="mt-2 text-[11px] text-slate-500">{presentation.message}</p></Link>; })}</div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left text-xs">
               <thead className="text-slate-500">
                 <tr className="border-b border-[#1b2a45]">
@@ -83,13 +75,14 @@ export default async function AccountOrders() {
                     <td className="p-4 font-mono text-cyan-300"><Link href={`/account/orders/${o.id}`}>{o.reference}</Link></td>
                     <td className="p-4 text-slate-400">{o.games?.name || '—'}</td>
                     <td className="p-4 text-slate-400">{o.packages?.name || '—'}</td>
-                    <td className="p-4"><span className={`font-medium ${statusColor[o.status] || 'text-slate-400'}`}>{o.status}</span></td>
+                    <td className="p-4"><span className={`rounded-full border px-2 py-1 text-[10px] font-medium ${getOrderPresentation(o.status).tone}`}>{getOrderPresentation(o.status).label}</span></td>
                     <td className="p-4 text-right font-medium">{fmtP(o.total_cents)}</td>
                     <td className="p-4 text-slate-500">{new Date(o.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </div>
