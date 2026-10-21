@@ -12,7 +12,8 @@ verify_ruleset_json() {
     and (([.rules[]?.type] | index("required_status_checks")) != null)
     and (([.rules[]?.type] | index("non_fast_forward")) != null)
     and (([.rules[]?.type] | index("deletion")) != null)
-    and ((.bypass_actors // []) | length == 0)
+    and has("bypass_actors")
+    and (.bypass_actors | type == "array" and length == 0)
     and ([.rules[] | select(.type == "pull_request") | .parameters.required_approving_review_count] | any(. == 0))
     and ([.rules[] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy] | any(. == true))
     and ([.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]?.context] | contains(["Next.js checks", "Isolated Supabase RPC security tests", "Production release safety"]))
@@ -36,10 +37,13 @@ self_test() {
   local ruleset='{"enforcement":"active","target":"branch","conditions":{"ref_name":{"include":["refs/heads/main"]}},"bypass_actors":[],"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":0}},{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"Next.js checks"},{"context":"Isolated Supabase RPC security tests"},{"context":"Production release safety"}]}},{"type":"non_fast_forward"},{"type":"deletion"}]}'
   local pr='{"base":{"ref":"main"},"head":{"repo":{"full_name":"Tedbits99/RFZ-LaunchSite-Dev"},"ref":"codex/test","sha":"0123456789012345678901234567890123456789"},"draft":false,"mergeable_state":"clean"}'
   local checks='{"check_runs":[{"name":"Next.js checks","head_sha":"0123456789012345678901234567890123456789","status":"completed","conclusion":"success"},{"name":"Isolated Supabase RPC security tests","head_sha":"0123456789012345678901234567890123456789","status":"completed","conclusion":"success"},{"name":"Production release safety","head_sha":"0123456789012345678901234567890123456789","status":"completed","conclusion":"success"}]}'
+  local ruleset_without_bypass
+  ruleset_without_bypass="$(jq 'del(.bypass_actors)' <<<"$ruleset")"
   assert_pass() { "$@" || die "self-test unexpectedly rejected valid fixture"; }
   assert_fail() { if "$@"; then die "self-test unexpectedly accepted invalid fixture"; fi; }
   assert_pass verify_ruleset_json "$ruleset"
   assert_fail verify_ruleset_json '{}'
+  assert_fail verify_ruleset_json "$ruleset_without_bypass"
   assert_fail verify_ruleset_json "${ruleset/\"enforcement\":\"active\"/\"enforcement\":\"disabled\"}"
   assert_fail verify_ruleset_json "${ruleset/\"refs\/heads\/main\"/\"refs\/heads\/release\"}"
   assert_fail verify_ruleset_json "${ruleset/\"bypass_actors\":\[\]/\"bypass_actors\":[{\"actor_type\":\"OrganizationAdmin\"}]}"
