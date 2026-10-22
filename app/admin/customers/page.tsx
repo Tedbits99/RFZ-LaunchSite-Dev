@@ -23,7 +23,7 @@ export default async function AdminCustomersPage() {
   }
   const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
   return (
-    <main className="min-h-screen bg-[#030718] text-slate-100">
+    <main className="rfz-admin-route min-h-screen bg-[#030718] text-slate-100">
       <header className="border-b border-[#14203a] bg-[#050a1b]/95"><div className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-4"><div className="flex items-center gap-3"><a href="/admin" className="text-xs text-slate-400">← Dashboard</a><span className="text-slate-600">/</span><span className="text-sm font-semibold">Customers</span></div><a href="/" className="text-xs text-slate-400">View Store</a></div></header>
       <div className="mx-auto max-w-[1180px] px-5 py-8">
         <h1 className="font-display text-2xl font-bold">Customers</h1>

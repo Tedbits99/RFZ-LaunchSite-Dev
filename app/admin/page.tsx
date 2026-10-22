@@ -73,7 +73,7 @@ export default async function AdminDashboard() {
   ];
 
   return (
-    <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+    <main className="rfz-admin-dashboard mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
       <PageHeader
         title="Overview"
         subtitle="A live snapshot of orders, revenue, fulfillment, and catalog health."

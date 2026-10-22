@@ -65,7 +65,7 @@ export default function Register() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#030718] px-5 text-slate-100">
+    <main className="rfz-auth-page grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
       <div className="w-full max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
         {submitState === 'success' ? (
           <div className="text-center">

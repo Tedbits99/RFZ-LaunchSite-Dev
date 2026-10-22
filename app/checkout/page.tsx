@@ -110,7 +110,7 @@ export default async function Checkout({ searchParams }: { searchParams: Promise
     || (activeConfig && typeof activeConfig === 'object' && 'provider_type' in activeConfig && activeConfig.provider_type === 'automated' && order?.payment_method === 'paymongo_qrph');
 
   return (
-    <main className="min-h-screen bg-[#030718] text-slate-100">
+    <main className="rfz-checkout-page min-h-screen bg-[#030718] text-slate-100">
       <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto max-w-[760px] px-4 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a></div></header>
       <div className="mx-auto max-w-[760px] px-4 py-16">
         {order ? (

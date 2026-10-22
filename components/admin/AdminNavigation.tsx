@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { PRIMARY_NAV, type NavDropdownItem } from './navData';
+import ThemeSelector from '@/components/ThemeSelector';
 
 type AdminNavigationProps = {
   open: boolean;
@@ -42,7 +43,7 @@ export default function AdminNavigation({ open, onClose }: AdminNavigationProps)
       {open && <button aria-label="Close admin navigation" className="fixed inset-0 z-40 bg-slate-950/70 lg:hidden" onClick={onClose} />}
       <aside
         aria-label="Admin navigation"
-        className={`fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r border-[#1b2a45] bg-[#060d1f] px-3 py-4 shadow-2xl shadow-black/30 transition-transform duration-200 lg:sticky lg:top-0 lg:z-30 lg:block lg:h-[calc(100vh-73px)] lg:translate-x-0 lg:shadow-none ${open ? 'translate-x-0' : '-translate-x-full'}`}
+        className={`rfz-admin-nav fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r border-[#1b2a45] bg-[#060d1f] px-3 py-4 shadow-2xl shadow-black/30 transition-transform duration-200 lg:sticky lg:top-0 lg:z-30 lg:block lg:h-[calc(100vh-73px)] lg:translate-x-0 lg:shadow-none ${open ? 'translate-x-0' : '-translate-x-full'}`}
       >
         <div className="mb-5 flex items-center justify-between px-2 lg:hidden">
           <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Admin menu</span>
@@ -50,6 +51,7 @@ export default function AdminNavigation({ open, onClose }: AdminNavigationProps)
             <X size={18} />
           </button>
         </div>
+        <div className="mb-4 hidden px-2 lg:block"><ThemeSelector compact /></div>
 
         <div className="space-y-1">
           {PRIMARY_NAV.map((item) => {
