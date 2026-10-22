@@ -25,6 +25,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
           # Load discovery logic only from trusted default-branch code. This
