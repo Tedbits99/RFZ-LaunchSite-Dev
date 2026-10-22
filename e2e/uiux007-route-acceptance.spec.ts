@@ -61,13 +61,13 @@ const adminProtectedRoutes = [
 ] as const;
 
 test.describe('UIUX-007 public route acceptance', () => {
-  for (const route of publicRoutes) {
-    test(`${route} renders without a server error`, async ({ page }) => {
+  test('public routes render without server errors', async ({ page }) => {
+    for (const route of publicRoutes) {
       const response = await page.goto(route);
       expect(response?.status(), `${route} response`).toBeLessThan(500);
       await expect(page.locator('body')).not.toContainText('Application error');
-    });
-  }
+    }
+  });
 
   test('appearance modes persist, remain keyboard reachable, and keep route navigation stable', async ({ page }) => {
     await page.goto('/login');
@@ -91,19 +91,24 @@ test.describe('UIUX-007 public route acceptance', () => {
 });
 
 test.describe('UIUX-007 anonymous authorization boundaries', () => {
-  for (const route of [...customerProtectedRoutes, ...adminProtectedRoutes]) {
-    test(`${route} denies an anonymous browser session`, async ({ page }) => {
+  test('customer and admin routes deny an anonymous browser session', async ({ page }) => {
+    for (const route of customerProtectedRoutes) {
       const response = await page.goto(route);
       expect(response?.status(), `${route} response`).toBeLessThan(500);
-      if (route.startsWith('/admin')) {
-        // AdminLayout intentionally returns notFound for anonymous requests;
-        // this avoids leaking route existence while preserving a normal page.
-        await expect(page).toHaveURL(new RegExp(`${route.replaceAll('/', '\\/')}(?:\\?|$)`));
-        expect(response?.status(), `${route} anonymous status`).toBe(404);
-      } else {
-        await expect(page).toHaveURL(/\/login(?:\?|$)/);
-      }
+      await expect(page).toHaveURL(/\/login(?:\?|$)/);
       await expect(page.locator('body')).not.toContainText('Application error');
-    });
-  }
+    }
+
+    for (const route of adminProtectedRoutes) {
+      const response = await page.goto(route);
+      expect(response?.status(), `${route} response`).toBeLessThan(500);
+      // AdminLayout returns the framework not-found surface for anonymous
+      // requests. This intentionally avoids exposing admin route existence;
+      // the response is 200 in Next's App Router despite the not-found UI.
+      await expect(page).toHaveURL(new RegExp(`${route.replaceAll('/', '\\/')}(?:\\?|$)`));
+      await expect(page.locator('body')).toContainText('This page could not be found.');
+      await expect(page.locator('body')).not.toContainText('Overview');
+      await expect(page.locator('body')).not.toContainText('Application error');
+    }
+  });
 });
