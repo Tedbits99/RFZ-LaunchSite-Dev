@@ -349,7 +349,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     </label>;
   };
 
-  return <main className="min-h-screen bg-[#030718] text-slate-100">
+  return <main className="rfz-topup-page min-h-screen bg-[#030718] text-slate-100">
     <header className="sticky top-0 z-30 border-b border-[#14203a] bg-[#030718]/95 backdrop-blur-xl"><div className="mx-auto flex max-w-[760px] items-center justify-between px-4 py-4"><a href="/" className="inline-flex items-center gap-2 text-xs text-slate-300 transition hover:text-cyan-300"><ArrowLeft size={15} /> Back to games</a><span className="font-display text-sm font-bold">Run<span className="text-cyan-300">Fazone</span></span><a href="/track-order" className="text-xs text-slate-400 hover:text-cyan-300">Track order</a></div></header>
 
     <div className="mx-auto max-w-[760px] px-4 pb-28 pt-5">
