@@ -25,9 +25,25 @@ test('customer authentication, account navigation, logout and protected denial',
   await expect(page).toHaveURL(/\/account\/wallet$/);
   await page.reload();
   await expect(page).toHaveURL(/\/account\/wallet$/);
-  await page.context().clearCookies();
+  await page.goto('/account');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/login\?from=logout$/);
   await page.goto('/account/orders');
   await expect(page).toHaveURL(/\/login$/);
+  await page.reload();
+  await expect(page).toHaveURL(/\/login$/);
+
+  const browser = page.context().browser();
+  if (!browser) throw new Error('Playwright browser is unavailable for anonymous-context verification.');
+  const anonymousContext = await browser.newContext();
+  try {
+    const anonymousPage = await anonymousContext.newPage();
+    await anonymousPage.goto('/account/orders');
+    await expect(anonymousPage).toHaveURL(/\/login$/);
+    await expect(anonymousPage.locator('body')).not.toContainText(/Order History|Profile Settings/);
+  } finally {
+    await anonymousContext.close();
+  }
 });
 
 test('administrator authentication and navigation', async ({ page }) => {
