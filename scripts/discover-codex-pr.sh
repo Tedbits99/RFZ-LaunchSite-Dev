@@ -1,30 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Discover an open, same-repository codex PR for a completed workflow head.
-# workflow_run also fires for pushes to main, so an empty API response means
-# there is no candidate. Non-empty malformed JSON fails closed.
+# workflow_run fires on both PR validation and main pushes. Only PR validation
+# can yield an auto-merge candidate. Never query the flaky commit-to-PR API for
+# main pushes, and match PRs by exact head SHA from an authenticated PR listing.
 parse_response() {
-  local response="$1" repository="$2"
+  local response="$1" repository="$2" head_sha="$3"
   if [[ -z "$response" ]]; then
-    echo "NO_PR: commit-to-PR API returned an empty response" >&2
-    return 0
+    echo "BLOCKED: open PR listing was empty instead of valid JSON" >&2
+    return 1
   fi
-  if ! jq -e 'type == "array"' <<<"$response" >/dev/null 2>&1; then
-    echo "BLOCKED: commit-to-PR API returned invalid JSON" >&2
+  # gh api --paginate can emit multiple JSON arrays, one per page.
+  if ! jq -s -e 'length > 0 and all(.[]; type == "array")' <<<"$response" >/dev/null 2>&1; then
+    echo "BLOCKED: open PR API returned malformed JSON" >&2
     printf 'response_bytes=%s\n' "${#response}" >&2
     return 1
   fi
-  jq -r --arg repository "$repository" '[.[] | select(.state == "open" and .base.ref == "main" and .head.repo.full_name == $repository and (.head.ref | startswith("codex/")) and .draft == false)] | first | .number // empty' <<<"$response"
+  jq -sr --arg repository "$repository" --arg head_sha "$head_sha" '
+    [.[][] | select(
+      .state == "open"
+      and .base.ref == "main"
+      and .head.sha == $head_sha
+      and .head.repo.full_name == $repository
+      and ((.head.ref // "") | startswith("codex/"))
+      and .draft == false
+    )] | first | .number // empty
+  ' <<<"$response"
 }
 
 self_test() {
   local repo="Tedbits99/RFZ-LaunchSite-Dev"
-  [[ -z "$(parse_response "" "$repo")" ]]
-  [[ -z "$(parse_response '[]' "$repo")" ]]
-  ! parse_response '{' "$repo" >/dev/null 2>&1
-  [[ "$(parse_response '[{"number":12,"state":"open","base":{"ref":"main"},"head":{"repo":{"full_name":"Tedbits99/RFZ-LaunchSite-Dev"},"ref":"codex/test"},"draft":false}]' "$repo")" == "12" ]]
-  [[ -z "$(parse_response '[{"number":13,"state":"open","base":{"ref":"main"},"head":{"repo":{"full_name":"someone-else/repo"},"ref":"codex/test"},"draft":false}]' "$repo")" ]]
+  local sha="0123456789012345678901234567890123456789"
+  local valid='[{"number":12,"state":"open","base":{"ref":"main"},"head":{"sha":"0123456789012345678901234567890123456789","repo":{"full_name":"Tedbits99/RFZ-LaunchSite-Dev"},"ref":"codex/test"},"draft":false}]'
+  [[ -z "$(parse_response '[]' "$repo" "$sha")" ]]
+  [[ "$(parse_response "$valid" "$repo" "$sha")" == "12" ]]
+  [[ "$(parse_response "$valid"$'\n''[]' "$repo" "$sha")" == "12" ]]
+  [[ -z "$(parse_response "$valid" "$repo" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")" ]]
+  [[ -z "$(parse_response "${valid/Tedbits99\/RFZ-LaunchSite-Dev/outsider\/repo}" "$repo" "$sha")" ]]
+  [[ -z "$(parse_response "${valid/codex\/test/feature\/test}" "$repo" "$sha")" ]]
+  [[ -z "$(parse_response "${valid/\"draft\":false/\"draft\":true}" "$repo" "$sha")" ]]
+  ! parse_response "" "$repo" "$sha" >/dev/null 2>&1
+  ! parse_response "{" "$repo" "$sha" >/dev/null 2>&1
+  ! parse_response '{"error":"unauthorized"}' "$repo" "$sha" >/dev/null 2>&1
   echo "DISCOVER_CODEX_PR_SELF_TEST_PASS"
 }
 
@@ -32,8 +49,15 @@ if [[ "${1:-}" == "--self-test" ]]; then self_test; exit 0; fi
 
 repository="${REPOSITORY:?REPOSITORY is required}"
 head_sha="${HEAD_SHA:?HEAD_SHA is required}"
-response="$(gh api "repos/$repository/commits/$head_sha/pulls" 2> >(tee "$RUNNER_TEMP/discover-pr-error.log" >&2))" || {
-  echo "BLOCKED: commit-to-PR API request failed for head $head_sha" >&2
+
+if [[ "${SOURCE_EVENT:-}" == "push" && "${SOURCE_BRANCH:-}" == "main" ]]; then
+  echo "NO_PR: main push does not represent an open PR head" >&2
+  exit 0
+fi
+
+response="$(gh api --paginate "repos/$repository/pulls?state=open&per_page=100" \
+  2> >(tee "${RUNNER_TEMP:-/tmp}/discover-pr-error.log" >&2))" || {
+  echo "BLOCKED: open PR API request failed" >&2
   exit 1
 }
-parse_response "$response" "$repository"
+parse_response "$response" "$repository" "$head_sha"
