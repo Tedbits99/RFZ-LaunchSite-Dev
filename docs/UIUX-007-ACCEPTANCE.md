@@ -52,26 +52,28 @@ it must not be silently treated as the missing historical specification.
 
 - PR #13 is merged at `886f1f8864acf727ec5649203c5bcd564d6a56c3`.
 - PR #14 is intentionally draft at
-  `57d18b0b3507a9d8b8916cbe246a508407d046ac`.
-- Exact-head PR #14 validation is terminal SUCCESS:
-  [Frontend validation run 39836563824](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563824),
-  [Development validation run 39836563924](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924),
-  including the [isolated Supabase security job](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924/job/120026334239)
-  and [production release safety job](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924/job/120026333758).
-  Supabase Preview is SKIPPED by integration design.
-- Authenticated browser acceptance passed on exact head
-  `3f27aa57f2f98eabfdaff8202ef3db279fe8da5f` in
-  [Development validation run 39855425560](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39855425560):
-  6 Playwright tests passed across Chromium desktop and mobile projects.
-  This covers Customer A sign-in, account navigation, session persistence,
-  protected-route denial after cookie removal, administrator sign-in and
-  orders navigation, plus checkout rendering without a transaction. The
-  [browser artifact](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39855425560/artifacts/12460245018)
-  contains the generated report and traces/screenshots policy permits.
-- The browser pass does not promote every route: the matrix remains
-  `5 COMPLETE`, `46 PARTIAL`, and `1 BLOCKED` because route-specific CRUD,
-  ownership fixtures with private orders, payment recovery states, and some
-  admin operational pages still lack dedicated acceptance journeys.
+  `9ef5fbc67977d19b6f6620d9be55eca7c0af1bc0`.
+- The previous exact-head validation at
+  `c759e48fd617387f09e608fb0c86de840d96ac77` had frontend and production
+  release safety PASS, but the development run failed in browser acceptance.
+  The isolated database assertions passed 6/6 and the application suite passed
+  857 tests; the failure was limited to the new route-harness expectations and
+  a customer fixture redirect under the large parallel fan-out. The browser
+  artifact is available from
+  [Development validation run 39862775809](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39862775809/artifacts/12462688150).
+- The follow-up `9ef5fbc` validation is still in progress. Frontend validation
+  and production release safety have passed; isolated Chromium/browser,
+  database-security, and legacy-upgrade conclusions are not yet terminal.
+- The route harness now runs public routes and protected-route denial checks as
+  sequential journeys. Public routes passed on both Chromium desktop and
+  mobile in the prior run, but this evidence does not promote protected routes
+  or prove route-specific CRUD, ownership, payment recovery, or admin
+  operational acceptance.
+- The matrix remains `5 COMPLETE`, `46 PARTIAL`, and `1 BLOCKED`. The
+  authenticated `/secure-admin-login` and admin-order journey is useful
+  evidence, but it does not satisfy the full route contract for authorization,
+  responsive/theme states, and operational interactions, so it remains
+  PARTIAL until the fresh exact-head run completes.
 - Playwright same-origin smoke coverage passed public routes at mobile and
   desktop sizes, including Light/Dark/Night selection, reload persistence,
   and keyboard focus. A reproducible desktop artifact was written to
@@ -84,12 +86,10 @@ it must not be silently treated as the missing historical specification.
   unconfigured. The route explicitly returns `Database not configured`, and
   the storefront popup safely remains hidden. A configured isolated Supabase
   environment is required to test success and admin write scenarios.
-- Safe authenticated fixtures are BLOCKED locally: this environment has no
-  Supabase CLI/runtime, approved disposable project credentials, or test
-  identities. The CI security job provisions and tears down its own isolated
-  Supabase stack and passed its database/RLS assertions, but it does not
-  provide browser session identities for this local acceptance run. No
-  production account, secret, or real transaction was used.
+- Safe authenticated fixtures remain CI-only: this local environment has no
+  approved disposable Supabase credentials or test identities. CI provisions
+  and tears down its own isolated stack and synthetic users. No production
+  account, secret, or real transaction was used.
 
 ## Route identifiers covered by this matrix
 
