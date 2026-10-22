@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { isTheme, resolveTheme, themeBootScript } from './theme';
 
@@ -29,6 +30,32 @@ describe('appearance themes', () => {
     expect(resolveTheme(null)).toBe('dark');
     expect(resolveTheme('invalid')).toBe('dark');
     expect(resolveTheme('night')).toBe('night');
+  });
+
+  it.each([
+    ['light', 'light', 'light'],
+    ['dark', 'dark', 'dark'],
+    ['night', 'night', 'dark'],
+    ['invalid', 'dark', 'dark'],
+    [null, 'dark', 'dark'],
+  ] as const)('pre-hydration script applies %s preference as %s', (stored, expected, colorScheme) => {
+    const root = { dataset: { theme: '' }, style: { colorScheme: '' } };
+    runInNewContext(themeBootScript(), {
+      localStorage: { getItem: () => stored },
+      document: { documentElement: root },
+    });
+    expect(root.dataset.theme).toBe(expected);
+    expect(root.style.colorScheme).toBe(colorScheme);
+  });
+
+  it('pre-hydration script safely defaults to dark if browser storage throws', () => {
+    const root = { dataset: { theme: '' }, style: { colorScheme: '' } };
+    runInNewContext(themeBootScript(), {
+      localStorage: { getItem: () => { throw new Error('storage blocked'); } },
+      document: { documentElement: root },
+    });
+    expect(root.dataset.theme).toBe('dark');
+    expect(root.style.colorScheme).toBe('dark');
   });
 
   it('boot script reads the safe preference and assigns a root theme', () => {
