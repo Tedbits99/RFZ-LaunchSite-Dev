@@ -8,9 +8,10 @@ still needs route-specific visual or protected/browser evidence; it is not a
 claim that the route is complete.
 
 Evidence references: local test suite (857 passed, 1 skipped), TypeScript,
-lint, Next/OpenNext builds, and the browser smoke run documented in the task
-report. Protected routes require configured Supabase credentials and an
-authorized test account before browser acceptance can be promoted.
+lint, Next/OpenNext builds, the public browser smoke run documented in the
+task report, and the exact-head GitHub validations listed below. Protected
+routes require configured Supabase credentials and an authorized test account
+before browser acceptance can be promoted.
 
 | Route | Purpose/access | Current classification | Remaining acceptance evidence |
 | --- | --- | --- | --- |
@@ -50,9 +51,14 @@ it must not be silently treated as the missing historical specification.
 ## Evidence update (protected-journey continuation)
 
 - PR #13 is merged at `886f1f8864acf727ec5649203c5bcd564d6a56c3`.
-- PR #14 is intentionally draft at `3aec677865224f6bf6e605bb9ed5c4b27395db4a`.
-- PR #14's Next.js, isolated security, and production-release checks are
-  terminal SUCCESS; Supabase Preview is SKIPPED by integration design.
+- PR #14 is intentionally draft at
+  `57d18b0b3507a9d8b8916cbe246a508407d046ac`.
+- Exact-head PR #14 validation is terminal SUCCESS:
+  [Frontend validation run 39836563824](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563824),
+  [Development validation run 39836563924](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924),
+  including the [isolated Supabase security job](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924/job/120026334239)
+  and [production release safety job](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924/job/120026333758).
+  Supabase Preview is SKIPPED by integration design.
 - Playwright same-origin smoke coverage passed public routes at mobile and
   desktop sizes, including Light/Dark/Night selection, reload persistence,
   and keyboard focus. A reproducible desktop artifact was written to
@@ -65,9 +71,12 @@ it must not be silently treated as the missing historical specification.
   unconfigured. The route explicitly returns `Database not configured`, and
   the storefront popup safely remains hidden. A configured isolated Supabase
   environment is required to test success and admin write scenarios.
-- Safe authenticated fixtures are BLOCKED: this environment has no Supabase
-  CLI/runtime, approved disposable project credentials, or test identities.
-  No production account, secret, or real transaction was used.
+- Safe authenticated fixtures are BLOCKED locally: this environment has no
+  Supabase CLI/runtime, approved disposable project credentials, or test
+  identities. The CI security job provisions and tears down its own isolated
+  Supabase stack and passed its database/RLS assertions, but it does not
+  provide browser session identities for this local acceptance run. No
+  production account, secret, or real transaction was used.
 
 ## Route identifiers covered by this matrix
 
