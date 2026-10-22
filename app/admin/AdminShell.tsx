@@ -9,8 +9,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [navigationOpen, setNavigationOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-[#030718] text-slate-100">
-      <header className="sticky top-0 z-40 border-b border-[#1b2a45] bg-[#050a1b]/95 backdrop-blur-xl">
+    <div className="rfz-admin-app min-h-screen bg-[var(--rfz-bg)] text-[var(--rfz-ink)]">
+      <header className="rfz-admin-header sticky top-0 z-40 border-b backdrop-blur-xl">
         <div className="flex min-h-[73px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
               <button
