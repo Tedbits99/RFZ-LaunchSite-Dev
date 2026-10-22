@@ -9,6 +9,22 @@ describe('appearance themes', () => {
     expect(isTheme('system')).toBe(false);
   });
 
+  it.each(['', 'LIGHT', 'Night ', 'system', 'auto', '<script>alert(1)</script>'])(
+    'rejects unsupported stored appearance %s',
+    (stored) => {
+      expect(isTheme(stored)).toBe(false);
+      expect(resolveTheme(stored)).toBe('dark');
+    },
+  );
+
+  it.each(['light', 'dark', 'night'] as const)(
+    'preserves the valid %s appearance preference',
+    (stored) => {
+      expect(isTheme(stored)).toBe(true);
+      expect(resolveTheme(stored)).toBe(stored);
+    },
+  );
+
   it('defaults safely to dark', () => {
     expect(resolveTheme(null)).toBe('dark');
     expect(resolveTheme('invalid')).toBe('dark');
