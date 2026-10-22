@@ -27,8 +27,14 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          pr="$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/pulls" | jq -r --arg repository "$REPOSITORY" '[.[] | select(.state == "open" and .base.ref == "main" and .head.repo.full_name == $repository and (.head.ref | startswith("codex/")) and .draft == false)] | first | .number // empty')"
+          # Load discovery logic only from trusted default-branch code. This
+          # event also fires for main pushes with no open PR.
+          gh api "repos/$REPOSITORY/contents/scripts/discover-codex-pr.sh?ref=main" --jq .content | base64 --decode > "$RUNNER_TEMP/discover-pr.sh"
+          chmod +x "$RUNNER_TEMP/discover-pr.sh"
+          pr="$(REPOSITORY="$REPOSITORY" HEAD_SHA="$HEAD_SHA" RUNNER_TEMP="$RUNNER_TEMP" bash "$RUNNER_TEMP/discover-pr.sh")"
           test -n "$pr" || exit 0
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo "BLOCKED: discovery returned non-numeric PR number: $pr" >&2; exit 1; }
+          echo "Discovered eligible candidate PR #$pr for exact head $HEAD_SHA"
           echo "number=$pr" >> "$GITHUB_OUTPUT"
       - if: steps.pr.outputs.number != ''
         env:
@@ -42,11 +48,12 @@ jobs:
           # cannot replace the privileged merge policy.
           gh api "repos/$GITHUB_REPOSITORY/contents/scripts/verify-auto-merge-gates.sh?ref=main" --jq .content | base64 --decode > "$RUNNER_TEMP/verify.sh"
           bash "$RUNNER_TEMP/verify.sh"
-          # Request GitHub's protected native auto-merge. This never bypasses
-          # rules, and sha pins the request to the exact verified PR head.
-          response="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/auto-merge" -f sha="$EXPECTED_SHA" -f merge_method=squash)"
-          jq -e '(.auto_merge != null) or (.merged == true)' <<<"$response" >/dev/null || {
-            echo "BLOCKED: GitHub did not enable native auto-merge for the verified head" >&2
-            exit 1
-          }
-          echo "NATIVE_AUTO_MERGE_ENABLED sha=$EXPECTED_SHA"
+          # Use GitHub CLI's supported native auto-merge path. This never
+          # bypasses rules, and match-head-commit pins the request to the
+          # exact verified PR head.
+          gh pr merge "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --squash \
+            --match-head-commit "$EXPECTED_SHA"
+          echo "NATIVE_AUTO_MERGE_REQUESTED sha=$EXPECTED_SHA"
