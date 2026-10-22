@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { PRIMARY_NAV, type NavDropdownItem } from './navData';
+import ThemeSelector from '@/components/ThemeSelector';
 
 type AdminNavigationProps = {
   open: boolean;
@@ -50,6 +51,7 @@ export default function AdminNavigation({ open, onClose }: AdminNavigationProps)
             <X size={18} />
           </button>
         </div>
+        <div className="mb-4 hidden px-2 lg:block"><ThemeSelector compact /></div>
 
         <div className="space-y-1">
           {PRIMARY_NAV.map((item) => {
