@@ -37,7 +37,7 @@ test('administrator authentication and navigation', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign In' }).click();
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
-  await page.getByRole('link', { name: 'View orders' }).click();
+  await page.getByRole('link', { name: 'View orders', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/orders$/);
   await expect(page.getByRole('heading', { name: /orders/i }).first()).toBeVisible();
 });
