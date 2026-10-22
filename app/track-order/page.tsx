@@ -151,21 +151,21 @@ export default function TrackOrder() {
   const isRefundFlow = order?.status === 'REFUND_PENDING' || order?.status === 'REFUNDED';
 
   return (
-    <main className="min-h-screen bg-[#030718] text-slate-100">
+    <main className="rfz-track-page min-h-screen bg-[#030718] text-slate-100">
       <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto max-w-[1180px] px-5 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a></div></header>
       <div className="mx-auto max-w-2xl px-5 py-16">
         <h1 className="font-display text-3xl font-bold">Track Your Order</h1>
         <p className="mt-2 text-sm text-slate-400">Enter your order reference and email to check status.</p>
         <div className="mt-8 space-y-3">
-          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Order reference (e.g. RF-20260928-000001)" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-3 text-sm outline-none focus:border-cyan-400" />
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email used at checkout" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-3 text-sm outline-none focus:border-cyan-400" />
+          <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-300">Order reference</span><input id="order-reference" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. RF-20260928-000001" autoComplete="off" aria-describedby="order-reference-hint" className="rfz-input w-full px-4 py-3 text-sm" /><span id="order-reference-hint" className="mt-1 block text-[11px] text-slate-500">Use the reference from your confirmation email.</span></label>
+          <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-300">Checkout email</span><input id="tracking-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email used at checkout" autoComplete="email" className="rfz-input w-full px-4 py-3 text-sm" /></label>
           <button onClick={search} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 py-3 text-sm font-semibold disabled:opacity-50"><Search size={15} /> {loading ? 'Searching...' : 'Track Order'}</button>
           <button onClick={requestAccessCode} disabled={loading || !ref || !email} className="w-full rounded-lg border border-[#22314d] py-3 text-sm text-slate-300 disabled:opacity-50">Email me a one-time access code</button>
           {accessRequested && <div className="space-y-2">
             <input value={accessCode} onChange={(e) => setAccessCode(e.target.value)} placeholder="One-time code from your email" autoComplete="one-time-code" className="w-full rounded-lg border border-[#22314d] bg-[#0a1124] px-4 py-3 text-sm outline-none focus:border-cyan-400" />
             <button onClick={verifyAccessCode} disabled={loading || !accessCode} className="w-full rounded-lg bg-slate-800 py-3 text-sm font-semibold disabled:opacity-50">{loading ? 'Verifying...' : 'Verify and track order'}</button>
           </div>}
-          {error && <p className="text-sm text-rose-400">{error}</p>}
+          {error && <p role="alert" aria-live="polite" className="rounded-lg border border-rose-400/25 bg-rose-400/5 p-3 text-sm text-rose-300">{error}</p>}
         </div>
 
         {order && (

@@ -3,10 +3,10 @@ import { LucideIcon } from 'lucide-react';
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-col justify-between gap-4 border-b border-[#1b2a45] pb-5 sm:flex-row sm:items-end">
+    <div className="rfz-page-header mb-6 flex flex-col justify-between gap-4 border-b pb-5 sm:flex-row sm:items-end">
       <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-white">{title}</h1>
-        {subtitle && <p className="mt-1 max-w-2xl text-sm text-slate-400">{subtitle}</p>}
+        <h1 className="font-display text-2xl font-bold tracking-tight text-[var(--rfz-ink)]">{title}</h1>
+        {subtitle && <p className="mt-1 max-w-2xl text-sm text-[var(--rfz-muted)]">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -26,7 +26,7 @@ export function MetricCard({ label, value, icon: Icon, tone = 'cyan', detail }: 
     violet: 'from-violet-500/20 to-violet-600/5 text-violet-300',
     rose: 'from-rose-500/20 to-rose-600/5 text-rose-300',
   }[tone];
-  return <div className={`rounded-xl border border-[#1b2a45] bg-gradient-to-br ${tones} p-4 shadow-lg shadow-black/5`}><div className="flex items-center justify-between gap-3"><span className="text-[11px] uppercase tracking-wider text-slate-400">{label}</span><Icon size={16} aria-hidden="true" /></div><p className="font-display mt-3 text-2xl font-bold tracking-tight text-white">{value}</p>{detail && <p className="mt-1 text-[10px] text-slate-500">{detail}</p>}</div>;
+  return <div className={`rfz-metric-card rounded-xl border bg-gradient-to-br ${tones} p-4 shadow-lg shadow-black/5`}><div className="flex items-center justify-between gap-3"><span className="text-[11px] uppercase tracking-wider text-[var(--rfz-muted)]">{label}</span><Icon size={16} aria-hidden="true" /></div><p className="font-display mt-3 text-2xl font-bold tracking-tight text-[var(--rfz-ink)]">{value}</p>{detail && <p className="mt-1 text-[10px] text-[var(--rfz-subtle)]">{detail}</p>}</div>;
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -47,7 +47,7 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function DbNotReady() {
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-300">
+    <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-300">
       Database connection is not available. Please check your server configuration.
     </div>
   );
@@ -55,7 +55,7 @@ export function DbNotReady() {
 
 export function EmptyState({ icon: Icon, label, hint }: { icon: LucideIcon; label: string; hint?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-[#1b2a45] bg-[#0b1225] py-16 text-center">
+    <div className="rfz-empty-state flex flex-col items-center justify-center rounded-xl border py-16 text-center">
       <Icon size={32} className="mb-3 text-slate-600" />
       <p className="text-sm font-medium text-slate-400">{label}</p>
       {hint && <p className="mt-1 text-xs text-slate-600">{hint}</p>}
