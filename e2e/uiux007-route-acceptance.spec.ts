@@ -74,6 +74,7 @@ test.describe('UIUX-007 public route acceptance', () => {
     await page.goto('/login');
     const html = page.locator('html');
     const selector = (theme: string) => page.locator(`[data-theme-option="${theme}"]`);
+    await expect(html).toHaveAttribute('data-theme-ready', 'true');
 
     for (const theme of ['light', 'dark', 'night']) {
       await selector(theme).focus();
@@ -85,6 +86,7 @@ test.describe('UIUX-007 public route acceptance', () => {
     }
 
     await page.goto('/privacy-policy', { waitUntil: 'domcontentloaded' });
+    await expect(html).toHaveAttribute('data-theme-ready', 'true');
     await expect(html).toHaveAttribute('data-theme', 'night');
     await selector('dark').click();
     await expect(html).toHaveAttribute('data-theme', 'dark');
@@ -92,25 +94,26 @@ test.describe('UIUX-007 public route acceptance', () => {
 });
 
 test.describe('UIUX-007 anonymous authorization boundaries', () => {
-  test('customer and admin routes deny an anonymous browser session', async ({ page }) => {
-    test.setTimeout(120_000);
-    for (const route of customerProtectedRoutes) {
+  for (const route of customerProtectedRoutes) {
+    test(`${route} denies an anonymous customer session`, async ({ page }) => {
       const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
       expect(response?.status(), `${route} response`).toBeLessThan(500);
       await expect(page).toHaveURL(/\/login(?:\?|$)/);
       await expect(page.locator('body')).not.toContainText('Application error');
-    }
+    });
+  }
 
-    for (const route of adminProtectedRoutes) {
+  for (const route of adminProtectedRoutes) {
+    test(`${route} denies an anonymous admin session`, async ({ page }) => {
       const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
       expect(response?.status(), `${route} response`).toBeLessThan(500);
       // AdminLayout returns the framework not-found surface for anonymous
       // requests. This intentionally avoids exposing admin route existence;
       // the response is 200 in Next's App Router despite the not-found UI.
       await expect(page).toHaveURL(new RegExp(`${route.replaceAll('/', '\\/')}(?:\\?|$)`));
-      await expect(page.locator('body')).toContainText('This page could not be found.');
+      await expect(page.locator('[data-route-denial="not-found"]')).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Overview');
       await expect(page.locator('body')).not.toContainText('Application error');
-    }
-  });
+    });
+  }
 });

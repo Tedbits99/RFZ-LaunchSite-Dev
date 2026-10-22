@@ -14,6 +14,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeState(initial);
     document.documentElement.dataset.theme = initial;
     document.documentElement.style.colorScheme = initial === 'light' ? 'light' : 'dark';
+    // Expose a stable browser-acceptance and accessibility synchronization
+    // point after the boot script preference has been reconciled with React.
+    document.documentElement.dataset.themeReady = 'true';
   }, []);
 
   const setTheme = useCallback((next: Theme) => {
