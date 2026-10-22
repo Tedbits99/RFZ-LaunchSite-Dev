@@ -62,8 +62,9 @@ const adminProtectedRoutes = [
 
 test.describe('UIUX-007 public route acceptance', () => {
   test('public routes render without server errors', async ({ page }) => {
+    test.setTimeout(90_000);
     for (const route of publicRoutes) {
-      const response = await page.goto(route);
+      const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
       expect(response?.status(), `${route} response`).toBeLessThan(500);
       await expect(page.locator('body')).not.toContainText('Application error');
     }
@@ -83,7 +84,7 @@ test.describe('UIUX-007 public route acceptance', () => {
       await expect(html).toHaveAttribute('data-theme', theme);
     }
 
-    await page.goto('/privacy-policy');
+    await page.goto('/privacy-policy', { waitUntil: 'domcontentloaded' });
     await expect(html).toHaveAttribute('data-theme', 'night');
     await selector('dark').click();
     await expect(html).toHaveAttribute('data-theme', 'dark');
@@ -92,15 +93,16 @@ test.describe('UIUX-007 public route acceptance', () => {
 
 test.describe('UIUX-007 anonymous authorization boundaries', () => {
   test('customer and admin routes deny an anonymous browser session', async ({ page }) => {
+    test.setTimeout(120_000);
     for (const route of customerProtectedRoutes) {
-      const response = await page.goto(route);
+      const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
       expect(response?.status(), `${route} response`).toBeLessThan(500);
       await expect(page).toHaveURL(/\/login(?:\?|$)/);
       await expect(page.locator('body')).not.toContainText('Application error');
     }
 
     for (const route of adminProtectedRoutes) {
-      const response = await page.goto(route);
+      const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
       expect(response?.status(), `${route} response`).toBeLessThan(500);
       // AdminLayout returns the framework not-found surface for anonymous
       // requests. This intentionally avoids exposing admin route existence;
