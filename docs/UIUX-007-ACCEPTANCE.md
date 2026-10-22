@@ -59,6 +59,19 @@ it must not be silently treated as the missing historical specification.
   including the [isolated Supabase security job](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924/job/120026334239)
   and [production release safety job](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39836563924/job/120026333758).
   Supabase Preview is SKIPPED by integration design.
+- Authenticated browser acceptance passed on exact head
+  `3f27aa57f2f98eabfdaff8202ef3db279fe8da5f` in
+  [Development validation run 39855425560](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39855425560):
+  6 Playwright tests passed across Chromium desktop and mobile projects.
+  This covers Customer A sign-in, account navigation, session persistence,
+  protected-route denial after cookie removal, administrator sign-in and
+  orders navigation, plus checkout rendering without a transaction. The
+  [browser artifact](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39855425560/artifacts/12460245018)
+  contains the generated report and traces/screenshots policy permits.
+- The browser pass does not promote every route: the matrix remains
+  `5 COMPLETE`, `46 PARTIAL`, and `1 BLOCKED` because route-specific CRUD,
+  ownership fixtures with private orders, payment recovery states, and some
+  admin operational pages still lack dedicated acceptance journeys.
 - Playwright same-origin smoke coverage passed public routes at mobile and
   desktop sizes, including Light/Dark/Night selection, reload persistence,
   and keyboard focus. A reproducible desktop artifact was written to
