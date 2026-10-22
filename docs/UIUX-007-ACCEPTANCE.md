@@ -46,3 +46,45 @@ authorized test account before browser acceptance can be promoted.
 
 The matrix must be updated with new evidence as protected routes are tested;
 it must not be silently treated as the missing historical specification.
+
+## Evidence update (protected-journey continuation)
+
+- PR #13 is merged at `886f1f8864acf727ec5649203c5bcd564d6a56c3`.
+- PR #14 is intentionally draft at `3aec677865224f6bf6e605bb9ed5c4b27395db4a`.
+- PR #14's Next.js, isolated security, and production-release checks are
+  terminal SUCCESS; Supabase Preview is SKIPPED by integration design.
+- Playwright same-origin smoke coverage passed public routes at mobile and
+  desktop sizes, including Light/Dark/Night selection, reload persistence,
+  and keyboard focus. A reproducible desktop artifact was written to
+  `/tmp/rfz-uiux007-home-desktop.png`.
+- `/account*` correctly resolves to `/login` without a customer session.
+  Admin routes render the retry-safe admin error boundary without configured
+  admin/Supabase credentials. This is denial/recovery evidence, not an
+  authorized admin journey pass.
+- `/api/announcement` returns HTTP 503 when Supabase is intentionally
+  unconfigured. The route explicitly returns `Database not configured`, and
+  the storefront popup safely remains hidden. A configured isolated Supabase
+  environment is required to test success and admin write scenarios.
+- Safe authenticated fixtures are BLOCKED: this environment has no Supabase
+  CLI/runtime, approved disposable project credentials, or test identities.
+  No production account, secret, or real transaction was used.
+
+## Route identifiers covered by this matrix
+
+The 52 page files are: `/`, `/account`, `/account/orders`,
+`/account/orders/[id]`, `/account/profile`, `/account/wallet`,
+`/admin`, `/admin/activity-log`, `/admin/analytics`, `/admin/announcements`,
+`/admin/approvals`, `/admin/blocklist`, `/admin/bulk-pricing`,
+`/admin/customers`, `/admin/export`, `/admin/games`,
+`/admin/games/[id]/packages`, `/admin/ml-offer-pricing`,
+`/admin/notifications`, `/admin/orders`, `/admin/orders/[id]`,
+`/admin/payments`, `/admin/pricing`, `/admin/promotions`,
+`/admin/reconciliation`, `/admin/refunds`, `/admin/risk-alerts`,
+`/admin/roles`, `/admin/security`, `/admin/settings`, `/admin/staff`,
+`/admin/suppliers`, `/admin/suppliers/controlled-test-order`,
+`/admin/suppliers/fazercards-catalog`, `/admin/system-health`, `/admin/tasks`,
+`/admin/tickets`, `/admin/vouchers`, `/auth/confirmation`,
+`/auth/reset-password`, `/checkout`, `/copyright-disclaimer`,
+`/forgot-password`, `/games/[slug]`, `/login`, `/payment-policy`,
+`/privacy-policy`, `/register`, `/refund-policy`, `/secure-admin-login`,
+`/terms-of-service`, and `/track-order`.
