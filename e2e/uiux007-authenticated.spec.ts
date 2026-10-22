@@ -13,6 +13,9 @@ async function signIn(page: import('@playwright/test').Page, email: string, pass
 }
 
 test('customer authentication, account navigation, logout and protected denial', async ({ page }) => {
+  // Mobile auth plus a fresh anonymous context can exceed Playwright's default
+  // 30-second budget even when every security assertion completes successfully.
+  test.setTimeout(45_000);
   await signIn(page, user('customerA').email);
   await expect(page).toHaveURL(/\/account$/);
   await expect(page.getByRole('heading', { name: 'My Account' })).toBeVisible();
