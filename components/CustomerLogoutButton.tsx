@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 export default function CustomerLogoutButton() {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,8 +16,9 @@ export default function CustomerLogoutButton() {
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) throw new Error('Sign out was not completed.');
-      router.replace('/login?from=logout');
-      router.refresh();
+      // A full navigation ensures the server-rendered protected boundary is
+      // re-evaluated after the cookie-backed session is invalidated.
+      window.location.assign('/login?from=logout');
     } catch {
       setError('Could not sign out. Please try again.');
       setPending(false);
