@@ -9,7 +9,7 @@ describe('ThemeSelector keyboard contract', () => {
     expect(source).toContain('type="button"');
     expect(source).toContain("event.key !== 'Enter' && event.key !== ' '");
     expect(source).toContain('event.preventDefault()');
-    expect(source).toContain('setTheme(next)');
+    expect(source).toContain('event.currentTarget.click()');
     expect(source).toContain('onKeyDown=');
   });
 
