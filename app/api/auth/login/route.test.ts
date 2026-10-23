@@ -29,6 +29,17 @@ function request(body: unknown, method = 'POST', includeOrigin = true) {
   });
 }
 
+function nativeFormRequest(email: string, password: string) {
+  return new NextRequest(`${origin}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      origin,
+    },
+    body: new URLSearchParams({ email, password }),
+  });
+}
+
 function installClient() {
   mocks.createCustomerServerClient.mockReturnValue({
     auth: {
@@ -74,6 +85,19 @@ describe('POST /api/auth/login', () => {
     expect(mocks.getUser).toHaveBeenCalledOnce();
     expect(mocks.createCustomerServerClient).toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('supports a pre-hydration native form submission without exposing credentials in the URL', async () => {
+    const response = await POST(nativeFormRequest('customer@example.com', validInput.password));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(`${origin}/account`);
+    expect(response.headers.get('location')).not.toContain('customer@example.com');
+    expect(response.headers.get('location')).not.toContain(validInput.password);
+    expect(mocks.signInWithPassword).toHaveBeenCalledWith({
+      email: 'customer@example.com',
+      password: validInput.password,
+    });
   });
 
   it.each([

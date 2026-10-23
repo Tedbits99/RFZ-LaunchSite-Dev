@@ -25,6 +25,23 @@ function json(body: Record<string, string>, status: number) {
   });
 }
 
+function nativeFormSuccess(request: NextRequest) {
+  return NextResponse.redirect(new URL('/account', request.url), 303);
+}
+
+async function readLoginInput(request: NextRequest): Promise<{ input: unknown; nativeForm: boolean }> {
+  const contentType = request.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return { input: await request.json(), nativeForm: false };
+  }
+
+  const form = await request.formData();
+  return {
+    input: { email: form.get('email'), password: form.get('password') },
+    nativeForm: true,
+  };
+}
+
 function hasTrustedOrigin(request: NextRequest): boolean {
   const origin = getConfiguredAppOrigin();
   return Boolean(origin && request.headers.get('origin') === origin);
@@ -34,8 +51,11 @@ export async function POST(request: NextRequest) {
   if (!hasTrustedOrigin(request)) return json({ error: 'Request origin is not allowed.' }, 403);
 
   let body: unknown;
+  let nativeForm = false;
   try {
-    body = await request.json();
+    const parsed = await readLoginInput(request);
+    body = parsed.input;
+    nativeForm = parsed.nativeForm;
   } catch {
     return json({ error: genericLoginError }, 400);
   }
@@ -107,7 +127,7 @@ export async function POST(request: NextRequest) {
         await client.auth.signOut({ scope: 'local' });
         return json({ error: genericLoginError }, 401);
       }
-      return json({ message: 'Signed in.' }, 200);
+      return nativeForm ? nativeFormSuccess(request) : json({ message: 'Signed in.' }, 200);
     }
 
     if (profile.status !== 'active') {
@@ -115,7 +135,7 @@ export async function POST(request: NextRequest) {
       return json({ error: genericLoginError }, 401);
     }
 
-    return json({ message: 'Signed in.' }, 200);
+    return nativeForm ? nativeFormSuccess(request) : json({ message: 'Signed in.' }, 200);
   } catch {
     try {
       await client.auth.signOut({ scope: 'local' });
