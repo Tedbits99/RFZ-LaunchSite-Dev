@@ -163,12 +163,18 @@ jobs:
       - name: Verify scoped credentials are present
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID_VAR: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID_SECRET: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_API_TOKEN is missing.' >&2; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_ACCOUNT_ID variable or secret is missing.' >&2; exit 1; }
+          if [[ -n "$CLOUDFLARE_ACCOUNT_ID_VAR" && -n "$CLOUDFLARE_ACCOUNT_ID_SECRET" && "$CLOUDFLARE_ACCOUNT_ID_VAR" != "$CLOUDFLARE_ACCOUNT_ID_SECRET" ]]; then
+            echo 'BLOCKED: runfazone-preview has conflicting Cloudflare account IDs in its variable and secret.' >&2
+            exit 1
+          fi
+          account_id="${CLOUDFLARE_ACCOUNT_ID_VAR:-$CLOUDFLARE_ACCOUNT_ID_SECRET}"
+          [[ "$account_id" =~ ^[0-9a-fA-F]{32}$ ]] || { echo 'BLOCKED: Cloudflare account ID is missing or malformed.' >&2; exit 1; }
 
       - name: Verify Cloudflare token status
         env:
@@ -211,11 +217,18 @@ jobs:
       - name: Verify Cloudflare identity, permissions, and preview target
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID_VAR: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID_SECRET: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(jq -r '.name' wrangler.jsonc)" = runfazone-preview
+          if [[ -n "$CLOUDFLARE_ACCOUNT_ID_VAR" && -n "$CLOUDFLARE_ACCOUNT_ID_SECRET" && "$CLOUDFLARE_ACCOUNT_ID_VAR" != "$CLOUDFLARE_ACCOUNT_ID_SECRET" ]]; then
+            echo 'BLOCKED: runfazone-preview has conflicting Cloudflare account IDs in its variable and secret.' >&2
+            exit 1
+          fi
+          CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID_VAR:-$CLOUDFLARE_ACCOUNT_ID_SECRET}"
+          [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-fA-F]{32}$ ]] || { echo 'BLOCKED: Cloudflare account ID is missing or malformed.' >&2; exit 1; }
           account_http="$(curl --silent --show-error --max-time 20 \
             --output "$RUNNER_TEMP/cloudflare-account.json" --write-out '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \

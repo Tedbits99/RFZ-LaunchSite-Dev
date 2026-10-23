@@ -17,8 +17,11 @@ the same repository, and matches the supplied SHA. It also requires successful
 safety` check runs on that exact SHA.
 
 The `runfazone-preview` environment supplies the scoped Cloudflare credentials.
-The account ID may be an environment variable or secret. Credential values are
-never written to logs or artifacts. The preflight first calls Cloudflare's
+The account ID may be an environment variable or secret. If both are configured,
+they must match; the workflow fails closed on a conflict. The environment
+variable is selected when it is the only configured source, otherwise the
+secret is selected. Credential values are never written to logs or artifacts.
+The preflight first calls Cloudflare's
 `/user/tokens/verify` endpoint and requires an active token. It then probes both
 the account-details endpoint and the account-scoped Workers Scripts endpoint.
 Successful Workers Scripts access is the least-privilege proof that the account
@@ -30,9 +33,11 @@ OpenNext artifact and fixed Worker name `runfazone-preview`. Diagnostics expose
 only HTTP status and numeric API codes.
 
 For the preflight environment, configure a Cloudflare API token scoped to the
-intended account with `Workers Scripts: Read`. A later reviewed deployment
-workflow would require `Workers Scripts: Write` (or the dashboard's equivalent
-edit permission) for that same account. No DNS, Workers Routes, account
+intended account with `Workers Scripts: Read` or `Workers Scripts: Edit`.
+Cloudflare's Edit permission includes the read capability needed by the
+account-scoped listing endpoint. A later reviewed deployment workflow would
+require the dashboard's Edit permission (or its API equivalent) for that same
+account. No DNS, Workers Routes, account
 administration, or unrelated permissions are needed for this no-domain,
 preflight-only workflow. Keep `CLOUDFLARE_ACCOUNT_ID` as a protected environment
 variable or secret and do not put its value in the repository.
