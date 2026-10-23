@@ -19,9 +19,23 @@ safety` check runs on that exact SHA.
 The `runfazone-preview` environment supplies the scoped Cloudflare credentials.
 The account ID may be an environment variable or secret. Credential values are
 never written to logs or artifacts. The preflight first calls Cloudflare's
-`/user/tokens/verify` endpoint and requires an active token, then verifies the
-intended account, Wrangler identity, OpenNext artifact, and fixed Worker name
-`runfazone-preview`. Diagnostics expose only HTTP status and numeric API codes.
+`/user/tokens/verify` endpoint and requires an active token. It then probes both
+the account-details endpoint and the account-scoped Workers Scripts endpoint.
+Successful Workers Scripts access is the least-privilege proof that the account
+ID is correct for the token and that Worker metadata can be addressed; account
+details may be denied when the token intentionally lacks broader account-read
+access. Wrangler `whoami` is diagnostic when it cannot enumerate accounts with
+an otherwise valid account-scoped token. The preflight also verifies the
+OpenNext artifact and fixed Worker name `runfazone-preview`. Diagnostics expose
+only HTTP status and numeric API codes.
+
+For the preflight environment, configure a Cloudflare API token scoped to the
+intended account with `Workers Scripts: Read`. A later reviewed deployment
+workflow would require `Workers Scripts: Write` (or the dashboard's equivalent
+edit permission) for that same account. No DNS, Workers Routes, account
+administration, or unrelated permissions are needed for this no-domain,
+preflight-only workflow. Keep `CLOUDFLARE_ACCOUNT_ID` as a protected environment
+variable or secret and do not put its value in the repository.
 
 Failures are classified as `TOKEN_INVALID`,
 `TOKEN_VALID_BUT_WRANGLER_FAILS`, `ACCOUNT_MISMATCH_OR_UNAVAILABLE`, or

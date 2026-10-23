@@ -221,22 +221,45 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H 'Content-Type: application/json' \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID")" || account_http=000
-          [[ "$account_http" =~ ^2 ]] || {
-            api_code="$(jq -r '.errors[0].code // "unknown"' "$RUNNER_TEMP/cloudflare-account.json" 2>/dev/null || echo unknown)"
-            if [[ "$account_http" == 403 ]]; then
-              echo "INSUFFICIENT_PERMISSIONS: Cloudflare account verification was denied (HTTP $account_http, API code $api_code)." >&2
+          account_details_ok=false
+          if [[ "$account_http" =~ ^2 ]] && jq -e '.success == true' "$RUNNER_TEMP/cloudflare-account.json" >/dev/null; then
+            account_details_ok=true
+            echo 'Cloudflare account-details authorization passed.'
+          fi
+
+          # Account details may require a broader account-read permission than
+          # the preview needs. The Workers Scripts endpoint is the
+          # least-privilege, account-scoped proof for this workflow: success
+          # proves that the configured account ID is valid for this token and
+          # that the token can address Worker metadata.
+          scripts_http="$(curl --silent --show-error --max-time 20 \
+            --output "$RUNNER_TEMP/cloudflare-worker-scripts.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")" || scripts_http=000
+          scripts_scope_ok=false
+          if [[ "$scripts_http" =~ ^2 ]] && jq -e '.success == true' "$RUNNER_TEMP/cloudflare-worker-scripts.json" >/dev/null; then
+            scripts_scope_ok=true
+            echo 'Cloudflare account ID and Workers Scripts scope verified.'
+          fi
+
+          if [[ "$scripts_scope_ok" != true ]]; then
+            account_code="$(jq -r '.errors[0].code // "unknown"' "$RUNNER_TEMP/cloudflare-account.json" 2>/dev/null || echo unknown)"
+            scripts_code="$(jq -r '.errors[0].code // "unknown"' "$RUNNER_TEMP/cloudflare-worker-scripts.json" 2>/dev/null || echo unknown)"
+            if [[ "$account_http" == 403 || "$scripts_http" == 403 ]]; then
+              echo "INSUFFICIENT_PERMISSIONS: Cloudflare account or Workers Scripts authorization was denied (account HTTP $account_http, code $account_code; scripts HTTP $scripts_http, code $scripts_code)." >&2
             else
-              echo "ACCOUNT_MISMATCH_OR_UNAVAILABLE: Cloudflare account verification failed (HTTP $account_http, API code $api_code)." >&2
+              echo "ACCOUNT_MISMATCH_OR_UNAVAILABLE: neither account details nor Workers Scripts access was verified (account HTTP $account_http, code $account_code; scripts HTTP $scripts_http, code $scripts_code)." >&2
             fi
             exit 1
-          }
-          jq -e '.success == true' "$RUNNER_TEMP/cloudflare-account.json" >/dev/null || {
-            echo 'ACCOUNT_MISMATCH_OR_UNAVAILABLE: Cloudflare account response was not successful.' >&2
-            exit 1
-          }
+          fi
+
           whoami_log="$RUNNER_TEMP/wrangler-whoami.log"
           if ! npx --yes wrangler@4.151.3 whoami >"$whoami_log" 2>&1; then
-            echo 'TOKEN_VALID_BUT_WRANGLER_FAILS: Cloudflare token and account endpoint passed, but Wrangler identity verification failed.' >&2
-            exit 1
+            if [[ "$account_details_ok" == true ]]; then
+              echo 'TOKEN_VALID_BUT_WRANGLER_FAILS: account authorization passed, but Wrangler identity verification failed.' >&2
+              exit 1
+            fi
+            echo 'Wrangler whoami cannot enumerate accounts with this least-privilege token; account-scoped Workers Scripts authorization passed, so this is not treated as a preview-scope failure.'
           fi
-          echo 'Cloudflare account, Wrangler identity, and preview target verification passed; response details redacted.'
+          echo 'Cloudflare account scope, Workers Scripts authorization, and preview target verification passed; response details redacted.'
