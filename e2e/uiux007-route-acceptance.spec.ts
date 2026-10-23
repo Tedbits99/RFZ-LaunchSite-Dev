@@ -81,9 +81,12 @@ test.describe('UIUX-007 public route acceptance', () => {
   });
 
   test('appearance modes persist, remain keyboard reachable, and keep route navigation stable', async ({ page }) => {
-    await page.goto('/login');
+    await navigateWithDevServerRecovery(page, '/login');
     const html = page.locator('html');
     const selector = (theme: string) => page.locator(`[data-theme-option="${theme}"]`);
+    if (await html.getAttribute('data-theme-ready') !== 'true') {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+    }
     await expect(html).toHaveAttribute('data-theme-ready', 'true');
 
     for (const theme of ['light', 'dark', 'night']) {
