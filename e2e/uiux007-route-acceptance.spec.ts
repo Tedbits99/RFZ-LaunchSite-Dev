@@ -1,13 +1,26 @@
 import { expect, test, type Response as PlaywrightResponse } from '@playwright/test';
 
 async function navigateWithDevServerRecovery(page: import('@playwright/test').Page, route: string) {
-  const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
+  let response = await page.goto(route, { waitUntil: 'domcontentloaded' });
   if ((response?.status() ?? 599) < 500) return response;
 
   // Next dev can return a transient 500 while compiling a route after the
-  // preceding project finishes. A single immediate reload must still pass
-  // the real response and page-content assertions below.
-  return page.reload({ waitUntil: 'domcontentloaded' });
+  // preceding project finishes. Repeat the real navigation instead of
+  // reloading the current document: an authorization redirect can detach the
+  // frame during reload and produce ERR_ABORTED before the login boundary is
+  // observable. The caller still asserts the final response and page state.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await page.goto(route, { waitUntil: 'domcontentloaded' });
+      if ((response?.status() ?? 599) < 500) return response;
+    } catch (error) {
+      if (!(error instanceof Error) || !/ERR_ABORTED|frame was detached/.test(error.message)) {
+        throw error;
+      }
+    }
+  }
+
+  return response;
 }
 
 function expectNavigationResponseOrRedirect(
