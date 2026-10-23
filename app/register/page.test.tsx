@@ -49,8 +49,9 @@ describe('register page source invariants (automated static checks)', () => {
     expect(source).toContain('href="/login"');
   });
 
-  it('does not navigate the browser to the API endpoint', () => {
-    expect(source).not.toMatch(/action=|method="POST"|window\.location/);
+  it('uses an explicit POST action so pre-hydration submission cannot put credentials in the URL', () => {
+    expect(source).toContain('method="post" action="/api/auth/register"');
+    expect(source).not.toMatch(/method="get"/i);
   });
 });
 

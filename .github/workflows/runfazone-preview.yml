@@ -154,6 +154,44 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_API_TOKEN is missing.' >&2; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_ACCOUNT_ID variable or secret is missing.' >&2; exit 1; }
 
+      - name: Verify Cloudflare token status
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_json="$RUNNER_TEMP/cloudflare-token-verify.json"
+          http_status=000
+          for delay in 0 2 5; do
+            if (( delay > 0 )); then sleep "$delay"; fi
+            set +e
+            http_status="$(curl --silent --show-error --max-time 20 \
+              --output "$verify_json" --write-out '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              'https://api.cloudflare.com/client/v4/user/tokens/verify')"
+            curl_exit=$?
+            set -e
+            if (( curl_exit == 0 )); then break; fi
+            http_status=000
+          done
+
+          if [[ "$http_status" =~ ^(401|403)$ ]]; then
+            api_code="$(jq -r '.errors[0].code // "unknown"' "$verify_json" 2>/dev/null || echo unknown)"
+            echo "TOKEN_INVALID: Cloudflare token verification rejected the credential (HTTP $http_status, API code $api_code)." >&2
+            exit 1
+          fi
+          [[ "$http_status" =~ ^2 ]] || {
+            echo "TOKEN_VERIFICATION_FAILED: Cloudflare token endpoint did not return success (HTTP ${http_status:-unknown})." >&2
+            exit 1
+          }
+          jq -e '.success == true and .result.status == "active"' "$verify_json" >/dev/null || {
+            token_status="$(jq -r '.result.status // "unknown"' "$verify_json" 2>/dev/null || echo unknown)"
+            echo "TOKEN_INVALID: Cloudflare token is not active (status $token_status)." >&2
+            exit 1
+          }
+          echo "Cloudflare token verification passed (HTTP $http_status, status active)."
+
       - name: Verify Cloudflare identity, permissions, and preview target
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -161,14 +199,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4.151.3 whoami
           test "$(jq -r '.name' wrangler.jsonc)" = runfazone-preview
-          curl --fail-with-body --silent --show-error \
+          account_http="$(curl --silent --show-error --max-time 20 \
+            --output "$RUNNER_TEMP/cloudflare-account.json" --write-out '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H 'Content-Type: application/json' \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID" \
-            -o "$RUNNER_TEMP/cloudflare-account.json"
-          jq -e '.success == true' "$RUNNER_TEMP/cloudflare-account.json" >/dev/null
-          echo 'Cloudflare account and scoped credential preflight passed; response details redacted.'
-
-
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID")" || account_http=000
+          [[ "$account_http" =~ ^2 ]] || {
+            api_code="$(jq -r '.errors[0].code // "unknown"' "$RUNNER_TEMP/cloudflare-account.json" 2>/dev/null || echo unknown)"
+            if [[ "$account_http" == 403 ]]; then
+              echo "INSUFFICIENT_PERMISSIONS: Cloudflare account verification was denied (HTTP $account_http, API code $api_code)." >&2
+            else
+              echo "ACCOUNT_MISMATCH_OR_UNAVAILABLE: Cloudflare account verification failed (HTTP $account_http, API code $api_code)." >&2
+            fi
+            exit 1
+          }
+          jq -e '.success == true' "$RUNNER_TEMP/cloudflare-account.json" >/dev/null || {
+            echo 'ACCOUNT_MISMATCH_OR_UNAVAILABLE: Cloudflare account response was not successful.' >&2
+            exit 1
+          }
+          whoami_log="$RUNNER_TEMP/wrangler-whoami.log"
+          if ! npx --yes wrangler@4.151.3 whoami >"$whoami_log" 2>&1; then
+            echo 'TOKEN_VALID_BUT_WRANGLER_FAILS: Cloudflare token and account endpoint passed, but Wrangler identity verification failed.' >&2
+            exit 1
+          fi
+          echo 'Cloudflare account, Wrangler identity, and preview target verification passed; response details redacted.'

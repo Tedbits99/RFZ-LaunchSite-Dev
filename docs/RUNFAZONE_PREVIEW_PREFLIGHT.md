@@ -18,9 +18,14 @@ safety` check runs on that exact SHA.
 
 The `runfazone-preview` environment supplies the scoped Cloudflare credentials.
 The account ID may be an environment variable or secret. Credential values are
-never written to logs or artifacts. The preflight verifies Wrangler identity,
-Cloudflare account access, the OpenNext artifact, and the fixed Worker name
-`runfazone-preview`.
+never written to logs or artifacts. The preflight first calls Cloudflare's
+`/user/tokens/verify` endpoint and requires an active token, then verifies the
+intended account, Wrangler identity, OpenNext artifact, and fixed Worker name
+`runfazone-preview`. Diagnostics expose only HTTP status and numeric API codes.
+
+Failures are classified as `TOKEN_INVALID`,
+`TOKEN_VALID_BUT_WRANGLER_FAILS`, `ACCOUNT_MISMATCH_OR_UNAVAILABLE`, or
+`INSUFFICIENT_PERMISSIONS`; invalid credentials are not retried indefinitely.
 
 ## Deployment gate
 

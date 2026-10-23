@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { createAdminServerClient } from '@/lib/authSessionClients'
+import { sessionCookieName } from '@/lib/authSessionConfig'
 import { adminSupabase } from '@/lib/supabaseAdmin'
 
 export type AdminSession = {
@@ -11,7 +12,7 @@ export type AdminSession = {
 }
 
 export async function getAdminSession(): Promise<AdminSession | null> {
-  const supabase = await createSupabaseServerClient()
+  const supabase = await createAdminServerClient()
 
   const {
     data: { user },
@@ -52,6 +53,8 @@ function createRequestClient(req: NextRequest) {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !anonKey) throw new Error('Supabase is not configured.')
   return createServerClient(url, anonKey, {
+    cookieOptions: { name: sessionCookieName('admin') },
+    cookieEncoding: 'base64url',
     cookies: {
       getAll() {
         return req.cookies.getAll().map(({ name, value }: { name: string; value: string }) => ({ name, value }))
@@ -75,8 +78,8 @@ function jsonError(status: number, message: string): Response {
 
 export async function requireAdmin(
   req: NextRequest,
-): Promise<{ ok: true; session: AdminSession; client: Awaited<ReturnType<typeof createSupabaseServerClient>> } | { ok: false; response: Response }> {
-  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
+): Promise<{ ok: true; session: AdminSession; client: Awaited<ReturnType<typeof createAdminServerClient>> } | { ok: false; response: Response }> {
+  let supabase: Awaited<ReturnType<typeof createAdminServerClient>>
   try {
     supabase = createRequestClient(req)
   } catch {

@@ -21,4 +21,8 @@ describe('login page source invariants (automated static checks)', () => {
   it('never logs credentials or tokens', () => {
     expect(source).not.toMatch(/console\.(log|error|warn|info|debug)/);
   });
+
+  it('uses an explicit POST action so pre-hydration submission cannot put credentials in the URL', () => {
+    expect(source).toContain('method="post" action="/api/auth/login"');
+  });
 });

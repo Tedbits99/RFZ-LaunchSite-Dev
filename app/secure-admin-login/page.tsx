@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Lock, Mail, ShieldCheck } from 'lucide-react'
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 
 export default function SecureAdminLoginPage() {
   const router = useRouter()
@@ -14,7 +14,7 @@ export default function SecureAdminLoginPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient()
+    const supabase = createAdminBrowserClient()
     if (!supabase) { setReady(true); return }
     supabase.auth.getSession().then(({ data }: { data: { session: unknown | null } }) => {
       if (data?.session) {
@@ -30,7 +30,7 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
-    const supabase = getSupabaseBrowserClient()
+    const supabase = createAdminBrowserClient()
     if (!supabase) {
       setError('Database is not configured.')
       setSubmitting(false)
@@ -78,7 +78,7 @@ export default function SecureAdminLoginPage() {
           </p>
         </div>
 
-        <form className="space-y-3" onSubmit={handleSubmit}>
+        <form className="space-y-3" method="post" action="/secure-admin-login" onSubmit={handleSubmit}>
           <label className="block">
             <span className="mb-1 block text-xs text-slate-400">Email</span>
             <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">

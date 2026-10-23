@@ -59,7 +59,7 @@ export default function ForgotPassword() {
           <>
             <h1 className="font-display text-2xl font-bold">Reset password</h1>
             <p className="mt-1 text-sm text-slate-400">We&apos;ll send you a reset link.</p>
-            <form className="mt-6 space-y-3" onSubmit={submit}>
+            <form className="mt-6 space-y-3" method="post" action="/api/auth/forgot-password" onSubmit={submit}>
               <label className="block"><span className="mb-1 block text-xs text-slate-400">Email</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Mail size={15} className="text-slate-500" /><input name="email" type="email" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
               {state === 'error' && error ? (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert">{error}</div>
