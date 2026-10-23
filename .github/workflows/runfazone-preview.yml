@@ -7,6 +7,14 @@ on:
         description: 'Exact approved PR #14 head SHA'
         required: true
         type: string
+      operation:
+        description: 'Run credential/configuration preflight, or explicitly deploy the private preview'
+        required: true
+        type: choice
+        options:
+          - preflight
+          - deploy
+        default: preflight
 
 permissions:
   contents: read
@@ -31,11 +39,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           APPROVED_SHA: ${{ inputs.head_sha }}
+          APPROVED_BRANCH: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$REPOSITORY" == "Tedbits99/RFZ-LaunchSite-Dev" ]] || {
             echo 'BLOCKED: preview workflow is restricted to the approved repository.' >&2
+            exit 1
+          }
+          [[ "$APPROVED_BRANCH" == "codex/uiux-007-continuation" ]] || {
+            echo 'BLOCKED: preview workflow must be dispatched from codex/uiux-007-continuation.' >&2
             exit 1
           }
           [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -117,9 +130,52 @@ jobs:
             wrangler.jsonc
           if-no-files-found: error
 
+  cloudflare-preflight:
+    name: Verify scoped Cloudflare preview credentials
+    needs: [verify-approved-head, build-preview]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: runfazone-preview
+    permissions:
+      contents: read
+    steps:
+      - name: Download approved preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runfazone-preview-${{ needs.verify-approved-head.outputs.head_sha }}
+
+      - name: Verify scoped credentials are present
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_API_TOKEN is missing.' >&2; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_ACCOUNT_ID variable or secret is missing.' >&2; exit 1; }
+
+      - name: Verify Cloudflare identity, permissions, and preview target
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.151.3 whoami
+          test "$(jq -r '.name' wrangler.jsonc)" = runfazone-preview
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID" \
+            -o "$RUNNER_TEMP/cloudflare-account.json"
+          jq -e '.success == true' "$RUNNER_TEMP/cloudflare-account.json" >/dev/null
+          echo 'Cloudflare account and scoped credential preflight passed; response details redacted.'
+
   deploy-private-preview:
     name: Deploy private Worker Preview
-    needs: [verify-approved-head, build-preview]
+    if: ${{ inputs.operation == 'deploy' }}
+    needs: [verify-approved-head, build-preview, cloudflare-preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -137,7 +193,7 @@ jobs:
       - name: Verify scoped credentials are present
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -147,7 +203,7 @@ jobs:
       - name: Verify Cloudflare identity and preview target
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           npx --yes wrangler@4.151.3 whoami
@@ -157,7 +213,7 @@ jobs:
         id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
