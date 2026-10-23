@@ -13,7 +13,6 @@ on:
         type: choice
         options:
           - preflight
-          - deploy
         default: preflight
 
 permissions:
@@ -171,73 +170,3 @@ jobs:
             -o "$RUNNER_TEMP/cloudflare-account.json"
           jq -e '.success == true' "$RUNNER_TEMP/cloudflare-account.json" >/dev/null
           echo 'Cloudflare account and scoped credential preflight passed; response details redacted.'
-
-  deploy-private-preview:
-    name: Deploy private Worker Preview
-    if: ${{ inputs.operation == 'deploy' }}
-    needs: [verify-approved-head, build-preview, cloudflare-preflight]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: runfazone-preview
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-    steps:
-      - name: Download approved preview artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: runfazone-preview-${{ needs.verify-approved-head.outputs.head_sha }}
-
-      - name: Verify scoped credentials are present
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_API_TOKEN is missing.' >&2; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'BLOCKED: runfazone-preview.CLOUDFLARE_ACCOUNT_ID is missing.' >&2; exit 1; }
-
-      - name: Verify Cloudflare identity and preview target
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@4.151.3 whoami
-          test "$(jq -r '.name' wrangler.jsonc)" = runfazone-preview
-
-      - name: Deploy private Worker Preview
-        id: deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@4.151.3 preview \
-            --name pr-14 \
-            --worker-name runfazone-preview \
-            --json > "$RUNNER_TEMP/preview.json"
-          preview_url="$(jq -r '.. | strings | select(test("^https://"))' "$RUNNER_TEMP/preview.json" | head -n 1)"
-          [[ "$preview_url" =~ ^https:// ]] || { echo 'BLOCKED: Wrangler returned no HTTPS preview URL.' >&2; exit 1; }
-          echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
-          echo "Preview URL: $preview_url" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Check Access denies an unauthenticated request
-        env:
-          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS --max-time 20 --max-redirs 0 -D "$RUNNER_TEMP/access.headers" -o /dev/null "$PREVIEW_URL" \
-            || status=$?
-          status="${status:-0}"
-          http_status="$(awk 'NR==1 {print $2}' "$RUNNER_TEMP/access.headers" 2>/dev/null || true)"
-          location="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' "$RUNNER_TEMP/access.headers" 2>/dev/null || true)"
-          if [[ "$http_status" =~ ^(401|403)$ ]]; then exit 0; fi
-          if [[ "$http_status" =~ ^3 ]] && grep -Eiq 'cloudflareaccess|cloudflareaccess\.org|/cdn-cgi/access' <<<"$location"; then exit 0; fi
-          echo "BLOCKED: preview did not prove unauthenticated Access denial (HTTP $http_status)." >&2
-          exit 1
