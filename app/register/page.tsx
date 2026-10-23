@@ -83,7 +83,7 @@ export default function Register() {
           <>
             <h1 className="font-display text-2xl font-bold">Create account</h1>
             <p className="mt-1 text-sm text-slate-400">Join RunFazone for faster top-ups.</p>
-            <form className="mt-6 space-y-3" onSubmit={handleSubmit} noValidate={false}>
+            <form className="mt-6 space-y-3" method="post" action="/api/auth/register" onSubmit={handleSubmit} noValidate={false}>
               <label className="block"><span className="mb-1 block text-xs text-slate-400">Full name</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><UserRound size={15} className="text-slate-500" /><input name="name" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
               <label className="block"><span className="mb-1 block text-xs text-slate-400">Email</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Mail size={15} className="text-slate-500" /><input name="email" type="email" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
               <label className="block"><span className="mb-1 block text-xs text-slate-400">Password</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Lock size={15} className="text-slate-500" /><input name="password" type="password" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Response as PlaywrightResponse } from '@playwright/test';
 
 async function navigateWithDevServerRecovery(page: import('@playwright/test').Page, route: string) {
   const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
@@ -8,6 +8,21 @@ async function navigateWithDevServerRecovery(page: import('@playwright/test').Pa
   // preceding project finishes. A single immediate reload must still pass
   // the real response and page-content assertions below.
   return page.reload({ waitUntil: 'domcontentloaded' });
+}
+
+function expectNavigationResponseOrRedirect(
+  response: PlaywrightResponse | null,
+  page: import('@playwright/test').Page,
+  route: string,
+) {
+  if (response) {
+    expect(response.status(), `${route} response`).toBeLessThan(500);
+  } else {
+    // Playwright may not expose a response when the navigation is completed
+    // by a redirect/client transition. Treat that as an explicit redirect
+    // case; it is not an implicit pass for a missing response.
+    expect(page.url(), `${route} redirect URL`).toMatch(/\/login(?:\?|$)/);
+  }
 }
 
 const publicRoutes = [
@@ -75,7 +90,7 @@ test.describe('UIUX-007 public route acceptance', () => {
     test.setTimeout(90_000);
     for (const route of publicRoutes) {
       const response = await navigateWithDevServerRecovery(page, route);
-      expect(response?.status(), `${route} response`).toBeLessThan(500);
+      expectNavigationResponseOrRedirect(response, page, route);
       await expect(page.locator('body')).not.toContainText('Application error');
     }
   });
@@ -110,7 +125,7 @@ test.describe('UIUX-007 anonymous authorization boundaries', () => {
   for (const route of customerProtectedRoutes) {
     test(`${route} denies an anonymous customer session`, async ({ page }) => {
       const response = await navigateWithDevServerRecovery(page, route);
-      expect(response?.status(), `${route} response`).toBeLessThan(500);
+      expectNavigationResponseOrRedirect(response, page, route);
       await expect(page).toHaveURL(/\/login(?:\?|$)/);
       await expect(page.locator('body')).not.toContainText('Application error');
     });
@@ -119,7 +134,14 @@ test.describe('UIUX-007 anonymous authorization boundaries', () => {
   for (const route of adminProtectedRoutes) {
     test(`${route} denies an anonymous admin session`, async ({ page }) => {
       const response = await navigateWithDevServerRecovery(page, route);
-      expect(response?.status(), `${route} response`).toBeLessThan(500);
+      if (response) {
+        expect(response.status(), `${route} response`).toBeLessThan(500);
+      } else {
+        // A client transition can complete without exposing a navigation
+        // response. Require the actual authorization-denial surface instead
+        // of treating a missing response as success.
+        await expect(page.locator('[data-route-denial="not-found"]')).toBeVisible();
+      }
       // AdminLayout returns the framework not-found surface for anonymous
       // requests. This intentionally avoids exposing admin route existence;
       // the response is 200 in Next's App Router despite the not-found UI.

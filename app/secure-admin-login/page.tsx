@@ -78,7 +78,7 @@ export default function SecureAdminLoginPage() {
           </p>
         </div>
 
-        <form className="space-y-3" onSubmit={handleSubmit}>
+        <form className="space-y-3" method="post" action="/secure-admin-login" onSubmit={handleSubmit}>
           <label className="block">
             <span className="mb-1 block text-xs text-slate-400">Email</span>
             <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">

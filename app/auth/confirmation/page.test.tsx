@@ -62,9 +62,10 @@ describe('resend form source invariants (static checks)', () => {
     expect(source).toContain('JSON.stringify({ email: normalized })');
   });
 
-  it('uses same-origin credentials and prevents native navigation', () => {
+  it('uses same-origin credentials and prevents credential-bearing GET navigation', () => {
     expect(source).toContain("credentials: 'same-origin'");
-    expect(source).not.toMatch(/action=|method="POST"|window\.location/);
+    expect(source).toContain('method="post" action="/api/auth/resend-confirmation"');
+    expect(source).not.toMatch(/method="get"/i);
   });
 
   it('never logs emails, tokens, or secrets', () => {

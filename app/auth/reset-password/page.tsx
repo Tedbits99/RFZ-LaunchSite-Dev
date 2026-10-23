@@ -63,7 +63,7 @@ export default function ResetPasswordPage() {
           <>
             <h1 className="font-display text-2xl font-bold">Choose a new password</h1>
             <p className="mt-1 text-sm text-slate-400">Enter a new password for your account.</p>
-            <form className="mt-6 space-y-3" onSubmit={submit}>
+            <form className="mt-6 space-y-3" method="post" action="/auth/reset-password/complete" onSubmit={submit}>
               <label className="block">
                 <span className="mb-1 block text-xs text-slate-400">New password</span>
                 <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
