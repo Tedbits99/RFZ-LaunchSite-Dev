@@ -32,6 +32,12 @@ jobs:
     outputs:
       head_sha: ${{ steps.verify.outputs.head_sha }}
     steps:
+      - name: Check out approved PR #14 head for manual safety verification
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_sha }}
+          fetch-depth: 1
+
       - id: verify
         name: Verify exact PR head and required checks
         env:
@@ -74,6 +80,16 @@ jobs:
           required=("Next.js checks" "Isolated Supabase RPC security tests" "Production release safety")
           for check_name in "${required[@]}"; do
             count="$(jq --arg name "$check_name" '[.check_runs[] | select(.name == $name and .conclusion == "success")] | length' <<<"$checks_json")"
+            if [[ "$check_name" == "Production release safety" && "$count" != "1" && "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              skipped_count="$(jq --arg name "$check_name" '[.check_runs[] | select(.name == $name and .conclusion == "skipped")] | length' <<<"$checks_json")"
+              [[ "$skipped_count" == "1" ]] || {
+                echo 'BLOCKED: production release safety is neither successful nor the expected manual-dispatch skip.' >&2
+                exit 1
+              }
+              echo 'Production release safety is skipped by manual dispatch; rerunning the exact deployable-migration verifier for the approved head.'
+              bash scripts/verify-deployable-migrations.sh
+              count=1
+            fi
             [[ "$count" == 1 ]] || {
               echo "BLOCKED: required Gate A check is not exactly successful on the approved head: $check_name" >&2
               exit 1
