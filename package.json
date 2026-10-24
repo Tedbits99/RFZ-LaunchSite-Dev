@@ -43,6 +43,7 @@
   },
   "overrides": {
     "@types/node": "^22.0.0",
-    "body-parser": "2.4.0"
+    "body-parser": "2.4.0",
+    "undici": "7.30.1"
   }
 }
