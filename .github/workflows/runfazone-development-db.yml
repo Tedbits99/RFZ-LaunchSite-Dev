@@ -20,6 +20,7 @@ on:
           - behavioral-audit
           - customer-security-audit
           - customer-security-cleanup
+          - gate-b-audit
           - plan
           - apply
         default: audit
@@ -102,7 +103,7 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = gate-b-audit || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
           if [[ "$OPERATION" = customer-security-cleanup && "$CLEANUP_RUN_ID" != 40167500569 ]]; then
             echo 'BLOCKED: cleanup is allow-listed only for failed run 40167500569.' >&2
             exit 1
@@ -270,6 +271,33 @@ jobs:
           test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_SERVICE_ROLE_KEY.' >&2; exit 1; }
           bash scripts/cleanup-hosted-customer-security-fixtures.sh "$CLEANUP_RUN_ID"
 
+      - name: Run hosted Gate B integration and RPC audit
+        if: inputs.operation == 'gate-b-audit'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+          POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/supabase/tests/hosted-privileged-rpc-audit.sql" || {
+            echo 'BLOCKED: trusted privileged RPC audit SQL is missing.' >&2
+            exit 1
+          }
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=aws-0-${PROJECT_REGION}.pooler.supabase.com port=${POOLER_PORT} user=postgres.${PROJECT_ID} dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/supabase/tests/hosted-privileged-rpc-audit.sql" \
+            > "$RUNNER_TEMP/hosted-privileged-rpc-audit.log"
+          grep -Eq '^[[:space:]]*HOSTED_PRIVILEGED_RPC_AUDIT_PASS[[:space:]]*$' "$RUNNER_TEMP/hosted-privileged-rpc-audit.log" || {
+            echo 'BLOCKED: privileged RPC audit did not emit its pass marker.' >&2
+            exit 1
+          }
+          SUPABASE_URL="https://${PROJECT_ID}.supabase.co" \
+            SUPABASE_POOLER_HOST="aws-0-${PROJECT_REGION}.pooler.supabase.com" \
+            SUPABASE_POOLER_PORT="$POOLER_PORT" \
+            SUPABASE_DB_USER="postgres.${PROJECT_ID}" \
+            bash scripts/audit-hosted-integrations.sh
+
       - name: Audit hosted schema without changing data
         if: inputs.operation == 'audit'
         env:
@@ -358,4 +386,5 @@ jobs:
             ${{ runner.temp }}/hosted-schema-summary.json
             ${{ runner.temp }}/hosted-security-summary.json
             ${{ runner.temp }}/hosted-behavioral-audit.log
+            ${{ runner.temp }}/hosted-privileged-rpc-audit.log
           if-no-files-found: ignore
