@@ -8,6 +8,7 @@ import { ArrowLeft, BadgeCheck, ChevronDown, CircleHelp, CreditCard, Download, I
 
 import { createPortal } from 'react-dom';
 import SiteFooter from '@/components/SiteFooter';
+import GameArtwork from '@/components/GameArtwork';
 
 type Game = { id: string; slug: string; name: string; description: string; region: string; currency: string; banner_url?: string | null; logo_url?: string | null };
 type Field = { id: string; label: string; field_key: string; placeholder: string; help_text: string; is_required: boolean };
@@ -45,11 +46,6 @@ function formatPrice(cents: number): string {
 function discountPercent(pkg: Package): number {
   if (!pkg.original_price_cents || pkg.original_price_cents <= pkg.price_cents) return 0;
   return Math.round((1 - pkg.price_cents / pkg.original_price_cents) * 100);
-}
-
-function gameBadge(name: string): string {
-  const initials = name.split(/\s+/).map((w) => w[0]).join('').slice(0, 4).toUpperCase();
-  return initials.length >= 2 ? initials : name.slice(0, 4).toUpperCase();
 }
 
 export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], paymentMethodsConfigured = false, bannerUrl = null, coinPaymentEnabled = false }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; paymentMethodsConfigured?: boolean; bannerUrl?: string | null; coinPaymentEnabled?: boolean }) {
@@ -357,7 +353,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
         {bannerUrl && <img src={bannerUrl} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover" />}
         {bannerUrl && <div className="absolute inset-0 bg-gradient-to-r from-[#030718]/80 via-[#030718]/40 to-transparent" />}
         <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-cyan-400/10 blur-3xl" /><div className="absolute -bottom-28 -left-20 h-64 w-64 rounded-full bg-violet-500/10 blur-3xl" />
-        <div className="relative flex h-full flex-col justify-center p-4 sm:p-6 md:p-8"><div className="flex items-start gap-2.5 sm:gap-4">{game.slug === 'mobile-legends' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753406334/app_icon_0_sstwtq.png" alt="Mobile Legends" width={200} height={200} className="h-10 w-10 shrink-0 rounded-xl border border-white/15 object-cover shadow-lg sm:h-14 sm:w-14 sm:rounded-2xl" /> : <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/15 bg-white/10 font-display text-[10px] font-bold text-cyan-200 shadow-lg sm:h-14 sm:w-14 sm:rounded-2xl sm:text-xs">{gameBadge(game.name)}</span>}<div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-300 sm:text-[10px] sm:tracking-[.22em]">Secure Top-Up</p><h1 className="font-display mt-1 text-lg font-bold leading-tight sm:text-2xl sm:leading-tight md:text-3xl">{game.name}</h1><p className="mt-1.5 text-[11px] leading-snug text-slate-300 sm:mt-2 sm:text-xs sm:leading-5">{game.description || `Fast, safe, and affordable top-ups for your next match.`}</p></div></div>
+        <div className="relative flex h-full flex-col justify-center p-4 sm:p-6 md:p-8"><div className="flex items-start gap-2.5 sm:gap-4"><GameArtwork game={game} alt={game.name} className="h-10 w-10 rounded-xl border-white/15 shadow-lg sm:h-14 sm:w-14 sm:rounded-2xl" /><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-300 sm:text-[10px] sm:tracking-[.22em]">Secure Top-Up</p><h1 className="font-display mt-1 text-lg font-bold leading-tight sm:text-2xl sm:leading-tight md:text-3xl">{game.name}</h1><p className="mt-1.5 text-[11px] leading-snug text-slate-300 sm:mt-2 sm:text-xs sm:leading-5">{game.description || `Fast, safe, and affordable top-ups for your next match.`}</p></div></div>
         <div className="mt-4 flex flex-wrap gap-1.5 text-[9px] text-slate-300 sm:mt-7 sm:gap-2 sm:text-[10px]"><span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-0.5 sm:px-3 sm:py-1"><ShieldCheck size={11} className="mr-1 inline text-cyan-300 sm:size-3" />Verified delivery</span><span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-0.5 sm:px-3 sm:py-1"><Zap size={11} className="mr-1 inline text-amber-300 sm:size-3" />Instant processing</span></div></div>
       </section>
 
