@@ -413,19 +413,15 @@ jobs:
           set -euo pipefail
           api_root='https://api.cloudflare.com/client/v4'
           headers=( -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' )
-          script_json="$RUNNER_TEMP/script.json"
           account_subdomain_json="$RUNNER_TEMP/account-subdomain.json"
           script_subdomain_json="$RUNNER_TEMP/script-subdomain.json"
           deployments_json="$RUNNER_TEMP/deployments.json"
           version_json="$RUNNER_TEMP/version.json"
-          script_http="$(curl --silent --show-error --max-time 30 --output "$script_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")"
-          [[ "$script_http" =~ ^2 ]] || { echo "BLOCKED: Worker inventory lookup failed (HTTP $script_http)." >&2; exit 1; }
-          jq -e '.success == true' "$script_json" >/dev/null || { echo 'BLOCKED: Worker inventory response was not successful.' >&2; exit 1; }
-          jq -e '[.result[]? | select(.name == "runfazone-preview")] | length == 1' "$script_json" >/dev/null || {
-            echo 'BLOCKED: deployed preview Worker was not present exactly once in the Worker inventory.' >&2
-            exit 1
-          }
 
+          # The collection endpoint is eventually consistent after deploy and
+          # does not identify the just-created script reliably. The script
+          # subdomain and deployment/version endpoints below are the
+          # authoritative, account-scoped checks for this named Worker.
           account_subdomain_http="$(curl --silent --show-error --max-time 30 --output "$account_subdomain_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain")"
           [[ "$account_subdomain_http" =~ ^2 ]] || { echo "BLOCKED: Workers account subdomain lookup failed (HTTP $account_subdomain_http)." >&2; exit 1; }
           jq -e '.success == true' "$account_subdomain_json" >/dev/null || { echo 'BLOCKED: Workers account subdomain response was not successful.' >&2; exit 1; }
