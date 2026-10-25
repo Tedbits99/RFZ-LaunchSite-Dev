@@ -45,6 +45,32 @@ PGPASSWORD="$local_password" pg_isready -h 127.0.0.1 -p "$local_port" -U postgre
 }
 
 local_connection="host=127.0.0.1 port=$local_port user=postgres dbname=postgres sslmode=disable connect_timeout=10"
+PGPASSWORD="$local_password" psql "$local_connection" -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+DO $$
+DECLARE
+  role_name text;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = role_name) THEN
+      EXECUTE format('CREATE ROLE %I NOLOGIN', role_name);
+    END IF;
+  END LOOP;
+END;
+$$;
+
+CREATE SCHEMA auth;
+CREATE TABLE auth.users (
+  id uuid PRIMARY KEY,
+  email text,
+  email_confirmed_at timestamptz,
+  raw_user_meta_data jsonb
+);
+CREATE FUNCTION auth.uid()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $$ SELECT NULL::uuid $$;
+SQL
 PGPASSWORD="$local_password" psql "$local_connection" -v ON_ERROR_STOP=1 -f "$SCHEMA_DUMP" >/dev/null
 PGPASSWORD="$local_password" psql "$local_connection" -v ON_ERROR_STOP=1 -f "$DATA_DUMP" >/dev/null
 
