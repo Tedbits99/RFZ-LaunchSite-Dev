@@ -182,7 +182,7 @@ jobs:
           set -euo pipefail
           grep -q '"name": "runfazone-preview"' wrangler.jsonc
           test -s .open-next/worker.js
-          if rg -n --hidden --glob '!node_modules/**' --glob '!.git/**' \
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.git \
             '(SUPABASE_SERVICE_ROLE_KEY|PAYMONGO_SECRET_KEY|FAZERCARDS_API_KEY|SMTP_PASSWORD)=' \
             .open-next; then
             echo 'BLOCKED: privileged environment variable assignment found in preview artifact.' >&2
