@@ -376,7 +376,6 @@ jobs:
           deploy_log="$RUNNER_TEMP/wrangler-deploy.log"
           set +e
           npx --yes wrangler@4.151.3 deploy --config wrangler.jsonc --no-bundle \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --name runfazone-preview --message "Runfazone PR14 $APPROVED_SHA" >"$deploy_log" 2>&1
           deploy_status=$?
           set -e
