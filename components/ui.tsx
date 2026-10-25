@@ -22,4 +22,4 @@ export function Panel({ title, description, actions, children, className = '' }:
   return <section className={`surface p-5 sm:p-6 ${className}`}>{title || actions ? <header className="mb-5 flex flex-col justify-between gap-3 border-b border-[var(--rfz-line)] pb-4 sm:flex-row sm:items-start"><div>{title && <h2 className="font-display text-lg font-semibold text-[var(--rfz-ink)]">{title}</h2>}{description && <p className="mt-1 text-sm text-[var(--rfz-muted)]">{description}</p>}</div>{actions}</header> : null}{children}</section>;
 }
 
-export function Skeleton({ className = '' }: { className?: string }) { return <span aria-hidden="true" className={`block animate-pulse rounded-md bg-white/10 ${className}`} />; }
+export function Skeleton({ className = '' }: { className?: string }) { return <span aria-hidden="true" className={`rfz-skeleton block rounded-md ${className}`} />; }

@@ -62,4 +62,26 @@ test.describe('UIUX-007 visual regression', () => {
     await expect(page.getByRole('button', { name: 'Close menu' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Top Up' })).toBeVisible();
   });
+
+  test('desktop appearance control does not cover header actions', async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 0) < 768, 'desktop header case');
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const appearance = page.locator('.theme-selector-global');
+    const trackOrder = page.locator('header').getByRole('link', { name: 'Track Order' });
+    await expect(appearance).toBeVisible();
+    await expect(trackOrder).toBeVisible();
+    const geometry = await Promise.all([appearance.boundingBox(), trackOrder.boundingBox()]);
+    const appearanceBox = geometry[0];
+    const trackBox = geometry[1];
+    expect(appearanceBox).not.toBeNull();
+    expect(trackBox).not.toBeNull();
+    expect(appearanceBox!.x >= trackBox!.x + trackBox!.width || trackBox!.x >= appearanceBox!.x + appearanceBox!.width || appearanceBox!.y >= trackBox!.y + trackBox!.height || trackBox!.y >= appearanceBox!.y + appearanceBox!.height).toBe(true);
+  });
+
+  test('reduced motion keeps storefront content immediate', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const motion = await page.locator('#top h1').evaluate((element) => getComputedStyle(element).animationDuration);
+    expect(parseFloat(motion)).toBeLessThanOrEqual(0.01);
+  });
 });
