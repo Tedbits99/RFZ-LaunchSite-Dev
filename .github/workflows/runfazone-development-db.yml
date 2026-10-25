@@ -235,7 +235,28 @@ jobs:
               'public_triggers', (SELECT count(*) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal)
             )" > "$RUNNER_TEMP/hosted-schema-summary.json"
           test -s "$RUNNER_TEMP/hosted-schema-summary.json"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=$pooler_host port=$POOLER_PORT user=$db_user dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 -Atqc "SELECT json_build_object(
+              'tables', COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'name', c.relname,
+                'rls_enabled', c.relrowsecurity,
+                'rls_forced', c.relforcerowsecurity,
+                'policy_count', (SELECT count(*) FROM pg_catalog.pg_policies p WHERE p.schemaname = 'public' AND p.tablename = c.relname)
+              ) ORDER BY c.relname) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'), '[]'::jsonb),
+              'functions', COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'identity', p.proname || '(' || pg_catalog.pg_get_function_identity_arguments(p.oid) || ')',
+                'security_definer', p.prosecdef,
+                'anon_execute', has_function_privilege('anon', p.oid, 'EXECUTE'),
+                'authenticated_execute', has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                'service_role_execute', has_function_privilege('service_role', p.oid, 'EXECUTE')
+              ) ORDER BY p.proname, p.oid) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), '[]'::jsonb),
+              'scheduled_jobs', CASE WHEN to_regclass('cron.job') IS NULL THEN 0 ELSE (SELECT count(*) FROM cron.job) END,
+              'edge_function_like_http_functions', (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND pg_catalog.pg_get_functiondef(p.oid) ~* '(net\\.(http|http_post|http_get)|https?://)')
+            )" > "$RUNNER_TEMP/hosted-security-summary.json"
+          test -s "$RUNNER_TEMP/hosted-security-summary.json"
           echo 'HOSTED_SCHEMA_SUMMARY_CAPTURED metadata_only=true rows=excluded definitions=excluded'
+          echo 'HOSTED_SECURITY_SUMMARY_CAPTURED metadata_only=true rows=excluded definitions=excluded'
           echo 'HOSTED_SCHEMA_DUMP_CAPTURED schema=public rows=excluded'
 
       - name: Plan reviewed migrations without changing data
@@ -275,4 +296,5 @@ jobs:
             ${{ runner.temp }}/migrations-before.txt
             ${{ runner.temp }}/migrations-after.txt
             ${{ runner.temp }}/hosted-schema-summary.json
+            ${{ runner.temp }}/hosted-security-summary.json
           if-no-files-found: ignore
