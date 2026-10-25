@@ -42,4 +42,24 @@ test.describe('UIUX-007 visual regression', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(html).toHaveAttribute('data-theme', 'night');
   });
+
+  test('mobile navigation remains reachable beside the appearance control', async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 999) > 600, 'mobile navigation case');
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const menu = page.getByRole('button', { name: 'Open menu' });
+    const appearance = page.locator('.theme-selector-global');
+    await expect(menu).toBeVisible();
+    await expect(appearance).toBeVisible();
+
+    const geometry = await Promise.all([menu.boundingBox(), appearance.boundingBox()]);
+    const menuBox = geometry[0];
+    const appearanceBox = geometry[1];
+    expect(menuBox).not.toBeNull();
+    expect(appearanceBox).not.toBeNull();
+    expect(menuBox!.x + menuBox!.width <= appearanceBox!.x || appearanceBox!.x + appearanceBox!.width <= menuBox!.x || menuBox!.y + menuBox!.height <= appearanceBox!.y || appearanceBox!.y + appearanceBox!.height <= menuBox!.y).toBe(true);
+
+    await menu.click();
+    await expect(page.getByRole('button', { name: 'Close menu' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Top Up' })).toBeVisible();
+  });
 });
