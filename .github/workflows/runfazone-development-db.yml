@@ -118,10 +118,10 @@ jobs:
           fi
           git cat-file -e "$SOURCE_SHA^{commit}" || { echo 'BLOCKED: exact source commit could not be fetched.' >&2; exit 1; }
           workflow_runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&per_page=100")"
-          frontend_run="$(jq -c --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.event == "pull_request" and .workflow_name == "Frontend validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
-          development_run="$(jq -c --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.event == "pull_request" and .workflow_name == "Development validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
-          test -n "$frontend_run" || { echo 'BLOCKED: missing exact-head Frontend validation pull-request run.' >&2; exit 1; }
-          test -n "$development_run" || { echo 'BLOCKED: missing exact-head Development validation pull-request run.' >&2; exit 1; }
+          frontend_run="$(jq -c --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.name == "Frontend validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          development_run="$(jq -c --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.name == "Development validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          test -n "$frontend_run" || { echo 'BLOCKED: missing exact-head Frontend validation run.' >&2; exit 1; }
+          test -n "$development_run" || { echo 'BLOCKED: missing exact-head Development validation run.' >&2; exit 1; }
           [[ "$(jq -r '.status' <<<"$frontend_run")" = completed && "$(jq -r '.conclusion' <<<"$frontend_run")" = success ]] || { echo 'BLOCKED: exact-head Frontend validation did not pass.' >&2; exit 1; }
           [[ "$(jq -r '.status' <<<"$development_run")" = completed && "$(jq -r '.conclusion' <<<"$development_run")" = success ]] || { echo 'BLOCKED: exact-head Development validation did not pass.' >&2; exit 1; }
           development_jobs="$(gh api "repos/$REPOSITORY/actions/runs/$(jq -r '.id' <<<"$development_run")/jobs?per_page=100")"
