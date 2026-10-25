@@ -77,3 +77,26 @@ The MCP registration has no `read_only=true` parameter and exposes write-capable
 ## Documentation checks
 
 Final local link/script/config, phase-section, placeholder-secret, source-preservation and whitespace checks are recorded in [phase status](PHASE_STATUS.md) after completion. No application test was added for documentation. Local pass does not establish live integration, data portability, backup restoration or launch readiness.
+
+## UIUX-007 Gate B hosted integration matrix
+
+Fresh protected audit evidence was collected from the trusted `main` workflow
+in run [40163826511](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/40163826511)
+against PR #14 source `9144102754644adbde2a0ad589982379d651f64a`.
+
+| Requirement | Status | Evidence or limitation |
+|---|---|---|
+| Project identity and PostgreSQL connection | VERIFIED PASS | Project `ketdhcmwowzztcdlmris`; protected `SELECT 1` passed. |
+| Migration compatibility | VERIFIED PASS | 96 hosted versions exactly match the 96 reviewed repository versions; before/after ledgers are identical. |
+| RLS coverage | VERIFIED PASS | 35/35 public tables have RLS enabled; 135 policies observed. |
+| Customer isolation | UNVERIFIED | Structural policy data is captured, but no hosted disposable customer A/B behavioral request was run. |
+| Administrator authorization | UNVERIFIED | Authenticated security-definer RPC grants are inventoried; internal role-guard behavior requires disposable hosted identities. |
+| Privileged RPC security | UNVERIFIED | 39 public functions inventoried, including execution grants and security-definer status; grant presence is not proof of authorization correctness. |
+| Checkout/order/payment safety | UNVERIFIED | No hosted transaction or behavioral checkout test was executed. |
+| PayMongo, supplier, webhook, email, crypto isolation | UNVERIFIED | Hosted secret/config values and outbound runtime behavior were not exposed by the audit. |
+| Scheduled jobs and hosted Edge Functions | VERIFIED PASS (metadata) | Scheduled-job count was 0 and no public function contained an HTTP-like function body; this does not prove provider-side configuration absence. |
+| Recovery readiness | BLOCKED | Backup/export/restore evidence was not available through the protected audit. |
+| Cloudflare Access all-traffic protection | BLOCKED | No protected Worker endpoint was deployed or tested in this batch. |
+
+The audit was read-only: no hosted migrations, rows, provider calls, emails,
+Worker deployments, DNS changes, or payment/supplier activity occurred.
