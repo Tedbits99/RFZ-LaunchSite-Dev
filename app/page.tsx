@@ -105,7 +105,13 @@ export default function Home() {
       const client = db();
       if (!client) return;
       Promise.resolve(client.from('promotions').select('*').eq('is_active', true).eq('placement', 'HOMEPAGE_HERO').order('sort_order').limit(5)).then(({ data, error }) => {
-        if (!error && data?.length) setHeroSlides((data as HeroPromo[]).map(toHeroSlide).filter((slide) => Boolean(slide.image)));
+        const cmsSlides = !error && data?.length
+          ? (data as HeroPromo[]).map(toHeroSlide).filter((slide) => Boolean(slide.image))
+          : [];
+        // A partially configured CMS row must not blank the storefront hero.
+        // Keep the verified local artwork until the CMS returns at least one
+        // renderable banner.
+        if (cmsSlides.length) setHeroSlides(cmsSlides);
       }).catch(() => { /* Supabase is optional; local artwork remains the safe fallback. */ });
     } catch { /* Optional CMS data must never block the storefront. */ }
   }, []);
