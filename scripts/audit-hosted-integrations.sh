@@ -84,7 +84,7 @@ echo "HOSTED_EDGE_FUNCTION_INVENTORY_PASS count=$function_count external_capable
 # the EXIT trap. It proves export capability, not a disposable restore.
 supabase db dump --linked --schema public --file "$temporary_schema_dump"
 test -s "$temporary_schema_dump"
-supabase db dump --linked --data-only --file "$temporary_dump"
+supabase db dump --linked --schema public --data-only --file "$temporary_dump"
 test -s "$temporary_dump"
 echo 'HOSTED_RECOVERY_EXPORT_PASS data_dump_created=ephemeral_and_deleted restore=rehearsal_starting'
 
