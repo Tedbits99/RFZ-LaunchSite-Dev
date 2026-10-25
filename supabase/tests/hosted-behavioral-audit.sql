@@ -56,10 +56,16 @@ BEGIN
   IF public.is_admin() THEN
     RAISE EXCEPTION 'HOSTED_ANON_IS_ADMIN';
   END IF;
-  SELECT count(*) INTO n FROM public.customer_profiles;
-  IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_ANON_CUSTOMER_PROFILE_READ'; END IF;
-  SELECT count(*) INTO n FROM public.orders;
-  IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_ANON_ORDER_READ'; END IF;
+  BEGIN
+    SELECT count(*) INTO n FROM public.customer_profiles;
+    IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_ANON_CUSTOMER_PROFILE_READ'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    SELECT count(*) INTO n FROM public.orders;
+    IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_ANON_ORDER_READ'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
   BEGIN
     PERFORM 1 FROM public.admin_get_all_games();
     RAISE EXCEPTION 'HOSTED_ANON_ADMIN_RPC_EXECUTED';
@@ -79,10 +85,16 @@ BEGIN
   IF public.is_admin() THEN
     RAISE EXCEPTION 'HOSTED_FAKE_CLAIM_IS_ADMIN';
   END IF;
-  SELECT count(*) INTO n FROM public.customer_profiles;
-  IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_FAKE_CLAIM_PROFILE_READ'; END IF;
-  SELECT count(*) INTO n FROM public.orders;
-  IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_FAKE_CLAIM_ORDER_READ'; END IF;
+  BEGIN
+    SELECT count(*) INTO n FROM public.customer_profiles;
+    IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_FAKE_CLAIM_PROFILE_READ'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    SELECT count(*) INTO n FROM public.orders;
+    IF n <> 0 THEN RAISE EXCEPTION 'HOSTED_FAKE_CLAIM_ORDER_READ'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
   BEGIN
     PERFORM 1 FROM public.admin_get_all_games();
     RAISE EXCEPTION 'HOSTED_NONADMIN_ADMIN_RPC_EXECUTED';
