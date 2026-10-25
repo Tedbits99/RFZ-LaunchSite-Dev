@@ -6,7 +6,7 @@ operation, email, or webhook.
 
 | Requirement | Evidence | Status | Next evidence/action |
 |---|---|---|---|
-| PR exact head and Gate A checks | PR #14 at `f3de5d8d5fa252a6baf4214966437bd361f3688e`; Frontend run `40147705548` passed; Development run `40147707434` failed with 82/84 browser tests because the admin route was still on the loading boundary and the mobile theme-ready marker was never set | FAIL | Fix both browser regressions and validate the new exact head |
+| PR exact head and Gate A checks | Browser regression fixes are at `1eb2344723f597ba5fba8e6eb8b3e78b5eae2fde`; local focused theme checks pass on desktop/mobile; fresh GitHub exact-head runs are required | UNVERIFIED | Record terminal conclusions before relying on this row |
 | Cloudflare account authorization | Preflight run `40146567430` | PASS | Preserve environment restriction |
 | OpenNext artifact and privileged-secret scan | Preflight build job passed | PASS | No deploy authorization implied |
 | Existing Supabase project identity | Project `ketdhcmwowzztcdlmris`, URL recorded in prior project-scoped audit | PASS (historical) | Owner-confirm current identity |
