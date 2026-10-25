@@ -100,9 +100,12 @@ section#top > div:first-child > div:last-of-type { position: relative; z-index: 
 .rfz-admin-route > header { background: rgba(5,8,20,.88); border-color: rgba(65,217,255,.12); }
 .rfz-admin-route .overflow-x-auto { border-color: var(--rfz-line); background: linear-gradient(145deg, rgba(16,28,51,.9), rgba(8,15,31,.94)); box-shadow: var(--rfz-shadow-sm); }
 .rfz-admin-dashboard .rounded-xl.border { border-color: var(--rfz-line); box-shadow: var(--rfz-shadow-sm); }
+.theme-selector { backdrop-filter: blur(16px); box-shadow: 0 10px 28px rgba(0,0,0,.2); }
+.theme-selector button { min-width: 2.35rem; border: 1px solid transparent; }
+.theme-selector button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--rfz-accent) 28%, transparent); }
 .theme-selector-global { position: fixed; top: .75rem; right: .75rem; z-index: 100; }
 @media (min-width: 768px) {
-  header.sticky > div, .rfz-admin-header > div { padding-right: 14rem; }
+  header.sticky > div, .rfz-admin-header > div { padding-right: 10rem; }
 }
 @media (max-width: 767px) {
   .theme-selector-global { top: auto; right: .75rem; bottom: .75rem; }

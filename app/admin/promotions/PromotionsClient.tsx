@@ -5,6 +5,7 @@ import {
   Save, Loader2, CheckCircle2, AlertTriangle, Megaphone, Plus, X,
   Calendar, Image as ImageIcon, ExternalLink, Layout, Gamepad2,
 } from 'lucide-react';
+import { RFZ_IMAGE_PRESETS } from '@/lib/storefrontAssets';
 
 type Placement = 'HOMEPAGE_HERO' | 'GAME_CARD' | 'GAME_DETAIL_HERO';
 
@@ -329,6 +330,17 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
               {newImageUrlError && (
                 <p className="mt-1 text-xs text-rose-400">URL must start with https://</p>
               )}
+              <div className="mt-3 rounded-lg border border-cyan-400/10 bg-cyan-400/[.04] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-300">RunFazone asset library</p>
+                <p className="mt-1 text-xs text-slate-500">Use an approved starter asset, then replace it with your own HTTPS artwork when needed.</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {RFZ_IMAGE_PRESETS.map((preset) => (
+                    <button key={preset.url} type="button" onClick={() => setNewPromo(p => ({ ...p, image_url: preset.url }))} className="rounded-md border border-[#294264] px-2.5 py-1.5 text-[10px] font-semibold text-slate-300 transition hover:border-cyan-300/60 hover:text-cyan-200">
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {newPromo.image_url && !newImageUrlError && (
                 <div className="mt-2">
                   <span className={labelCls}>Preview</span>

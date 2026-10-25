@@ -9,6 +9,7 @@ import SiteFooter from '@/components/SiteFooter';
 import GameArtwork from '@/components/GameArtwork';
 import RunfazoneLogo from '@/components/RunfazoneLogo';
 import { filterStorefrontGames, type StorefrontCatalogFilter } from '@/lib/storefrontCatalog';
+import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets';
 
 type Game = { id: string; slug: string; name: string; short_name: string; description: string; is_featured: boolean; sort_order: number; logo_url?: string | null };
 type Package = { id: string; game_id: string; name: string; amount: string; price_cents: number; original_price_cents: number | null; bonus: string | null };
@@ -16,7 +17,7 @@ type HeroPromo = { image_url: string | null; placement: string | null; cta_href:
 type CardPromo = { target_game_id: string | null; image_url: string | null };
 
 const fallbackGames: Game[] = [
-  { id:'1', slug:'mobile-legends', name:'Mobile Legends', short_name:'MLBB', description:'Bang Bang', is_featured:true, sort_order:1 },
+  { id:'1', slug:'mobile-legends', name:'Mobile Legends', short_name:'MLBB', description:'Bang Bang', is_featured:true, sort_order:1, logo_url: RFZ_PUBLIC_ASSETS.mlbbLogo },
   { id:'2', slug:'pubg-mobile', name:'PUBG Mobile', short_name:'PUBG', description:'Battle Royale', is_featured:true, sort_order:2 },
   { id:'3', slug:'free-fire', name:'Free Fire', short_name:'FREE FIRE', description:'Battle in style', is_featured:true, sort_order:3 },
   { id:'4', slug:'genshin-impact', name:'Genshin Impact', short_name:'GENSHIN', description:'Open-world RPG', is_featured:true, sort_order:4 },
@@ -34,8 +35,8 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [slide, setSlide] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [heroImages, setHeroImages] = useState<(string | null)[]>([]);
-  const [heroCtas, setHeroCtas] = useState<(string | null)[]>([]);
+  const [heroImages, setHeroImages] = useState<(string | null)[]>([...RFZ_PUBLIC_ASSETS.heroBanners]);
+  const [heroCtas, setHeroCtas] = useState<(string | null)[]>(RFZ_PUBLIC_ASSETS.heroBanners.map(() => '#games'));
   const [heroAspect, setHeroAspect] = useState<number | null>(null);
   const [heroLoaded, setHeroLoaded] = useState(false);
   const [cardBanners, setCardBanners] = useState<Record<string, string>>({});

@@ -8,11 +8,17 @@ export async function GET(req: NextRequest) {
   if (!session.ok) return session.response;
 
   const db = adminSupabase || session.client;
-  const { data, error } = await db.from('app_settings').select('reference_usd_php_rate').eq('id', 1).maybeSingle();
+  const [{ data, error }, { data: policy, error: policyError }] = await Promise.all([
+    db.from('app_settings').select('reference_usd_php_rate').eq('id', 1).maybeSingle(),
+    db.from('checkout_policy').select('allow_guest_checkout').eq('setting_key', 'allow_guest_checkout').maybeSingle(),
+  ]);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ reference_usd_php_rate: data?.reference_usd_php_rate ?? 56 });
+  return NextResponse.json({
+    reference_usd_php_rate: data?.reference_usd_php_rate ?? 56,
+    allow_guest_checkout: policyError ? null : policy?.allow_guest_checkout ?? null,
+  });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -21,7 +27,13 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { reference_usd_php_rate } = body;
+    const { reference_usd_php_rate, allow_guest_checkout } = body;
+
+    if (typeof allow_guest_checkout === 'boolean') {
+      const { data, error } = await session.client.rpc('admin_set_allow_guest_checkout', { p_enabled: allow_guest_checkout });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ success: true, allow_guest_checkout: Boolean(data) });
+    }
 
     if (typeof reference_usd_php_rate !== 'number' || reference_usd_php_rate <= 0 || reference_usd_php_rate > 1000) {
       return NextResponse.json({ error: 'A valid rate between 0 and 1000 is required' }, { status: 400 });
