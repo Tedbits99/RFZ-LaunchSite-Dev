@@ -58,6 +58,11 @@ db_summary="$(psql "$db_connection" -v ON_ERROR_STOP=1 -Atqc "
 
 live_payment_configs="$(jq -r '.live_nonmanual_payment_configs' <<<"$db_summary")"
 cron_relation_present="$(jq -r '.cron_relation_present' <<<"$db_summary")"
+payment_configs="$(jq -c '.payment_configs' <<<"$db_summary")"
+enabled_suppliers="$(jq -r '.enabled_suppliers' <<<"$db_summary")"
+echo "HOSTED_EDGE_FUNCTION_INVENTORY_OBSERVED count=$function_count names=${function_names:-none}"
+echo "HOSTED_PROVIDER_SECRET_NAMES_RECORDED names=${secret_names:-none}"
+echo "HOSTED_DB_INTEGRATION_SUMMARY cron_relation_present=$cron_relation_present enabled_suppliers=$enabled_suppliers live_nonmanual_payment_configs=$live_payment_configs payment_configs=$payment_configs"
 [[ "$live_payment_configs" = 0 ]] || {
   echo 'HOSTED_INTEGRATION_AUDIT_FAIL=non_test_payment_configuration' >&2
   exit 1
