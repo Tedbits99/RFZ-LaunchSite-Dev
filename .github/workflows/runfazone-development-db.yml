@@ -61,6 +61,15 @@ jobs:
         with:
           version: 2.121.0
 
+      - name: Install required audit tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-client ripgrep
+          command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
+          command -v psql >/dev/null || { echo 'BLOCKED: required PostgreSQL diagnostic client is unavailable.' >&2; exit 1; }
+
       - name: Validate protected inputs and project identity
         id: identity
         shell: bash
@@ -98,8 +107,12 @@ jobs:
             echo 'BLOCKED: Supabase API identity did not match the approved project.' >&2
             exit 1
           }
+          region="$(jq -r '.region // empty' <<<"$project_json")"
+          test -n "$region" || { echo 'BLOCKED: Supabase project region is unavailable.' >&2; exit 1; }
           jq -r '{id, name, region, status}' <<<"$project_json"
           echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
+          echo "region=$region" >> "$GITHUB_OUTPUT"
+          echo 'DB_PASSWORD_SOURCE=runfazone-development-db environment secret'
 
       - name: Verify reviewed source commit and import migration SQL only
         env:
@@ -142,6 +155,7 @@ jobs:
           } || true
           count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
           test "$count" = 96 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 96." >&2; exit 1; }
+          command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
           if rg -n -i --glob '*.sql' \
             '(drop[[:space:]]+(table|schema|database)|truncate([[:space:];]|$)|alter[[:space:]]+table[^;]*(drop[[:space:]]+column)|cron\.schedule|net\.http|http_(post|get)|https?://)' \
             "$migration_dir"; then
@@ -154,6 +168,36 @@ jobs:
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
         run: supabase link --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Verify hosted PostgreSQL authentication with SELECT 1
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v psql >/dev/null || { echo 'BLOCKED: required PostgreSQL diagnostic client is unavailable.' >&2; exit 1; }
+          pooler_host="aws-0-${PROJECT_REGION}.pooler.supabase.com"
+          db_user="postgres.${PROJECT_ID}"
+          for port in 5432 6543; do
+            diagnostic_log="$RUNNER_TEMP/postgres-auth-${port}.log"
+            if PGPASSWORD="$SUPABASE_DB_PASSWORD" \
+              psql "host=$pooler_host port=$port user=$db_user dbname=postgres sslmode=require connect_timeout=10" \
+              -v ON_ERROR_STOP=1 -Atqc 'SELECT 1' >"$diagnostic_log" 2>&1; then
+              test "$(tr -d '[:space:]' <"$diagnostic_log")" = 1 || {
+                echo "BLOCKED: PostgreSQL SELECT 1 returned an unexpected result on pooler port $port." >&2
+                exit 1
+              }
+              echo "POSTGRES_AUTHENTICATION_PASS pooler_port=$port query=SELECT_1"
+              exit 0
+            fi
+            if grep -q '28P01' "$diagnostic_log"; then
+              echo "OWNER_ACTION_REQUIRED: SUPABASE_DB_PASSWORD rejected by PostgreSQL (SQLSTATE 28P01, pooler_port=$port)." >&2
+              exit 1
+            fi
+          done
+          echo 'BLOCKED: PostgreSQL SELECT 1 could not connect on the verified pooler ports.' >&2
+          exit 1
 
       - name: Capture hosted migration history before changes
         env:
