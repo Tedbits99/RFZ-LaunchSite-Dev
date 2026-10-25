@@ -170,6 +170,7 @@ jobs:
         run: supabase link --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
       - name: Verify hosted PostgreSQL authentication with SELECT 1
+        id: postgres_auth
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
           PROJECT_REGION: ${{ steps.identity.outputs.region }}
@@ -189,6 +190,7 @@ jobs:
                 exit 1
               }
               echo "POSTGRES_AUTHENTICATION_PASS pooler_port=$port query=SELECT_1"
+              echo "pooler_port=$port" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             if grep -q '28P01' "$diagnostic_log"; then
@@ -210,12 +212,30 @@ jobs:
 
       - name: Audit hosted schema without changing data
         if: inputs.operation == 'audit'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+          POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
         shell: bash
         run: |
           set -euo pipefail
           # Schema-only dump; no rows are exported and no write command runs.
           supabase db dump --linked --schema public --file "$RUNNER_TEMP/hosted-public-schema.sql"
           test -s "$RUNNER_TEMP/hosted-public-schema.sql"
+          pooler_host="aws-0-${PROJECT_REGION}.pooler.supabase.com"
+          db_user="postgres.${PROJECT_ID}"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=$pooler_host port=$POOLER_PORT user=$db_user dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 -Atqc "SELECT json_build_object(
+              'public_tables', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'),
+              'public_tables_rls_enabled', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity),
+              'public_policies', (SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname = 'public'),
+              'public_functions', (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'),
+              'public_indexes', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'i'),
+              'public_triggers', (SELECT count(*) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal)
+            )" > "$RUNNER_TEMP/hosted-schema-summary.json"
+          test -s "$RUNNER_TEMP/hosted-schema-summary.json"
+          echo 'HOSTED_SCHEMA_SUMMARY_CAPTURED metadata_only=true rows=excluded definitions=excluded'
           echo 'HOSTED_SCHEMA_DUMP_CAPTURED schema=public rows=excluded'
 
       - name: Plan reviewed migrations without changing data
@@ -254,4 +274,5 @@ jobs:
           path: |
             ${{ runner.temp }}/migrations-before.txt
             ${{ runner.temp }}/migrations-after.txt
+            ${{ runner.temp }}/hosted-schema-summary.json
           if-no-files-found: ignore
