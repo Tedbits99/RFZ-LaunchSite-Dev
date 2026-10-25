@@ -3,8 +3,21 @@ import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { requireAdmin } from '@/lib/adminGuard';
 
-const ALLOWED_FIELDS = new Set(['image_url', 'is_active', 'cta_text', 'cta_href', 'sort_order', 'title', 'body', 'target_type', 'starts_at', 'ends_at', 'placement', 'target_game_id']);
+const ALLOWED_FIELDS = new Set(['image_url', 'is_active', 'cta_text', 'cta_href', 'sort_order', 'title', 'body', 'target_type', 'starts_at', 'ends_at', 'placement', 'target_game_id', 'animation_preset', 'motion_speed', 'autoplay_enabled']);
 const VALID_PLACEMENTS = new Set(['HOMEPAGE_HERO', 'GAME_CARD', 'GAME_DETAIL_HERO']);
+const VALID_PRESETS = new Set(['holographic-reveal', 'cinematic-depth', 'futuristic-energy', 'minimal-motion', 'static']);
+const VALID_SPEEDS = new Set(['fast', 'standard', 'relaxed']);
+
+function isSafeCtaHref(value: string): boolean {
+  if (!value) return true;
+  if (value.startsWith('#')) return true;
+  if (value.startsWith('/') && !value.startsWith('//')) return true;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 export async function GET() {
   const db = adminSupabase || supabase;
@@ -46,17 +59,13 @@ export async function POST(req: NextRequest) {
     }
 
     const cta_href = String(body.cta_href || '').trim();
-    if (cta_href) {
-      try {
-        new URL(cta_href);
-      } catch {
-        return NextResponse.json({ error: 'Invalid CTA link format.' }, { status: 400 });
-      }
-    }
+    if (!isSafeCtaHref(cta_href)) return NextResponse.json({ error: 'CTA link must be a safe internal or HTTPS URL.' }, { status: 400 });
 
     const target_type = ['GLOBAL', 'GAME', 'PACKAGE'].includes(body.target_type) ? body.target_type : 'GLOBAL';
     const placement = VALID_PLACEMENTS.has(body.placement) ? body.placement : 'HOMEPAGE_HERO';
     const target_game_id = body.target_game_id || null;
+    const animation_preset = VALID_PRESETS.has(body.animation_preset) ? body.animation_preset : 'holographic-reveal';
+    const motion_speed = VALID_SPEEDS.has(body.motion_speed) ? body.motion_speed : 'standard';
 
     if ((placement === 'GAME_CARD' || placement === 'GAME_DETAIL_HERO') && !target_game_id) {
       return NextResponse.json({ error: 'A target game is required for this banner placement.' }, { status: 400 });
@@ -73,6 +82,9 @@ export async function POST(req: NextRequest) {
       cta_href: cta_href || null,
       is_active: Boolean(body.is_active),
       sort_order: Number(body.sort_order) || 0,
+      animation_preset,
+      motion_speed,
+      autoplay_enabled: body.autoplay_enabled !== false,
     };
 
     if (body.starts_at) insert.starts_at = body.starts_at;
@@ -119,6 +131,18 @@ export async function PATCH(req: NextRequest) {
       } catch {
         return NextResponse.json({ error: 'Invalid image URL format.' }, { status: 400 });
       }
+    }
+
+    if (typeof rawUpdates.cta_href === 'string' && !isSafeCtaHref(rawUpdates.cta_href)) {
+      return NextResponse.json({ error: 'CTA link must be a safe internal or HTTPS URL.' }, { status: 400 });
+    }
+
+    if (rawUpdates.animation_preset !== undefined && !VALID_PRESETS.has(rawUpdates.animation_preset)) {
+      return NextResponse.json({ error: 'Invalid animation preset.' }, { status: 400 });
+    }
+
+    if (rawUpdates.motion_speed !== undefined && !VALID_SPEEDS.has(rawUpdates.motion_speed)) {
+      return NextResponse.json({ error: 'Invalid motion speed.' }, { status: 400 });
     }
 
     if (typeof rawUpdates.placement === 'string' && !VALID_PLACEMENTS.has(rawUpdates.placement)) {
