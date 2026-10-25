@@ -6,7 +6,7 @@ operation, email, or webhook.
 
 | Requirement | Evidence | Status | Next evidence/action |
 |---|---|---|---|
-| PR exact head and Gate A checks | PR #14 at `256cbd326c58207244b671c8a08473bd2933c1cf`; Frontend and Development checks passed; 84/84 browser; legacy upgrade passed | PASS | Recheck only if the PR head changes |
+| PR exact head and Gate A checks | PR #14 at `fe7086da218266971a2b5ce292d283e039a2bca4`; the fresh exact-head Frontend run is `40147219307` and Development run is `40147219196` (both were still running when this matrix was prepared) | UNVERIFIED | Record terminal conclusions before relying on this row |
 | Cloudflare account authorization | Preflight run `40146567430` | PASS | Preserve environment restriction |
 | OpenNext artifact and privileged-secret scan | Preflight build job passed | PASS | No deploy authorization implied |
 | Existing Supabase project identity | Project `ketdhcmwowzztcdlmris`, URL recorded in prior project-scoped audit | PASS (historical) | Owner-confirm current identity |
