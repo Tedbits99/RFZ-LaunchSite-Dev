@@ -127,7 +127,7 @@ jobs:
             HOSTED_EDGE_FUNCTION_INVENTORY_PASS \
             HOSTED_INTEGRATION_AUDIT_PASS \
             HOSTED_DISPOSABLE_RESTORE_PASS; do
-            rg -q "$marker" "$audit_log" || {
+            grep -Fq -- "$marker" "$audit_log" || {
               echo "BLOCKED: Gate B audit run is missing required evidence marker $marker." >&2
               exit 1
             }
@@ -353,7 +353,7 @@ jobs:
             echo 'BLOCKED: preview Supabase URL is not the approved development project URL.' >&2
             exit 1
           }
-          if rg -n --hidden --glob '!node_modules/**' --glob '!.git/**' \
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.git \
             '(SUPABASE_SERVICE_ROLE_KEY|PAYMONGO_SECRET_KEY|PAYMENT_PAYMONGO_SECRET_KEY|FAZERCARDS_API_KEY|SUPPLIER_FAZERCARDS_API_KEY|SMTP_PASSWORD)=' .open-next; then
             echo 'BLOCKED: privileged or provider secret assignment found in immutable preview artifact.' >&2
             exit 1
@@ -435,7 +435,7 @@ jobs:
               echo "BLOCKED: anonymous request at ${endpoint#https://} returned unexpected HTTP $http." >&2
               exit 1
             fi
-            if rg -ni '(order|payment|customer|profile|supabase|dashboard|admin)' "$body_file"; then
+            if grep -Ein '(order|payment|customer|profile|supabase|dashboard|admin)' "$body_file"; then
               echo "BLOCKED: anonymous response at ${endpoint#https://} exposed application data markers." >&2
               exit 1
             fi
