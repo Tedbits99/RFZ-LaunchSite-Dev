@@ -6,10 +6,19 @@ run on pushes or pull requests, and its default operation is `preflight`.
 ## Required dispatch
 
 After this workflow is available on the default branch, dispatch **Runfazone
-private preview** from `codex/uiux-007-continuation` with:
+private preview** from `main` with:
 
 - `head_sha`: the full, current PR #14 head SHA
 - `operation`: `preflight`
+
+For the owner-authorized deployment, use the same trusted `main` dispatch with
+`operation: deploy-private-preview` and `gate_b_audit_run_id: 40175163923`.
+The workflow rechecks the open/draft PR #14 head, all Gate A checks, the
+successful hosted Gate B audit, the saved account-wide Cloudflare Access
+policy, and the development Supabase identity before it can upload the named
+Worker. It then resolves and tests both the normal workers.dev URL and the
+immutable version URL. It does not configure routes, custom domains, DNS, or
+production credentials.
 
 The workflow verifies that PR #14 is open and draft, targets `main`, belongs to
 the same repository, and matches the supplied SHA. It also requires successful
@@ -29,8 +38,10 @@ Failures are classified as `TOKEN_INVALID`,
 
 ## Deployment gate
 
-This infrastructure PR contains no deployment job. A later, separately reviewed
-change may add one only after obtaining evidence for the development Supabase
-schema, backup and recovery, RLS and authentication, Cloudflare Access
-enforcement, and payment, supplier, webhook, and email isolation. No production
-database, domain, DNS record, or Worker may be changed by this workflow.
+Deployment is available only as the explicit `deploy-private-preview` operation
+from trusted `main`. It remains protected by the `runfazone-preview`
+environment. The deployment job accepts no PR-provided credentials, uses only
+the immutable OpenNext artifact, requires the verified development project
+`ketdhcmwowzztcdlmris`, and rejects privileged/provider secret assignments in
+the artifact. No production database, domain, DNS record, or Worker may be
+changed by this workflow.
