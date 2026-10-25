@@ -224,7 +224,7 @@ jobs:
             "host=aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com port=${{ steps.postgres_auth.outputs.pooler_port }} user=postgres.${{ steps.identity.outputs.project_id }} dbname=postgres sslmode=require connect_timeout=10" \
             -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/supabase/tests/hosted-behavioral-audit.sql" \
             > "$RUNNER_TEMP/hosted-behavioral-audit.log"
-          grep -Fxq 'HOSTED_BEHAVIORAL_AUDIT_PASS' "$RUNNER_TEMP/hosted-behavioral-audit.log" || {
+          grep -Eq '^[[:space:]]*HOSTED_BEHAVIORAL_AUDIT_PASS[[:space:]]*$' "$RUNNER_TEMP/hosted-behavioral-audit.log" || {
             echo 'BLOCKED: hosted behavioral audit did not emit its pass marker.' >&2
             exit 1
           }
@@ -317,4 +317,5 @@ jobs:
             ${{ runner.temp }}/migrations-after.txt
             ${{ runner.temp }}/hosted-schema-summary.json
             ${{ runner.temp }}/hosted-security-summary.json
+            ${{ runner.temp }}/hosted-behavioral-audit.log
           if-no-files-found: ignore
