@@ -12,9 +12,10 @@ set -euo pipefail
 export PGPASSWORD="$SUPABASE_DB_PASSWORD"
 db_connection="host=$SUPABASE_POOLER_HOST port=$SUPABASE_POOLER_PORT user=$SUPABASE_DB_USER dbname=postgres sslmode=require connect_timeout=10"
 temporary_dump="$RUNNER_TEMP/runfazone-development-data.sql"
+temporary_schema_dump="$RUNNER_TEMP/runfazone-development-schema.sql"
 functions_json="$(mktemp)"
 secrets_json="$(mktemp)"
-trap 'rm -f "$temporary_dump" "$functions_json" "$secrets_json"' EXIT
+trap 'rm -f "$temporary_dump" "$temporary_schema_dump" "$functions_json" "$secrets_json"' EXIT
 
 curl --fail --silent --show-error \
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
@@ -81,9 +82,16 @@ echo "HOSTED_EDGE_FUNCTION_INVENTORY_PASS count=$function_count external_capable
 
 # The export is retained only in the ephemeral runner workspace and removed by
 # the EXIT trap. It proves export capability, not a disposable restore.
+supabase db dump --linked --schema public --file "$temporary_schema_dump"
+test -s "$temporary_schema_dump"
 supabase db dump --linked --data-only --file "$temporary_dump"
 test -s "$temporary_dump"
-echo 'HOSTED_RECOVERY_EXPORT_PASS data_dump_created=ephemeral_and_deleted restore=not_performed'
+echo 'HOSTED_RECOVERY_EXPORT_PASS data_dump_created=ephemeral_and_deleted restore=rehearsal_starting'
+
+SOURCE_DB_CONNECTION="$db_connection" \
+  SCHEMA_DUMP="$temporary_schema_dump" \
+  DATA_DUMP="$temporary_dump" \
+  bash scripts/verify-hosted-development-restore.sh
 
 [[ "$live_payment_configs" = 0 ]] || {
   echo 'HOSTED_INTEGRATION_AUDIT_FAIL=non_test_payment_configuration' >&2
