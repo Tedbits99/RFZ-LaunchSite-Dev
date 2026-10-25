@@ -37,6 +37,11 @@ a { color: inherit; text-decoration: none; }
 .rfz-cinematic-frame { inset: 1.1rem; z-index: 4; border: 1px solid rgba(65,217,255,.35); border-radius: var(--rfz-radius-lg); opacity: 0; box-shadow: inset 0 0 30px rgba(65,217,255,.08); }
 .rfz-cinematic-scene--cinematic-depth .rfz-cinematic-frame { animation: rfz-frame-sweep 1.5s .35s ease-out both; }
 .rfz-cinematic-scene--futuristic-energy .rfz-cinematic-frame { animation: rfz-frame-sweep 1.15s .2s ease-out both; border-color: rgba(155,123,255,.48); }
+.rfz-cinematic-hero[data-paused="true"] .rfz-cinematic-art,
+.rfz-cinematic-hero[data-paused="true"] .rfz-cinematic-scene,
+.rfz-cinematic-hero[data-paused="true"] .rfz-cinematic-depth,
+.rfz-cinematic-hero[data-paused="true"] .rfz-cinematic-energy,
+.rfz-cinematic-hero[data-paused="true"] .rfz-cinematic-frame { animation-play-state: paused; }
 .rfz-cinematic-scrim { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: linear-gradient(90deg, rgba(3,7,24,.84), rgba(3,7,24,.3) 48%, transparent 80%), linear-gradient(0deg, rgba(3,7,24,.42), transparent 45%); }
 .rfz-cinematic-copy { position: absolute; left: 6%; bottom: 13%; max-width: 27rem; color: white; }
 .rfz-cinematic-kicker { display: inline-flex; align-items: center; gap: .45rem; border: 1px solid rgba(65,217,255,.34); border-radius: 999px; background: rgba(65,217,255,.1); padding: .3rem .7rem; color: #b5f4ff; font-size: .63rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; animation: rfz-cinematic-copy-in .72s .25s both; }
