@@ -14,6 +14,7 @@ on:
         options:
           - audit
           - behavioral-audit
+          - customer-security-audit
           - plan
           - apply
         default: audit
@@ -44,6 +45,8 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SUPABASE_PROJECT_ID_SECRET: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_PROJECT_ID_VAR: ${{ vars.SUPABASE_PROJECT_ID }}
       SOURCE_SHA: ${{ inputs.source_sha }}
@@ -93,7 +96,7 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
           if [[ "$OPERATION" = apply && "$APPLY_CONFIRMATION" != APPLY_DEVELOPMENT_MIGRATIONS ]]; then
             echo 'BLOCKED: apply requires the exact confirmation phrase.' >&2
             exit 1
@@ -229,6 +232,20 @@ jobs:
             exit 1
           }
           echo 'HOSTED_BEHAVIORAL_AUDIT_PASS mutation_scope=transaction_rollback external_effects=not_invoked'
+
+      - name: Run real customer session security acceptance
+        if: inputs.operation == 'customer-security-audit'
+        env:
+          SUPABASE_URL: https://${{ steps.identity.outputs.project_id }}.supabase.co
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ANON_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_ANON_KEY.' >&2; exit 1; }
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_SERVICE_ROLE_KEY.' >&2; exit 1; }
+          bash scripts/test-hosted-customer-security.sh
 
       - name: Audit hosted schema without changing data
         if: inputs.operation == 'audit'
