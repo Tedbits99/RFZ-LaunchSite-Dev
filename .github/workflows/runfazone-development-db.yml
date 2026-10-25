@@ -1,0 +1,186 @@
+name: Runfazone development database synchronization
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact reviewed PR #14 commit containing the migration set'
+        required: true
+        type: string
+      operation:
+        description: 'Audit/plan only, or explicitly apply migrations to development'
+        required: true
+        type: choice
+        options:
+          - audit
+          - plan
+          - apply
+        default: audit
+      apply_confirmation:
+        description: 'Required only for apply: APPLY_DEVELOPMENT_MIGRATIONS'
+        required: false
+        type: string
+
+# This workflow is intentionally manual and is expected to run from trusted
+# main-branch workflow code. It imports only migration SQL from the reviewed
+# same-repository source SHA; it never executes scripts from a PR checkout.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: runfazone-development-db
+  cancel-in-progress: false
+
+jobs:
+  synchronize:
+    name: Audit or synchronize development Supabase
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: runfazone-development-db
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID_SECRET: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_PROJECT_ID_VAR: ${{ vars.SUPABASE_PROJECT_ID }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      OPERATION: ${{ inputs.operation }}
+      APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Check out trusted workflow code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.121.0
+
+      - name: Validate protected inputs and project identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_project='ketdhcmwowzztcdlmris'
+          test "$REPOSITORY" = 'Tedbits99/RFZ-LaunchSite-Dev' || {
+            echo 'BLOCKED: unexpected repository.' >&2
+            exit 1
+          }
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo 'BLOCKED: SUPABASE_ACCESS_TOKEN is missing.' >&2; exit 1; }
+          test -n "$SUPABASE_DB_PASSWORD" || { echo 'BLOCKED: SUPABASE_DB_PASSWORD is missing.' >&2; exit 1; }
+          if [[ -n "$SUPABASE_PROJECT_ID_SECRET" && -n "$SUPABASE_PROJECT_ID_VAR" && "$SUPABASE_PROJECT_ID_SECRET" != "$SUPABASE_PROJECT_ID_VAR" ]]; then
+            echo 'BLOCKED: conflicting SUPABASE_PROJECT_ID environment values.' >&2
+            exit 1
+          fi
+          project_id="${SUPABASE_PROJECT_ID_SECRET:-$SUPABASE_PROJECT_ID_VAR}"
+          test "$project_id" = "$expected_project" || {
+            echo 'BLOCKED: configured project is not the approved RunFazone development project.' >&2
+            exit 1
+          }
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          if [[ "$OPERATION" = apply && "$APPLY_CONFIRMATION" != APPLY_DEVELOPMENT_MIGRATIONS ]]; then
+            echo 'BLOCKED: apply requires the exact confirmation phrase.' >&2
+            exit 1
+          fi
+          printf '***%s***\n' "$SUPABASE_ACCESS_TOKEN" "$SUPABASE_DB_PASSWORD" | while IFS= read -r value; do echo "::add-mask::$value"; done
+          project_json="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H 'Accept: application/json' \
+            "https://api.supabase.com/v1/projects/$project_id")"
+          actual_id="$(jq -r '.id // empty' <<<"$project_json")"
+          [[ "$actual_id" = "$expected_project" ]] || {
+            echo 'BLOCKED: Supabase API identity did not match the approved project.' >&2
+            exit 1
+          }
+          jq -r '{id, name, region, status}' <<<"$project_json"
+          echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify reviewed source commit and import migration SQL only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh api "repos/$REPOSITORY/pulls/14")"
+          [[ "$(jq -r '.state' <<<"$pr_json")" = open ]] || { echo 'BLOCKED: PR #14 is not open.' >&2; exit 1; }
+          [[ "$(jq -r '.draft' <<<"$pr_json")" = true ]] || { echo 'BLOCKED: PR #14 must remain draft.' >&2; exit 1; }
+          [[ "$(jq -r '.base.ref' <<<"$pr_json")" = main ]] || { echo 'BLOCKED: PR #14 must target main.' >&2; exit 1; }
+          [[ "$(jq -r '.head.repo.full_name' <<<"$pr_json")" = "$REPOSITORY" ]] || { echo 'BLOCKED: source must be same-repository.' >&2; exit 1; }
+          [[ "$(jq -r '.head.sha' <<<"$pr_json")" = "$SOURCE_SHA" ]] || { echo 'BLOCKED: source_sha is not the current exact PR #14 head.' >&2; exit 1; }
+          rm -rf "$RUNNER_TEMP/runfazone-migrations"
+          mkdir -p "$RUNNER_TEMP/runfazone-migrations"
+          git archive "$SOURCE_SHA" supabase/migrations | tar -x -C "$RUNNER_TEMP/runfazone-migrations"
+          migration_dir="$RUNNER_TEMP/runfazone-migrations/supabase/migrations"
+          test -d "$migration_dir" || { echo 'BLOCKED: source commit has no migration directory.' >&2; exit 1; }
+          find "$migration_dir" -type f ! -name '*.sql' -print -quit | grep -q . && {
+            echo 'BLOCKED: migration source contains non-SQL files.' >&2
+            exit 1
+          } || true
+          count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$count" = 96 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 96." >&2; exit 1; }
+          echo "SOURCE_MIGRATIONS_VERIFIED count=$count"
+
+      - name: Link to the verified development project
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+        run: supabase link --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Capture hosted migration history before changes
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration list --project-ref "$PROJECT_ID" > "$RUNNER_TEMP/migrations-before.txt"
+          awk 'NF { print }' "$RUNNER_TEMP/migrations-before.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
+
+      - name: Audit hosted schema without changing data
+        if: inputs.operation == 'audit' || inputs.operation == 'plan'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Schema-only dump; no rows are exported and no write command runs.
+          supabase db dump --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" --schema public --file "$RUNNER_TEMP/hosted-public-schema.sql"
+          test -s "$RUNNER_TEMP/hosted-public-schema.sql"
+          echo 'HOSTED_SCHEMA_DUMP_CAPTURED schema=public rows=excluded'
+
+      - name: Apply reviewed migrations to development only
+        if: inputs.operation == 'apply'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf supabase/migrations
+          cp -a "$RUNNER_TEMP/runfazone-migrations/supabase/migrations" supabase/migrations
+          supabase db push --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" --yes
+
+      - name: Verify hosted migration history after operation
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration list --project-ref "$PROJECT_ID" > "$RUNNER_TEMP/migrations-after.txt"
+          awk 'NF { print }' "$RUNNER_TEMP/migrations-after.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
+          if [[ "$OPERATION" != audit ]]; then
+            test -s "$RUNNER_TEMP/migrations-after.txt"
+          fi
+
+      - name: Upload sanitized synchronization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runfazone-development-db-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/migrations-before.txt
+            ${{ runner.temp }}/migrations-after.txt
+          if-no-files-found: ignore
