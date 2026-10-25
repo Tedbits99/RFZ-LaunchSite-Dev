@@ -23,7 +23,11 @@ export NODE_ENV="test"
 
 node "$project_root/scripts/prepare-uiux-browser-fixtures.mjs"
 
-(cd "$project_root" && npm run dev -- --hostname 127.0.0.1 >"$server_log" 2>&1) &
+# Browser acceptance runs against the exact production build produced earlier
+# in the validation job. Using `next dev` here introduced a real mobile-only
+# race: route compilation/HMR could leave the page on the loading surface
+# while auth and theme interactions were already being exercised.
+(cd "$project_root" && npm run start -- --hostname 127.0.0.1 >"$server_log" 2>&1) &
 server_pid=$!
 for _ in $(seq 1 60); do
   if curl --silent --fail "$NEXT_PUBLIC_APP_URL/login" >/dev/null; then break; fi
