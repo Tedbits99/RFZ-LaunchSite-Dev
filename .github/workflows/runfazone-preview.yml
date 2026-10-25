@@ -374,8 +374,34 @@ jobs:
             exit 1
           }
           deploy_log="$RUNNER_TEMP/wrangler-deploy.log"
+          set +e
           npx --yes wrangler@4.151.3 deploy --config wrangler.jsonc --no-bundle \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --name runfazone-preview --message "Runfazone PR14 $APPROVED_SHA" >"$deploy_log" 2>&1
+          deploy_status=$?
+          set -e
+          if (( deploy_status != 0 )); then
+            # Wrangler output is retained only on the runner. Emit a bounded,
+            # redacted diagnostic so permission/configuration failures can be
+            # corrected without exposing credentials or raw deployment logs.
+            if grep -F -- "$CLOUDFLARE_API_TOKEN" "$deploy_log" >/dev/null 2>&1; then
+              echo "CLOUDFLARE_DEPLOY_FAILED: exit_code=$deploy_status diagnostic_withheld_due_to_secret_match." >&2
+            else
+              safe_diagnostic="$(grep -Ei 'error|fail|forbidden|unauthori[sz]ed|permission|account|worker|script|api|code' "$deploy_log" \
+                | head -20 \
+                | sed -E \
+                  -e 's/(Bearer[[:space:]]+|api[_ -]?token[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+                  -e 's#https?://[^[:space:]]+#URL_REDACTED#Ig' \
+                  -e 's/[0-9a-f]{32}/[REDACTED_ID]/Ig' || true)"
+              echo "CLOUDFLARE_DEPLOY_FAILED: exit_code=$deploy_status"
+              if [[ -n "$safe_diagnostic" ]]; then
+                printf '%s\n' "$safe_diagnostic" >&2
+              else
+                echo 'CLOUDFLARE_DEPLOY_FAILED: no safe diagnostic lines were available.' >&2
+              fi
+            fi
+            exit "$deploy_status"
+          fi
           echo 'Cloudflare Worker deployment completed for runfazone-preview; deployment diagnostics redacted.'
 
       - name: Resolve normal and immutable version URLs
