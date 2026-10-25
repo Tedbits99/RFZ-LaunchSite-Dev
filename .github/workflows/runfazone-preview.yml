@@ -414,24 +414,41 @@ jobs:
           api_root='https://api.cloudflare.com/client/v4'
           headers=( -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' )
           script_json="$RUNNER_TEMP/script.json"
+          account_subdomain_json="$RUNNER_TEMP/account-subdomain.json"
+          script_subdomain_json="$RUNNER_TEMP/script-subdomain.json"
           deployments_json="$RUNNER_TEMP/deployments.json"
           version_json="$RUNNER_TEMP/version.json"
           script_http="$(curl --silent --show-error --max-time 30 --output "$script_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")"
           [[ "$script_http" =~ ^2 ]] || { echo "BLOCKED: Worker inventory lookup failed (HTTP $script_http)." >&2; exit 1; }
           jq -e '.success == true' "$script_json" >/dev/null || { echo 'BLOCKED: Worker inventory response was not successful.' >&2; exit 1; }
-          worker_url="$(jq -r '[.result[]? | select(.name == "runfazone-preview") | .subdomain.url][0] // empty' "$script_json")"
-          test -n "$worker_url" || { echo 'BLOCKED: deployed Worker has no workers.dev URL.' >&2; exit 1; }
-          [[ "$worker_url" =~ ^https://runfazone-preview\..+\.workers\.dev$ ]] || { echo 'BLOCKED: Worker URL is not the expected workers.dev hostname.' >&2; exit 1; }
+          jq -e '[.result[]? | select(.name == "runfazone-preview")] | length == 1' "$script_json" >/dev/null || {
+            echo 'BLOCKED: deployed preview Worker was not present exactly once in the Worker inventory.' >&2
+            exit 1
+          }
+
+          account_subdomain_http="$(curl --silent --show-error --max-time 30 --output "$account_subdomain_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain")"
+          [[ "$account_subdomain_http" =~ ^2 ]] || { echo "BLOCKED: Workers account subdomain lookup failed (HTTP $account_subdomain_http)." >&2; exit 1; }
+          jq -e '.success == true' "$account_subdomain_json" >/dev/null || { echo 'BLOCKED: Workers account subdomain response was not successful.' >&2; exit 1; }
+          account_subdomain="$(jq -r '.result.subdomain // empty' "$account_subdomain_json")"
+          [[ "$account_subdomain" =~ ^[a-z0-9-]+$ ]] || { echo 'BLOCKED: Workers account subdomain was missing or malformed.' >&2; exit 1; }
+
+          script_subdomain_http="$(curl --silent --show-error --max-time 30 --output "$script_subdomain_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/runfazone-preview/subdomain")"
+          [[ "$script_subdomain_http" =~ ^2 ]] || { echo "BLOCKED: preview Worker subdomain lookup failed (HTTP $script_subdomain_http)." >&2; exit 1; }
+          jq -e '.success == true and .result.enabled == true and .result.previews_enabled == true' "$script_subdomain_json" >/dev/null || {
+            echo 'BLOCKED: preview Worker workers.dev access is not enabled for normal and versioned URLs.' >&2
+            exit 1
+          }
+          worker_url="https://runfazone-preview.${account_subdomain}.workers.dev"
 
           deployment_http="$(curl --silent --show-error --max-time 30 --output "$deployments_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/runfazone-preview/deployments?per_page=1")"
           [[ "$deployment_http" =~ ^2 ]] || { echo "BLOCKED: deployment inventory lookup failed (HTTP $deployment_http)." >&2; exit 1; }
           version_id="$(jq -r '.result.deployments[0].versions[0].version_id // empty' "$deployments_json")"
-          test -n "$version_id" || { echo 'BLOCKED: latest deployment did not expose a version ID.' >&2; exit 1; }
+          [[ "$version_id" =~ ^[A-Za-z0-9-]+$ ]] || { echo 'BLOCKED: latest deployment did not expose a valid version ID.' >&2; exit 1; }
           version_http="$(curl --silent --show-error --max-time 30 --output "$version_json" --write-out '%{http_code}' "${headers[@]}" "$api_root/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/runfazone-preview/versions/$version_id")"
-          [[ "$version_http" =~ ^2 ]] || { echo "BLOCKED: version URL lookup failed (HTTP $version_http)." >&2; exit 1; }
-          version_url="$(jq -r '[.result.urls[]?][0] // empty' "$version_json")"
-          test -n "$version_url" || { echo 'BLOCKED: deployed version did not expose an immutable URL.' >&2; exit 1; }
-          [[ "$version_url" =~ ^https://.+-runfazone-preview\..+\.workers\.dev$ ]] || { echo 'BLOCKED: version URL is not the expected workers.dev hostname.' >&2; exit 1; }
+          [[ "$version_http" =~ ^2 ]] || { echo "BLOCKED: version lookup failed (HTTP $version_http)." >&2; exit 1; }
+          jq -e '.success == true and .result.id == "'"$version_id"'"' "$version_json" >/dev/null || { echo 'BLOCKED: deployed version identity could not be verified.' >&2; exit 1; }
+          version_url="https://${version_id}-runfazone-preview.${account_subdomain}.workers.dev"
+          [[ "$version_url" =~ ^https://[A-Za-z0-9-]+-runfazone-preview\.[a-z0-9-]+\.workers\.dev$ ]] || { echo 'BLOCKED: version URL is not the expected workers.dev hostname.' >&2; exit 1; }
           printf 'worker_url=%s\n' "$worker_url" >>"$GITHUB_OUTPUT"
           printf 'version_url=%s\n' "$version_url" >>"$GITHUB_OUTPUT"
           echo 'Resolved normal and immutable version URLs; URLs are emitted as workflow outputs for owner review.'
