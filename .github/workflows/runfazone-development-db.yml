@@ -251,7 +251,7 @@ jobs:
                 'authenticated_execute', has_function_privilege('authenticated', p.oid, 'EXECUTE'),
                 'service_role_execute', has_function_privilege('service_role', p.oid, 'EXECUTE')
               ) ORDER BY p.proname, p.oid) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), '[]'::jsonb),
-              'scheduled_jobs', CASE WHEN to_regclass('cron.job') IS NULL THEN 0 ELSE (SELECT count(*) FROM cron.job) END,
+              'scheduled_jobs', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'cron' AND c.relname = 'job'),
               'edge_function_like_http_functions', (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND pg_catalog.pg_get_functiondef(p.oid) ~* '(net\\.(http|http_post|http_get)|https?://)')
             )" > "$RUNNER_TEMP/hosted-security-summary.json"
           test -s "$RUNNER_TEMP/hosted-security-summary.json"
