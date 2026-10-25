@@ -50,15 +50,26 @@ echo 'CLOUDFLARE_ACCESS_ACCOUNT_MATCH: true'
 page=1
 total_pages=1
 api_total_count='unknown'
+apps_pagination='metadata'
 while (( page <= total_pages )); do
   curl_api "/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps?page=$page&per_page=100"
   jq -c '.result[]?' "$response_file" >>"$apps_items"
-  total_pages="$(jq -r '.result_info.total_pages // 1' "$response_file")"
-  api_total_count="$(jq -r '.result_info.total_count // "unknown"' "$response_file")"
-  [[ "$total_pages" =~ ^[0-9]+$ && "$total_pages" -ge 1 ]] || {
-    echo 'CLOUDFLARE_ACCESS_BLOCKED: Access applications pagination metadata was invalid.' >&2
-    exit 1
-  }
+  result_count="$(jq '[.result[]?] | length' "$response_file")"
+  metadata_total_pages="$(jq -r '.result_info.total_pages // empty' "$response_file")"
+  metadata_total_count="$(jq -r '.result_info.total_count // empty' "$response_file")"
+  if [[ "$metadata_total_pages" =~ ^[0-9]+$ && "$metadata_total_pages" -ge 1 ]]; then
+    total_pages="$metadata_total_pages"
+    [[ "$metadata_total_count" =~ ^[0-9]+$ ]] && api_total_count="$metadata_total_count"
+  elif (( result_count < 100 )); then
+    # Some Access application responses omit result_info even though the
+    # endpoint is still page-addressable. A short page is a safe terminal
+    # condition; a full page means another page must be fetched.
+    total_pages="$page"
+    apps_pagination='inferred-from-page-size'
+  else
+    total_pages=$((page + 1))
+    apps_pagination='inferred-from-page-size'
+  fi
   page=$((page + 1))
   (( page <= 101 )) || {
     echo 'CLOUDFLARE_ACCESS_BLOCKED: Access applications pagination exceeded the safety bound.' >&2
@@ -72,7 +83,7 @@ application_total="$(jq 'length' "$response_file")"
 destination_types="$(jq -r '[.[].destinations[]?.type] | unique | if length == 0 then "none" else join(",") end' "$response_file")"
 application_types="$(jq -r '[.[].type // "unknown"] | unique | join(",")' "$response_file")"
 inline_policy_apps="$(jq '[.[] | select(.policies | type == "array")] | length' "$response_file")"
-echo "CLOUDFLARE_ACCESS_API_SUMMARY: application_total=$application_total api_total_count=$api_total_count pages=$total_pages application_types=$application_types destination_types=$destination_types inline_policy_apps=$inline_policy_apps"
+echo "CLOUDFLARE_ACCESS_API_SUMMARY: application_total=$application_total api_total_count=$api_total_count pages=$total_pages pagination=$apps_pagination application_types=$application_types destination_types=$destination_types inline_policy_apps=$inline_policy_apps"
 
 all_workers_count="$(jq '[.[] | select(any(.destinations[]?; .type == "all_workers"))] | length' "$response_file")"
 all_preview_workers_count="$(jq '[.[] | select(any(.destinations[]?; .type == "all_preview_workers"))] | length' "$response_file")"
@@ -106,15 +117,23 @@ jq -e '
 policy_page=1
 policy_total_pages=1
 policy_api_total_count='unknown'
+policy_pagination='metadata'
 while (( policy_page <= policy_total_pages )); do
   curl_api "/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$target_app_id/policies?page=$policy_page&per_page=1000"
   jq -c 'if (.result | type) == "array" then .result[]? elif (.result.policies | type) == "array" then .result.policies[]? else empty end' "$response_file" >>"$policies_items"
-  policy_total_pages="$(jq -r '.result_info.total_pages // 1' "$response_file")"
-  policy_api_total_count="$(jq -r '.result_info.total_count // "unknown"' "$response_file")"
-  [[ "$policy_total_pages" =~ ^[0-9]+$ && "$policy_total_pages" -ge 1 ]] || {
-    echo 'CLOUDFLARE_ACCESS_BLOCKED: Access policy pagination metadata was invalid.' >&2
-    exit 1
-  }
+  policy_result_count="$(jq 'if (.result | type) == "array" then (.result | length) elif (.result.policies | type) == "array" then (.result.policies | length) else 0 end' "$response_file")"
+  policy_metadata_total_pages="$(jq -r '.result_info.total_pages // empty' "$response_file")"
+  policy_metadata_total_count="$(jq -r '.result_info.total_count // empty' "$response_file")"
+  if [[ "$policy_metadata_total_pages" =~ ^[0-9]+$ && "$policy_metadata_total_pages" -ge 1 ]]; then
+    policy_total_pages="$policy_metadata_total_pages"
+    [[ "$policy_metadata_total_count" =~ ^[0-9]+$ ]] && policy_api_total_count="$policy_metadata_total_count"
+  elif (( policy_result_count < 1000 )); then
+    policy_total_pages="$policy_page"
+    policy_pagination='inferred-from-page-size'
+  else
+    policy_total_pages=$((policy_page + 1))
+    policy_pagination='inferred-from-page-size'
+  fi
   policy_page=$((policy_page + 1))
   (( policy_page <= 101 )) || {
     echo 'CLOUDFLARE_ACCESS_BLOCKED: Access policy pagination exceeded the safety bound.' >&2
@@ -130,7 +149,7 @@ if [[ "$(jq 'length' "$response_file")" == 0 ]]; then
   policy_source='inline-application-response'
 fi
 
-echo "CLOUDFLARE_ACCESS_POLICY_SUMMARY: policy_total=$(jq 'length' "$response_file") api_total_count=$policy_api_total_count pages=$policy_total_pages source=$policy_source"
+echo "CLOUDFLARE_ACCESS_POLICY_SUMMARY: policy_total=$(jq 'length' "$response_file") api_total_count=$policy_api_total_count pages=$policy_total_pages pagination=$policy_pagination source=$policy_source"
 
 # Cloudflare's documented email rule is {email:{email:"..."}}. Some API
 # responses use the legacy {_type:"email",email:"..."} representation. Both
