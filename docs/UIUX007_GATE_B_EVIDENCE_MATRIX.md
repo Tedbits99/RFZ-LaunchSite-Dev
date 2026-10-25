@@ -6,7 +6,7 @@ operation, email, or webhook.
 
 | Requirement | Evidence | Status | Next evidence/action |
 |---|---|---|---|
-| PR exact head and Gate A checks | Browser regression fixes are at `1eb2344723f597ba5fba8e6eb8b3e78b5eae2fde`; local focused theme checks pass on desktop/mobile; fresh GitHub exact-head runs are required | UNVERIFIED | Record terminal conclusions before relying on this row |
+| PR exact head and Gate A checks | PR #14 current head is `08d741736492c49fa01541d22b95dd3c452175f0`; browser regression fixes are included; local focused theme checks pass on desktop/mobile; fresh GitHub exact-head runs are required | UNVERIFIED | Record terminal conclusions before relying on this row |
 | Cloudflare account authorization | Preflight run `40146567430` | PASS | Preserve environment restriction |
 | OpenNext artifact and privileged-secret scan | Preflight build job passed | PASS | No deploy authorization implied |
 | Existing Supabase project identity | Project `ketdhcmwowzztcdlmris`, URL recorded in prior project-scoped audit | PASS (historical) | Owner-confirm current identity |
