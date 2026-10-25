@@ -387,11 +387,21 @@ jobs:
             exit 1
           }
           deploy_log="$RUNNER_TEMP/wrangler-deploy.log"
-          set +e
-          npx --yes wrangler@4.151.3 deploy --config wrangler.jsonc \
-            --name runfazone-preview --message "Runfazone PR14 $APPROVED_SHA" >"$deploy_log" 2>&1
-          deploy_status=$?
-          set -e
+          deploy_status=1
+          for attempt in 1 2; do
+            set +e
+            npx --yes wrangler@4.151.3 deploy --config wrangler.jsonc \
+              --name runfazone-preview --message "Runfazone PR14 $APPROVED_SHA" >"$deploy_log" 2>&1
+            deploy_status=$?
+            set -e
+            (( deploy_status == 0 )) && break
+            if (( attempt == 1 )) && grep -Fq '[code: 10013]' "$deploy_log"; then
+              echo 'Cloudflare asset-upload-session returned transient API code 10013; retrying once after backoff.' >&2
+              sleep 10
+              continue
+            fi
+            break
+          done
           if (( deploy_status != 0 )); then
             # Wrangler output is retained only on the runner. Emit a bounded,
             # redacted diagnostic so permission/configuration failures can be
