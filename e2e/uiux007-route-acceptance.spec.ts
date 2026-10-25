@@ -157,6 +157,14 @@ test.describe('UIUX-007 anonymous authorization boundaries', () => {
         // of treating a missing response as success.
         await expect(page.locator('[data-route-denial="not-found"]')).toBeVisible();
       }
+      // The App Router can stream the shared loading boundary before the
+      // server layout completes its auth check. Wait for that observable
+      // boundary to resolve; do not treat the loading shell as authorization
+      // denial and do not use a fixed delay.
+      await page.locator('main[aria-label="Loading page"]').waitFor({
+        state: 'detached',
+        timeout: 30_000,
+      }).catch(() => undefined);
       // AdminLayout returns the framework not-found surface for anonymous
       // requests. This intentionally avoids exposing admin route existence;
       // the response is 200 in Next's App Router despite the not-found UI.

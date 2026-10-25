@@ -83,7 +83,8 @@ ORDER BY p.proname, arguments;
 SELECT n.nspname AS schema_name,
        p.proname AS function_name,
        pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
-       pg_catalog.pg_get_functiondef(p.oid) AS definition
+       length(pg_catalog.pg_get_functiondef(p.oid)) AS definition_length,
+       pg_catalog.pg_get_functiondef(p.oid) ~* '(service_role|anon_key|secret|token|password|api[_ -]?key|https?://)' AS definition_needs_local_review
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public'
@@ -117,8 +118,11 @@ SELECT to_regclass('cron.job') AS cron_job_relation,
        to_regclass('net.http_request_queue') AS net_request_queue_relation,
        to_regclass('vault.secrets') AS vault_secrets_relation;
 
--- If cron.job exists, run this separate SELECT in the same read-only session:
--- SELECT jobid, schedule, command, active FROM cron.job ORDER BY jobid;
+-- If cron.job exists, run this metadata-only SELECT in the same read-only
+-- session. Never export command text: it can contain URLs or credentials.
+-- SELECT jobid, schedule, active, length(command) AS command_length,
+--        command ~* '(secret|token|password|api[_ -]?key|https?://)' AS command_needs_local_review
+-- FROM cron.job ORDER BY jobid;
 
 -- 6. Integration-specific object presence only; no customer or secret values.
 SELECT object_name,

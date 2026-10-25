@@ -6,7 +6,7 @@ operation, email, or webhook.
 
 | Requirement | Evidence | Status | Next evidence/action |
 |---|---|---|---|
-| PR exact head and Gate A checks | PR #14 at `fe7086da218266971a2b5ce292d283e039a2bca4`; the fresh exact-head Frontend run is `40147219307` and Development run is `40147219196` (both were still running when this matrix was prepared) | UNVERIFIED | Record terminal conclusions before relying on this row |
+| PR exact head and Gate A checks | PR #14 at `f3de5d8d5fa252a6baf4214966437bd361f3688e`; Frontend run `40147705548` passed; Development run `40147707434` failed with 82/84 browser tests because the admin route was still on the loading boundary and the mobile theme-ready marker was never set | FAIL | Fix both browser regressions and validate the new exact head |
 | Cloudflare account authorization | Preflight run `40146567430` | PASS | Preserve environment restriction |
 | OpenNext artifact and privileged-secret scan | Preflight build job passed | PASS | No deploy authorization implied |
 | Existing Supabase project identity | Project `ketdhcmwowzztcdlmris`, URL recorded in prior project-scoped audit | PASS (historical) | Owner-confirm current identity |
@@ -21,6 +21,13 @@ operation, email, or webhook.
 | Email isolation | Local tests and secret-name inventory only | BLOCKED | Verify sink/test recipient and disabled production SMTP delivery |
 | Cloudflare Access all traffic | No Worker/hostname exists; account policy unavailable to this session | UNVERIFIED | Owner protects exact hostname and every alternate/version URL |
 | Anonymous denial | Not executable before a protected Worker exists | BLOCKED | After authorized deployment, test unauthenticated 401/Access denial |
+
+The failed browser evidence is retained in GitHub run `40147707434`. Its
+screenshots show the shared loading/compiling surface, with no admin data
+rendered. The remediation waits for that observable loading boundary to
+resolve before checking the server-side not-found marker, and sets the theme
+ready marker in the existing synchronous boot script so mobile hydration does
+not gate the preference contract.
 
 ## Owner-provided evidence package
 

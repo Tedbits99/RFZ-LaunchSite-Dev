@@ -11,5 +11,5 @@ export function resolveTheme(value: string | null | undefined): Theme {
 }
 
 export function themeBootScript(): string {
-  return `(function(){try{var k=${JSON.stringify(THEME_STORAGE_KEY)};var v=localStorage.getItem(k);var t=v==='light'||v==='night'||v==='dark'?v:'dark';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='light'?'light':'dark'}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.style.colorScheme='dark'}})()`;
+  return `(function(){try{var k=${JSON.stringify(THEME_STORAGE_KEY)};var v=localStorage.getItem(k);var t=v==='light'||v==='night'||v==='dark'?v:'dark';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='light'?'light':'dark';document.documentElement.dataset.themeReady='true'}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.style.colorScheme='dark';document.documentElement.dataset.themeReady='true'}})()`;
 }
