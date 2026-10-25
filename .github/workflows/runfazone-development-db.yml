@@ -123,7 +123,7 @@ jobs:
             exit 1
           } || true
           count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          test "$count" = 96 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 96." >&2; exit 1; }
+          test "$count" = 97 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 97." >&2; exit 1; }
           echo "SOURCE_MIGRATIONS_VERIFIED count=$count"
 
       - name: Link to the verified development project

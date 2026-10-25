@@ -7,7 +7,7 @@ only supported hosted synchronization path. It uses the protected
 It verifies project `ketdhcmwowzztcdlmris` through the Supabase Management API
 before linking or applying anything. `audit` and `plan` are non-mutating.
 `apply` requires the exact confirmation phrase
-`APPLY_DEVELOPMENT_MIGRATIONS` and applies only the 96 SQL migrations from the
+`APPLY_DEVELOPMENT_MIGRATIONS` and applies only the 97 SQL migrations from the
 verified same-repository PR #14 head. It does not reset the project, mark
 migrations as applied, execute PR scripts, or run production integrations.
 
