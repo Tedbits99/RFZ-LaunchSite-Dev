@@ -23,6 +23,11 @@ export NODE_ENV="test"
 
 node "$project_root/scripts/prepare-uiux-browser-fixtures.mjs"
 
+# NEXT_PUBLIC_* values are embedded into the browser bundle at build time.
+# Rebuild after the disposable Supabase environment is prepared so browser
+# acceptance never receives an artifact with missing or hosted credentials.
+(cd "$project_root" && npm run build)
+
 # Browser acceptance runs against the exact production build produced earlier
 # in the validation job. Using `next dev` here introduced a real mobile-only
 # race: route compilation/HMR could leave the page on the loading surface

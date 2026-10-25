@@ -14,15 +14,32 @@ export default function SecureAdminLoginPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const supabase = createAdminBrowserClient()
-    if (!supabase) { setReady(true); return }
-    supabase.auth.getSession().then(({ data }: { data: { session: unknown | null } }) => {
-      if (data?.session) {
-        router.replace('/admin')
-      } else {
+    let active = true
+    try {
+      const supabase = createAdminBrowserClient()
+      // Render the form immediately. Session discovery is an enhancement and
+      // must never leave an administrator-facing route in an indefinite
+      // loading state when Auth is unavailable or slow.
+      setReady(true)
+      void supabase.auth.getSession()
+        .then(({ data, error }) => {
+          if (!active) return
+          if (data?.session) {
+            router.replace('/admin')
+          } else if (error) {
+            setError('We could not verify an existing admin session. Sign in to continue.')
+          }
+        })
+        .catch(() => {
+          if (active) setError('We could not verify an existing admin session. Sign in to continue.')
+        })
+    } catch {
+      if (active) {
+        setError('Admin authentication is temporarily unavailable. You can retry signing in.')
         setReady(true)
       }
-    })
+    }
+    return () => { active = false }
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,17 +47,16 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
-    const supabase = createAdminBrowserClient()
-    if (!supabase) {
-      setError('Database is not configured.')
+    let supabase: ReturnType<typeof createAdminBrowserClient>
+    try {
+      supabase = createAdminBrowserClient()
+    } catch {
+      setError('Admin authentication is temporarily unavailable. Please try again later.')
       setSubmitting(false)
       return
     }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
 
     if (signInError) {
       setError(
