@@ -9,7 +9,12 @@ before linking or applying anything. After linking, all database commands use
 the linked project explicitly: `migration list --linked`, `db dump --linked`,
 and `db push --linked`. `audit` is schema/history-only; `plan` runs
 `db push --dry-run` against the reviewed migration set and makes no hosted
-change.
+change. The workflow installs and verifies `ripgrep` before scanning migration
+SQL, and fails closed if the scanner is unavailable. It also performs a
+secret-free PostgreSQL `SELECT 1` authentication diagnostic against the
+region-derived Supabase pooler before reading migration history; SQLSTATE
+`28P01` is reported as an owner credential action rather than retried or
+silently accepted.
 Before `apply`, the workflow verifies the latest terminal success of the three
 required exact-head PR checks and rejects destructive DDL or outbound/scheduled
 side effects in the migration source. `apply` also requires the exact phrase
