@@ -132,6 +132,7 @@
 | — | EXCLUDE | `20261019023739_20261019020000_rf_coins_security_remediation.sql.sql` | `34050f1c6214e6388b89fa59521c36e207ef89d168488c18839281caa9d32aa7` | RF Coins deferred pending separate business/security approval | do not install; RF Coins and hosted fulfillment URL remain inactive |
 | 95 | INCLUDE | `20261019110000_restrict_order_archive_rpc.sql` | `cc165f381d0a256b215a4e0907eed7f3488d94e6222a6b1033e3b16999a8075f` | 94. 20261018153746_20261018160000_restore_mlbb_package_count_filter.sql | no outbound target; run in isolated disposable DB |
 | 96 | INCLUDE | `20261019120000_completion_receipt_reconciliation_contract.sql` | `4dc3561332c5c4b604d7e3d880380e076b32b83d691c546f880ec5dd0902b7e2` | 95. 20261019110000_restrict_order_archive_rpc.sql | no outbound target; run in isolated disposable DB |
+| 97 | INCLUDE | `20261025150000_promotions_cinematic_presets.sql` | `26c49a0d13ce22aebec0975005e365ba4c78ed4f2f614689ec7ff0d288af7772` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | additive promotion animation metadata; no outbound target |
 
 ## Execution gates
 
