@@ -7,6 +7,10 @@ on:
         description: 'Exact reviewed PR #14 commit containing the migration set'
         required: true
         type: string
+      cleanup_run_id:
+        description: 'Only for customer-security-cleanup: exact failed run fixture ID'
+        required: false
+        type: string
       operation:
         description: 'Audit/plan only, or explicitly apply migrations to development'
         required: true
@@ -15,6 +19,7 @@ on:
           - audit
           - behavioral-audit
           - customer-security-audit
+          - customer-security-cleanup
           - plan
           - apply
         default: audit
@@ -50,6 +55,7 @@ jobs:
       SUPABASE_PROJECT_ID_SECRET: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_PROJECT_ID_VAR: ${{ vars.SUPABASE_PROJECT_ID }}
       SOURCE_SHA: ${{ inputs.source_sha }}
+      CLEANUP_RUN_ID: ${{ inputs.cleanup_run_id }}
       OPERATION: ${{ inputs.operation }}
       APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
       REPOSITORY: ${{ github.repository }}
@@ -96,7 +102,11 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          if [[ "$OPERATION" = customer-security-cleanup && "$CLEANUP_RUN_ID" != 40167500569 ]]; then
+            echo 'BLOCKED: cleanup is allow-listed only for failed run 40167500569.' >&2
+            exit 1
+          fi
           if [[ "$OPERATION" = apply && "$APPLY_CONFIRMATION" != APPLY_DEVELOPMENT_MIGRATIONS ]]; then
             echo 'BLOCKED: apply requires the exact confirmation phrase.' >&2
             exit 1
@@ -246,6 +256,19 @@ jobs:
           test -n "$SUPABASE_ANON_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_ANON_KEY.' >&2; exit 1; }
           test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_SERVICE_ROLE_KEY.' >&2; exit 1; }
           bash scripts/test-hosted-customer-security.sh
+
+      - name: Verify and clean failed customer security fixtures
+        if: inputs.operation == 'customer-security-cleanup'
+        env:
+          SUPABASE_URL: https://${{ steps.identity.outputs.project_id }}.supabase.co
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_SERVICE_ROLE_KEY.' >&2; exit 1; }
+          bash scripts/cleanup-hosted-customer-security-fixtures.sh "$CLEANUP_RUN_ID"
 
       - name: Audit hosted schema without changing data
         if: inputs.operation == 'audit'
