@@ -30,6 +30,7 @@ on:
           - customer-security-cleanup
           - admin-auth-audit
           - auth-confirmation-audit
+          - auth-confirmation-allowlist
           - auth-confirmation-configure
           - gate-b-audit
           - payment-safety-lockdown
@@ -118,11 +119,11 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-configure || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
           if [[ "$OPERATION" = admin-auth-audit ]]; then
             test -n "$ADMIN_EMAIL" || { echo 'BLOCKED: admin-auth-audit requires admin_email.' >&2; exit 1; }
           fi
-          if [[ "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-configure ]]; then
+          if [[ "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure ]]; then
             [[ "$AUTH_ORIGIN" =~ ^https://pr69-[0-9a-f]{12}-runfazone-preview\.[a-z0-9-]+\.workers\.dev$ ]] || {
               echo 'BLOCKED: auth-confirmation-audit requires the exact protected PR69 candidate origin.' >&2
               exit 1
@@ -142,6 +143,10 @@ jobs:
           fi
           if [[ "$OPERATION" = auth-confirmation-configure && "$APPLY_CONFIRMATION" != CONFIGURE_PR69_EMAIL_CONFIRMATION ]]; then
             echo 'BLOCKED: auth-confirmation-configure requires the exact confirmation phrase.' >&2
+            exit 1
+          fi
+          if [[ "$OPERATION" = auth-confirmation-allowlist && "$APPLY_CONFIRMATION" != CONFIGURE_PR69_AUTH_REDIRECT ]]; then
+            echo 'BLOCKED: auth-confirmation-allowlist requires the exact confirmation phrase.' >&2
             exit 1
           fi
           if [[ "$OPERATION" = admin-bootstrap-lockdown && "$APPLY_CONFIRMATION" != LOCK_FIRST_ADMIN_BOOTSTRAP ]]; then
@@ -283,6 +288,15 @@ jobs:
           APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
         shell: bash
         run: bash scripts/configure-hosted-auth-confirmation.sh
+
+      - name: Configure hosted Auth redirect allowlist for PR69
+        if: inputs.operation == 'auth-confirmation-allowlist'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          AUTH_ORIGIN: ${{ inputs.auth_origin }}
+          APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
+        shell: bash
+        run: bash scripts/configure-hosted-auth-allowlist.sh
 
       - name: Audit the existing admin Auth identity
         if: inputs.operation == 'admin-auth-audit'
@@ -459,7 +473,7 @@ jobs:
           set -euo pipefail
           supabase migration list --linked > "$RUNNER_TEMP/migrations-after.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-after.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
-          if [[ "$OPERATION" != audit && "$OPERATION" != auth-confirmation-audit && "$OPERATION" != auth-confirmation-configure ]]; then
+          if [[ "$OPERATION" != audit && "$OPERATION" != auth-confirmation-audit && "$OPERATION" != auth-confirmation-allowlist && "$OPERATION" != auth-confirmation-configure ]]; then
             test -s "$RUNNER_TEMP/migrations-after.txt"
           fi
 
