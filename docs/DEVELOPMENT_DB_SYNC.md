@@ -37,3 +37,11 @@ tokens, email addresses, or provider credentials, and it cannot change Auth
 configuration. A candidate callback must be added to the project's redirect
 allowlist before hosted confirmation testing; use a narrowly scoped PR69
 wildcard only if it matches the documented Supabase redirect syntax.
+
+`auth-confirmation-configure` is the explicitly confirmed development-only
+operation for this PR69 repair. It preserves the existing redirect rules and
+updates only the narrowly scoped PR69 callback rules plus the Confirm signup
+template. It requires `CONFIGURE_PR69_EMAIL_CONFIRMATION`, reads the settings
+back after the PATCH, and emits only hashes of the two changed values. It does
+not change the production site URL, customer records, database migrations, or
+any provider credentials.
