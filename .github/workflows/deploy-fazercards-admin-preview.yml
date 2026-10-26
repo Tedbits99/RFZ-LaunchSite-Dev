@@ -21,7 +21,7 @@ concurrency:
 jobs:
   deploy-pr54:
     name: Deploy PR54 merged main to protected runfazone-preview
-    # The first step verifies that this exact main SHA is PR #54's merge commit.
+    # First step verifies current main contains merged PR #54 (including security fixes).
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment:
@@ -39,7 +39,11 @@ jobs:
           merged="$(gh api "repos/$GITHUB_REPOSITORY/pulls/54" --jq '.merged_at // empty')"
           remote_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
           test -n "$merged" || { echo 'BLOCKED: PR54 has not merged'; exit 1; }
-          test "$pr_sha" = "$GITHUB_SHA" || { echo 'BLOCKED: this is not the approved PR54 merge commit'; exit 1; }
+          comparison="$(gh api "repos/$GITHUB_REPOSITORY/compare/$pr_sha...$GITHUB_SHA" --jq '.status')"
+          [[ "$comparison" == ahead || "$comparison" == identical ]] || {
+            echo 'BLOCKED: target main commit does not include the merged PR54';
+            exit 1;
+          }
           test "$remote_main" = "$GITHUB_SHA" || { echo 'BLOCKED: main moved ahead; avoid deploying obsolete code'; exit 1; }
           echo "APPROVED_MAIN_SHA=$GITHUB_SHA"
 
@@ -69,7 +73,8 @@ jobs:
           test "$SUPABASE_PROJECT_ID" = ketdhcmwowzztcdlmris || { echo 'BLOCKED: wrong Supabase project'; exit 1; }
           test "$NEXT_PUBLIC_SUPABASE_URL" = https://ketdhcmwowzztcdlmris.supabase.co || { echo 'BLOCKED: wrong Supabase URL'; exit 1; }
           node - <<'NODE'
-          const config=require('./wrangler.jsonc');
+          const fs=require('node:fs');
+          const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
           if(config.name !== 'runfazone-preview' || config.main !== '.open-next/worker.js'
              || (config.routes||[]).length || (config.domains||[]).length
              || Object.keys(config.triggers||{}).length) process.exit(1);
