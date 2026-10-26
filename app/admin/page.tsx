@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 import GamesVisibilityPanel from './GamesVisibilityPanel';
+import FazerCardsWebhookFeed from './suppliers/FazerCardsWebhookFeed';
 import Link from 'next/link';
 import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, Package, ShoppingCart, Users, XCircle } from 'lucide-react';
 import { MetricCard, PageHeader, StatusBadge, Surface } from '@/components/admin/ui';
@@ -153,6 +154,7 @@ export default async function AdminDashboard() {
           <GamesVisibilityPanel initialGames={games.map((g) => ({ id: g.id, name: g.name, slug: g.slug, is_active: g.is_active, is_featured: g.is_featured }))} />
         </div>
       </div>
+      <div className="mt-6"><FazerCardsWebhookFeed compact /></div>
     </main>
   );
 }
