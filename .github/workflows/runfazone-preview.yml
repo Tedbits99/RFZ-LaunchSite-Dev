@@ -160,11 +160,19 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          # Auth callback origins are build-time configuration. Keep this
+          # allowlisted to the already deployed protected Worker origin; do
+          # not derive it from an arbitrary request Host header.
+          NEXT_PUBLIC_APP_URL: https://runfazone-preview.mondigoted732.workers.dev
         shell: bash
         run: |
           set -euo pipefail
           test -n "$NEXT_PUBLIC_SUPABASE_URL" || { echo 'BLOCKED: development NEXT_PUBLIC_SUPABASE_URL is missing from runfazone-preview.' >&2; exit 1; }
           test -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" || { echo 'BLOCKED: development NEXT_PUBLIC_SUPABASE_ANON_KEY is missing from runfazone-preview.' >&2; exit 1; }
+          test "$NEXT_PUBLIC_APP_URL" = 'https://runfazone-preview.mondigoted732.workers.dev' || {
+            echo 'BLOCKED: preview auth origin is not the approved protected Worker origin.' >&2
+            exit 1
+          }
           [[ "$NEXT_PUBLIC_SUPABASE_URL" == https://ketdhcmwowzztcdlmris.supabase.co ]] || {
             echo 'BLOCKED: preview build is not bound to the approved development Supabase project.' >&2
             exit 1
@@ -174,6 +182,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_APP_URL: https://runfazone-preview.mondigoted732.workers.dev
         run: npm run cloudflare:build
 
       - name: Verify preview target and package contents
