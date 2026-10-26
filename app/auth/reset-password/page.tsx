@@ -107,11 +107,11 @@ export default function ResetPasswordPage() {
         // destination. Explicitly allowlist the two internal sign-in routes:
         // forged response destinations can never become open redirects.
         const body = await response.json().catch(() => null) as { signInPath?: unknown } | null;
-        if (body?.signInPath !== '/login' && body?.signInPath !== '/secure-admin-login') {
+        const destination = body?.signInPath;
+        if (destination !== '/login' && destination !== '/secure-admin-login') {
           setState('success');
           return;
         }
-        const destination = body.signInPath;
         setSignInPath(destination);
         setState('success');
         window.location.replace(destination);
