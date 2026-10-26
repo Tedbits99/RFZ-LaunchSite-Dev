@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Lock, Mail, ShieldCheck } from 'lucide-react'
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import ThemeSelector from '@/components/ThemeSelector'
 
 export default function SecureAdminLoginPage() {
   const router = useRouter()
@@ -68,6 +69,7 @@ export default function SecureAdminLoginPage() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#030718] px-5 text-slate-100">
       <div className="w-full max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
         <div className="mb-6 text-center">
           <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white">
             <ShieldCheck size={24} />

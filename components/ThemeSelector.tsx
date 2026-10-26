@@ -12,8 +12,8 @@ const options: { value: Theme; label: string; Icon: typeof Sun }[] = [
 
 export default function ThemeSelector({ compact = false }: { compact?: boolean }) {
   const { theme, setTheme } = useTheme();
-  return <fieldset className={`theme-selector inline-flex items-center gap-1 rounded-xl border border-[var(--rfz-line)] bg-[var(--rfz-surface)] p-1 shadow-sm ${compact ? '' : 'px-1.5'}`} aria-label="Appearance">
+  return <fieldset data-theme-selector className={`theme-selector inline-flex items-center gap-1 rounded-xl border border-[var(--rfz-line)] bg-[var(--rfz-surface)] p-1 shadow-sm ${compact ? '' : 'px-1.5'}`} aria-label="Appearance">
     <legend className="sr-only">Appearance</legend>
-    {options.map(({ value, label, Icon }) => <button key={value} type="button" aria-pressed={theme === value} aria-label={`${label} mode`} title={`${label} mode`} onClick={() => setTheme(value)} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold transition ${theme === value ? 'bg-[var(--rfz-accent-soft)] text-[var(--rfz-accent)] shadow-sm' : 'text-[var(--rfz-muted)] hover:bg-[var(--rfz-surface-raised)] hover:text-[var(--rfz-text)]'}`}><Icon size={14} aria-hidden="true" />{!compact && <span>{label}</span>}</button>)}
+    {options.map(({ value, label, Icon }) => <button key={value} type="button" aria-pressed={theme === value} aria-label={`${label} mode`} title={`${label} mode`} onClick={() => setTheme(value)} className={`inline-flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold transition ${theme === value ? 'bg-[var(--rfz-accent-soft)] text-[var(--rfz-accent)] shadow-sm' : 'text-[var(--rfz-muted)] hover:bg-[var(--rfz-surface-raised)] hover:text-[var(--rfz-text)]'}`}><Icon size={14} aria-hidden="true" />{!compact && <span>{label}</span>}</button>)}
   </fieldset>;
 }

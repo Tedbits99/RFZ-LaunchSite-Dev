@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, TextInput } from '@/components/ui';
+import ThemeSelector from '@/components/ThemeSelector';
 
 export default function Login() {
   const router = useRouter();
@@ -47,6 +48,7 @@ export default function Login() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
       <div className="surface w-full max-w-sm p-6 sm:p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
         <h1 className="font-display text-2xl font-bold">Sign in</h1>
         <p className="mt-1 text-sm text-slate-400">Access your RunFazone account and order history.</p>
         <form className="mt-6 space-y-3" onSubmit={submit}>

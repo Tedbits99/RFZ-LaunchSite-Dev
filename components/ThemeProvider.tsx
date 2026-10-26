@@ -29,6 +29,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
 export function useTheme() {
   const context = useContext(ThemeContext);
-  if (!context) throw new Error('useTheme must be used inside ThemeProvider');
+  // A few server-rendered route probes render a page component in isolation.
+  // Keep the selector presentational in that context while the real app still
+  // receives the stateful provider from the root layout.
+  if (!context) {
+    return {
+      theme: 'dark' as Theme,
+      setTheme: (next: Theme) => {
+        if (typeof document !== 'undefined') document.documentElement.dataset.theme = next;
+        if (typeof window !== 'undefined') window.localStorage.setItem(THEME_STORAGE_KEY, next);
+      },
+    };
+  }
   return context;
 }

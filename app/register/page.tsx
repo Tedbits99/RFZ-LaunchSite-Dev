@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { Mail, Lock, UserRound, CheckCircle2, AlertCircle } from 'lucide-react';
+import ThemeSelector from '@/components/ThemeSelector';
 
 type SubmitState = 'idle' | 'pending' | 'success' | 'error';
 
@@ -67,6 +68,7 @@ export default function Register() {
   return (
     <main className="rfz-auth-page grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
       <div className="w-full max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
         {submitState === 'success' ? (
           <div className="text-center">
             <CheckCircle2 size={36} className="mx-auto text-emerald-400" />

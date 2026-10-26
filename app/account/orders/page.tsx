@@ -4,6 +4,7 @@ import SiteFooter from '@/components/SiteFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
+import ThemeSelector from '@/components/ThemeSelector';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,8 +37,8 @@ export default async function AccountOrders() {
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">
       <header className="border-b border-[#14203a] bg-[#050a1b]/90">
-        <div className="mx-auto max-w-[1180px] px-5 py-4">
-          <a href="/account" className="text-xs text-cyan-300">← Account</a>
+        <div className="mx-auto flex max-w-[1180px] items-center justify-between gap-4 px-5 py-4">
+          <a href="/account" className="text-xs text-cyan-300">← Account</a><ThemeSelector compact={false} />
         </div>
       </header>
       <div className="mx-auto max-w-[1180px] px-5 py-10">

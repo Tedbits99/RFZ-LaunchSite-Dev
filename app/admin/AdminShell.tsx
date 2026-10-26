@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { Activity, Bell, LogOut, Menu, Search } from 'lucide-react'
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
 import AdminNavigation from '@/components/admin/AdminNavigation'
+import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets'
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const [navigationOpen, setNavigationOpen] = useState(false)
@@ -23,10 +24,10 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 <Menu size={18} />
               </button>
               <img
-                src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1789837643/R_logo_1_au2g5c.png"
+                src={RFZ_PUBLIC_ASSETS.logo}
                 alt="RunFazone"
-                width={1701}
-                height={378}
+                width={3772}
+                height={840}
                 className="h-10 w-auto object-contain"
               />
               <div className="hidden sm:block">

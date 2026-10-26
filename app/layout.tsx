@@ -3,7 +3,6 @@ import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import { themeBootScript } from '@/lib/theme';
 import { ThemeProvider } from '@/components/ThemeProvider';
-import ThemeSelector from '@/components/ThemeSelector';
 
 // Self-hosted latin subsets; avoids build-time Google Fonts fetches that fail
 // on network-restricted build machines (ETIMEDOUT in Netlify builds).
@@ -35,5 +34,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en" data-theme="dark" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: themeBootScript() }} /></head><body className={`${inter.className} ${spaceGrotesk.variable}`}><ThemeProvider><ThemeSelector /><div className="rfz-theme-content">{children}</div></ThemeProvider></body></html>;
+  return <html lang="en" data-theme="dark" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: themeBootScript() }} /></head><body className={`${inter.className} ${spaceGrotesk.variable}`}><ThemeProvider><div className="rfz-theme-content">{children}</div></ThemeProvider></body></html>;
 }
