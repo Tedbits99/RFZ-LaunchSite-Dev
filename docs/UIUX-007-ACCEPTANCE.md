@@ -7,7 +7,7 @@ current application. `PARTIAL` means the route has working product UI but
 still needs route-specific visual or protected/browser evidence; it is not a
 claim that the route is complete.
 
-Evidence references: local test suite (857 passed, 1 skipped), TypeScript,
+Evidence references: local test suite (890 passed, 1 skipped), TypeScript,
 lint, Next/OpenNext builds, the public browser smoke run documented in the
 task report, and the exact-head GitHub validations listed below. Protected
 routes require configured Supabase credentials and an authorized test account
@@ -52,7 +52,7 @@ it must not be silently treated as the missing historical specification.
 
 - PR #13 is merged at `886f1f8864acf727ec5649203c5bcd564d6a56c3`.
 - PR #14 is intentionally draft at
-  `9ef5fbc67977d19b6f6620d9be55eca7c0af1bc0`.
+  `e5444f1804f3f7fa4befdf30dc0220794124ab45`.
 - The previous exact-head validation at
   `c759e48fd617387f09e608fb0c86de840d96ac77` had frontend and production
   release safety PASS, but the development run failed in browser acceptance.
@@ -61,9 +61,11 @@ it must not be silently treated as the missing historical specification.
   a customer fixture redirect under the large parallel fan-out. The browser
   artifact is available from
   [Development validation run 39862775809](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39862775809/artifacts/12462688150).
-- The follow-up `9ef5fbc` validation is still in progress. Frontend validation
-  and production release safety have passed; isolated Chromium/browser,
-  database-security, and legacy-upgrade conclusions are not yet terminal.
+- The current exact-head Frontend validation run `40263570276` and
+  Development validation run `40263570558` are terminal SUCCESS. The
+  Development run includes successful isolated database/security, browser,
+  legacy-upgrade, and production release-safety jobs; its browser result was
+  101 passed and 3 skipped.
 - The route harness now runs public routes and protected-route denial checks as
   sequential journeys. Public routes passed on both Chromium desktop and
   mobile in the prior run, but this evidence does not promote protected routes
@@ -90,6 +92,18 @@ it must not be silently treated as the missing historical specification.
   approved disposable Supabase credentials or test identities. CI provisions
   and tears down its own isolated stack and synthetic users. No production
   account, secret, or real transaction was used.
+
+## P0 authentication evidence
+
+The current head routes admin sign-in through a server-side endpoint that
+verifies the Auth user against the exact `public.admins.id`, normalized email,
+active status, and `ADMIN`/`SUPER_ADMIN` role before redirecting to `/admin`.
+Native pre-hydration submission and the hydrated JSON flow are both covered by
+regression tests. Live owner-admin sign-in, password-reset email delivery,
+Auth callback settings, and same-browser/fresh-browser hosted recovery remain
+UNVERIFIED because this environment has no authorized live Supabase/Auth
+binding or owner mailbox session. The earlier hosted preview result is
+historical and is not evidence that this exact head is deployed.
 
 ## Route identifiers covered by this matrix
 

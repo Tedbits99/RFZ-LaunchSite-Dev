@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
         // via data.session. getUser() is used only to confirm the identity.
         const { data: exchangeData, error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
         if (recoveryExchangeError) return redirectToResetPassword(origin);
-        return issueRecoveryProof(recovery, origin, exchangeData?.session);
+        return await issueRecoveryProof(recovery, origin, exchangeData?.session);
       }
 
       // Some Supabase projects retain the token-hash email template rather
@@ -120,7 +120,7 @@ export async function GET(request: NextRequest) {
         token_hash: tokenHash!,
       });
       if (otpError) return redirectToResetPassword(origin);
-      return issueRecoveryProof(recovery, origin, otpData?.session);
+      return await issueRecoveryProof(recovery, origin, otpData?.session);
     }
 
     // Token-hash verification is recovery-only. Confirmation flows continue
@@ -148,6 +148,10 @@ export async function GET(request: NextRequest) {
     if (result.status === 'active' && result.error === null) return redirectToConfirmation('success');
     return redirectToConfirmation('error');
   } catch {
-    return redirectToConfirmation('error');
+    // Recovery failures must stay inside the recovery boundary. Falling
+    // through to signup confirmation can make an expired, cross-device, or
+    // provider-error recovery link look like a registration failure and can
+    // leave the wrong flow's UI/state in play.
+    return recovery ? recoveryClientError(origin) : redirectToConfirmation('error');
   }
 }
