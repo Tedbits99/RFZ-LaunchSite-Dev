@@ -6,6 +6,7 @@ import { Activity, RefreshCcw, Radio, ShieldCheck } from 'lucide-react';
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+import { categorizeFazerCardsEvent, titleForFazerCardsEvent, summarizeFazerCardsStatus } from '@/lib/suppliers/fazercardsEvents';
 
 type SupplierEvent = {
   id: string;
@@ -21,6 +22,7 @@ type SupplierEvent = {
 
 export default function FazerCardsWebhookFeed({ compact = false }: { compact?: boolean }) {
   const [events, setEvents] = useState<SupplierEvent[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'created' | 'status'>('all');
   const [error, setError] = useState('');
   const [live, setLive] = useState(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -76,6 +78,13 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
     };
   }, [refresh]);
 
+  const newOrderCount = events.filter(event => categorizeFazerCardsEvent(event.event_type) === 'created').length;
+  const statusChangeCount = events.filter(event => categorizeFazerCardsEvent(event.event_type) === 'status').length;
+  const filteredEvents = selectedCategory === 'all'
+    ? events
+    : events.filter(event => categorizeFazerCardsEvent(event.event_type) === selectedCategory);
+  const shownEvents = compact ? filteredEvents.slice(0, 5) : filteredEvents;
+
   return (
     <section className="rounded-xl border border-[#253451] bg-[#0b1225] p-4 sm:p-5" aria-label="FazerCards supplier activity">
       <header className="mb-4 flex items-center justify-between gap-2">
@@ -98,24 +107,50 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
         {live ? 'Realtime connected' : 'Checking every 10 seconds'}
         {syncedAt && <span>· Last sync {new Date(syncedAt).toLocaleTimeString()}</span>}
       </p>
+      <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Filter FazerCards supplier event type">
+        {([
+          { value: 'all', label: 'All activity', count: events.length },
+          { value: 'created', label: 'New orders', count: newOrderCount },
+          { value: 'status', label: 'Order status changes', count: statusChangeCount },
+        ] as const).map(filter => (
+          <button
+            key={filter.value}
+            type="button"
+            aria-pressed={selectedCategory === filter.value}
+            onClick={() => setSelectedCategory(filter.value)}
+            className={`rounded-lg border px-3 py-2 text-xs transition ${
+              selectedCategory === filter.value
+                ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200'
+                : 'border-[#253451] text-slate-400 hover:border-cyan-400/40 hover:text-slate-200'
+            }`}
+          >
+            {filter.label} <span className="font-semibold tabular-nums">({filter.count})</span>
+          </button>
+        ))}
+      </div>
+      <p className="mb-3 text-[11px] text-slate-500">
+        Counts reflect the latest 30 supplier events, including orders created in FazerCards outside RunFazone.
+      </p>
       {error && <p role="status" className="mb-3 rounded-lg bg-amber-900/20 px-3 py-2 text-xs text-amber-300">{error}</p>}
       {events.length === 0 ? (
         <p className="rounded-lg border border-dashed border-[#253451] p-4 text-xs text-slate-400">
           No signed FazerCards events received yet. Configure the webhook secret and use Send test in the reseller panel.
         </p>
+      ) : shownEvents.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-[#253451] p-4 text-xs text-slate-400">No matching supplier events in the latest activity.</p>
       ) : (
         <div className="space-y-2" aria-live="polite">
-          {(compact ? events.slice(0, 5) : events).map((event) => (
+          {shownEvents.map((event) => (
             <div key={event.id} className="rounded-lg border border-[#253451] bg-[#070e1e] px-3 py-3 text-xs">
               <div className="flex items-start justify-between gap-2">
-                <p className="font-semibold text-slate-200">{event.event_type}</p>
+                <p className="font-semibold text-slate-200">{titleForFazerCardsEvent(event.event_type)}</p>
                 <time className="shrink-0 text-[10px] text-slate-500" dateTime={event.received_at}>
                   {new Date(event.received_at).toLocaleTimeString()}
                 </time>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-400">
                 {event.supplier_reference && <span className="font-mono">{event.supplier_reference}</span>}
-                {event.supplier_status && <span className="rounded bg-cyan-400/10 px-2 py-0.5 text-cyan-200">{event.supplier_status}</span>}
+                {(event.supplier_status || event.previous_status) && <span className="rounded bg-cyan-400/10 px-2 py-0.5 text-cyan-200">{summarizeFazerCardsStatus(event.previous_status, event.supplier_status)}</span>}
                 {event.linked_order_id
                   ? <Link className="text-cyan-300 hover:underline" href={`/admin/orders/${event.linked_order_id}`}>RunFazone order</Link>
                   : <span>Supplier account activity</span>}
