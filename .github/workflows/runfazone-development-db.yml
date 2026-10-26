@@ -33,6 +33,7 @@ on:
           - auth-confirmation-allowlist
           - auth-confirmation-configure
           - gate-b-audit
+          - integration-safety-lockdown
           - payment-safety-lockdown
           - admin-bootstrap-lockdown
           - plan
@@ -119,7 +120,7 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure || "$OPERATION" = gate-b-audit || "$OPERATION" = integration-safety-lockdown || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
           if [[ "$OPERATION" = admin-auth-audit ]]; then
             test -n "$ADMIN_EMAIL" || { echo 'BLOCKED: admin-auth-audit requires admin_email.' >&2; exit 1; }
           fi
@@ -139,6 +140,10 @@ jobs:
           fi
           if [[ "$OPERATION" = payment-safety-lockdown && "$APPLY_CONFIRMATION" != DISABLE_DEVELOPMENT_LIVE_PAYMENTS ]]; then
             echo 'BLOCKED: payment-safety-lockdown requires the exact confirmation phrase.' >&2
+            exit 1
+          fi
+          if [[ "$OPERATION" = integration-safety-lockdown && "$APPLY_CONFIRMATION" != DEPLOY_DEVELOPMENT_INTEGRATION_GUARD ]]; then
+            echo 'BLOCKED: integration-safety-lockdown requires the exact confirmation phrase.' >&2
             exit 1
           fi
           if [[ "$OPERATION" = auth-confirmation-configure && "$APPLY_CONFIRMATION" != CONFIGURE_PR69_EMAIL_CONFIRMATION ]]; then
@@ -380,6 +385,28 @@ jobs:
             SUPABASE_POOLER_PORT="$POOLER_PORT" \
             SUPABASE_DB_USER="postgres.${PROJECT_ID}" \
             bash scripts/audit-hosted-integrations.sh
+
+      - name: Deploy the reviewed supplier-test safety guard
+        if: inputs.operation == 'integration-safety-lockdown'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
+            echo 'BLOCKED: reviewed supplier-test function source is missing.' >&2
+            exit 1
+          }
+          rg -q 'isActiveSuperAdmin' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
+            echo 'BLOCKED: supplier-test authorization guard is missing from the reviewed source.' >&2
+            exit 1
+          }
+          rg -q 'Supplier integration is disabled' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
+            echo 'BLOCKED: supplier-test development isolation guard is missing from the reviewed source.' >&2
+            exit 1
+          }
+          supabase functions deploy fazercards-test --project-ref "$PROJECT_ID" --no-verify-jwt
+          echo 'HOSTED_SUPPLIER_TEST_GUARD_DEPLOY_PASS function=fazercards-test jwt_verification=handler_admin_guard provider_disabled_without_enabled_supplier=true'
 
       - name: Disable automated development PayMongo configuration
         if: inputs.operation == 'payment-safety-lockdown'

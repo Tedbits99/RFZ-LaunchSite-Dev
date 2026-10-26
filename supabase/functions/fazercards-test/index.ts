@@ -1,3 +1,6 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { isActiveSuperAdmin } from "./authorization.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -28,13 +31,77 @@ Deno.serve(async (req: Request) => {
   try {
     const url = new URL(req.url);
     const path = url.pathname.replace("/fazercards-test", "");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const apiKey = Deno.env.get("SUPPLIER_FAZERCARDS_API_KEY");
 
-    if (!apiKey) {
+    if (!supabaseUrl || !serviceKey) {
       return new Response(
-        JSON.stringify({ error: "SUPPLIER_FAZERCARDS_API_KEY is not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: "Supplier test integration is unavailable" }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    // This endpoint can read supplier data and can create a real supplier
+    // order. Supabase verify_jwt is disabled for this function, so enforce the
+    // caller boundary here before any provider request. Service-role tokens
+    // are not accepted as caller credentials; the caller must be an active
+    // SUPER_ADMIN Auth identity mapped to public.admins.
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    if (!bearer || bearer === serviceKey) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const db = createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: authData, error: authError } = await db.auth.getUser(bearer);
+    if (authError || !authData.user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { data: admin, error: adminError } = await db
+      .from("admins")
+      .select("role, is_active")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+    if (adminError) {
+      return new Response(JSON.stringify({ error: "Authorization unavailable" }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!isActiveSuperAdmin(admin)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Development isolation is enforced by the hosted supplier configuration,
+    // not by the presence or absence of a secret. Do not call FazerCards when
+    // no enabled custom FazerCards supplier exists.
+    const { data: supplier, error: supplierError } = await db
+      .from("suppliers")
+      .select("id")
+      .eq("code", "fazercards")
+      .eq("adapter", "custom")
+      .eq("enabled", true)
+      .maybeSingle();
+    if (supplierError) {
+      return new Response(JSON.stringify({ error: "Supplier configuration unavailable" }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!supplier) {
+      return new Response(JSON.stringify({ error: "Supplier integration is disabled" }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: "Supplier test integration is unavailable" }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // GET /balance
