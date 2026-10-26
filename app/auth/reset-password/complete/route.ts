@@ -93,6 +93,27 @@ export async function POST(request: NextRequest) {
     });
     if (!initialProof.ok) return json({ error: GENERIC_INVALID }, 403);
 
+    // The redirect destination is determined only after a valid, signed,
+    // user-bound recovery proof. Never trust a query parameter, submitted role,
+    // or browser cookie to decide whether this is an admin recovery.
+    // This read uses the recovery user's authenticated RLS context; an
+    // unrelated user cannot inspect another administrator's record.
+    const { data: admin, error: adminLookupError } = await recovery
+      .from('admins')
+      .select('id, email, role, is_active')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (adminLookupError) return json({ error: GENERIC_503 }, 503);
+    const isVerifiedAdmin = Boolean(
+      admin?.id === user.id
+        && admin.is_active === true
+        && (admin.role === 'ADMIN' || admin.role === 'SUPER_ADMIN')
+        && typeof user.email === 'string'
+        && typeof admin.email === 'string'
+        && admin.email.trim().toLowerCase() === user.email.trim().toLowerCase(),
+    );
+    const signInPath = isVerifiedAdmin ? '/secure-admin-login' : '/login';
+
     const { error: updateError } = await recovery.auth.updateUser({ password });
     if (updateError) return json({ error: GENERIC_INVALID }, 403);
 
@@ -103,7 +124,7 @@ export async function POST(request: NextRequest) {
     // provider-level authorization boundary.
     await recovery.auth.signOut({ scope: 'local' });
 
-    const res = json({ message: 'Password updated.' }, 200);
+    const res = json({ message: 'Password updated.', signInPath }, 200);
     const cleared = clearRecoveryProofCookie();
     res.cookies.set(cleared.name, cleared.value, cleared.options);
     return res;
