@@ -86,6 +86,7 @@ jobs:
               exit 1
             }
           done
+
           echo "Verified PR #14 exact head $APPROVED_SHA with all required Gate A checks successful."
           echo "head_sha=$APPROVED_SHA" >> "$GITHUB_OUTPUT"
 
@@ -510,3 +511,4 @@ jobs:
             fi
             echo "Anonymous access denied at ${endpoint#https://} (HTTP $http)."
           done
+
