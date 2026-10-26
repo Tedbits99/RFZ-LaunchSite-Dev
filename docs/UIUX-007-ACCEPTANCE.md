@@ -7,7 +7,7 @@ current application. `PARTIAL` means the route has working product UI but
 still needs route-specific visual or protected/browser evidence; it is not a
 claim that the route is complete.
 
-Evidence references: local test suite (890 passed, 1 skipped), TypeScript,
+Evidence references: local test suite (893 passed, 1 skipped), TypeScript,
 lint, Next/OpenNext builds, the public browser smoke run documented in the
 task report, and the exact-head GitHub validations listed below. Protected
 routes require configured Supabase credentials and an authorized test account
@@ -52,7 +52,7 @@ it must not be silently treated as the missing historical specification.
 
 - PR #13 is merged at `886f1f8864acf727ec5649203c5bcd564d6a56c3`.
 - PR #14 is intentionally draft at
-  `d020440114a2610cd4c8783603ffd9f23e1ee58e`.
+  `86fd873663a3894dbf962175c72dadb9daa020d0`.
 - The previous exact-head validation at
   `c759e48fd617387f09e608fb0c86de840d96ac77` had frontend and production
   release safety PASS, but the development run failed in browser acceptance.
@@ -61,8 +61,8 @@ it must not be silently treated as the missing historical specification.
   a customer fixture redirect under the large parallel fan-out. The browser
   artifact is available from
   [Development validation run 39862775809](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39862775809/artifacts/12462688150).
-- The current exact-head Frontend validation run `40264513457` and
-  Development validation run `40264513560` are terminal SUCCESS. The
+- The current exact-head Frontend validation run `40265219897` and
+  Development validation run `40265219736` are terminal SUCCESS. The
   Development run includes successful isolated database/security, browser,
   legacy-upgrade, and production release-safety jobs; its browser result was
   101 passed and 3 skipped.
