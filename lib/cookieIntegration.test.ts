@@ -98,6 +98,9 @@ function recoveryNetwork() {
     if (u.includes('/auth/v1/user') && method === 'GET') return jsonResponse(sessionBody(ACCESS_TOKEN, USER_ID).user);
     if (u.includes('/auth/v1/user') && method === 'PUT') return jsonResponse(sessionBody(ACCESS_TOKEN, USER_ID).user);
     if (u.includes('/auth/v1/logout')) return new Response(null, { status: 204 });
+    // Include the new authenticated admin-identity read in the network mock.
+    // Empty result = customer, so password recovery must still succeed.
+    if (u.includes('/rest/v1/admins') && method === 'GET') return jsonResponse([]);
     throw new Error(`unexpected fetch ${method} ${u}`);
   };
 }
