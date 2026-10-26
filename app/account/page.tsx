@@ -3,6 +3,7 @@ import SiteFooter from '@/components/SiteFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
+import ThemeSelector from '@/components/ThemeSelector';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export default async function Account() {
 
   return (
     <main className="rfz-account-page min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto max-w-[1180px] px-5 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a></div></header>
+      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto flex max-w-[1180px] items-center justify-between gap-4 px-5 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a><ThemeSelector compact={false} /></div></header>
       <div className="mx-auto max-w-[1180px] px-5 py-10">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs uppercase tracking-[.18em] text-cyan-300">Customer hub</p><h1 className="font-display mt-2 text-3xl font-bold">My Account</h1></div><nav aria-label="Account navigation" className="flex flex-wrap gap-2 text-xs"><a href="/account/orders" className="rounded-lg border border-[#233653] px-3 py-2 text-slate-300 hover:border-cyan-300 hover:text-cyan-200">All orders</a><a href="/track-order" className="rounded-lg border border-[#233653] px-3 py-2 text-slate-300 hover:border-cyan-300 hover:text-cyan-200">Guest tracking</a><a href="/account/profile" className="rounded-lg border border-[#233653] px-3 py-2 text-slate-300 hover:border-cyan-300 hover:text-cyan-200">Profile</a></nav></div>
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
