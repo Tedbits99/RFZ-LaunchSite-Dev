@@ -42,8 +42,8 @@ before browser acceptance can be promoted.
 - Global and admin loading/error boundaries provide retry-safe recovery UI.
 - Guest tracking has labeled inputs, autocomplete metadata, live errors and
   theme-aware styling.
-- Appearance controls expose stable `data-theme-option` hooks and persist
-  across reloads.
+- Appearance controls use one rotating `data-theme-toggle` button, expose the
+  current/next mode through an accessible label, and persist across reloads.
 
 The matrix must be updated with new evidence as protected routes are tested;
 it must not be silently treated as the missing historical specification.

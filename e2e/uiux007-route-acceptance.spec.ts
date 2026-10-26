@@ -113,25 +113,28 @@ test.describe('UIUX-007 public route acceptance', () => {
   test('appearance modes persist, remain keyboard reachable, and keep route navigation stable', async ({ page }) => {
     await navigateWithDevServerRecovery(page, '/login');
     const html = page.locator('html');
-    const selector = (theme: string) => page.locator(`[data-theme-option="${theme}"]`);
+    const selector = page.locator('[data-theme-toggle]');
     if (await html.getAttribute('data-theme-ready') !== 'true') {
       await page.reload({ waitUntil: 'domcontentloaded' });
     }
     await expect(html).toHaveAttribute('data-theme-ready', 'true');
+    await page.evaluate(() => window.localStorage.setItem('rfz-appearance', 'light'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
 
-    for (const theme of ['light', 'dark', 'night']) {
-      await selector(theme).focus();
-      await expect(selector(theme)).toBeFocused();
+    for (const theme of ['dark', 'night', 'light']) {
+      await selector.focus();
+      await expect(selector).toBeFocused();
       await page.keyboard.press('Enter');
       await expect(html).toHaveAttribute('data-theme', theme);
+      await expect(selector).toHaveAttribute('data-current-theme', theme);
       await page.reload();
       await expect(html).toHaveAttribute('data-theme', theme);
     }
 
     await page.goto('/privacy-policy', { waitUntil: 'domcontentloaded' });
     await expect(html).toHaveAttribute('data-theme-ready', 'true');
-    await expect(html).toHaveAttribute('data-theme', 'night');
-    await selector('dark').click();
+    await expect(html).toHaveAttribute('data-theme', 'light');
+    await selector.click();
     await expect(html).toHaveAttribute('data-theme', 'dark');
   });
 });

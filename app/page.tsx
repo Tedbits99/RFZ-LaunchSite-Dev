@@ -154,13 +154,13 @@ export default function Home() {
       <div className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-4">
         <a href="#top" aria-label="RunFazone home"><RunfazoneLogo /></a>
         <div className="hidden items-center gap-2 md:flex">
-          <nav className="mr-5 flex items-center gap-5 text-[12px] text-slate-400"><a className="text-cyan-300" href="#top">Home</a><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></nav>
+          <nav className="rfz-storefront-nav mr-5 flex items-center gap-5 text-[12px] text-slate-400"><a className="text-cyan-300" href="#top">Home</a><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></nav>
           <a href="/track-order" className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-200 transition hover:border-cyan-400"><Search size={13} className="mr-1 inline text-cyan-300" />Track Order</a>
           <a href={customerSignedIn ? '/account' : '/login'} className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-300"><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a>
         </div>
         <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileOpen}>{mobileOpen ? <X /> : <Menu />}</button>
       </div>
-      {mobileOpen && <nav aria-label="Mobile navigation" className="rfz-mobile-drawer border-t border-[#14203a] px-5 py-4 md:hidden"><div className="flex flex-col gap-4 text-slate-300"><a href="#games" onClick={() => setMobileOpen(false)}>Top Up</a><a href="#benefits" onClick={() => setMobileOpen(false)}>About</a><a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a><a href="#contact" onClick={() => setMobileOpen(false)}>Contact</a><a href={customerSignedIn ? '/account' : '/login'} onClick={() => setMobileOpen(false)}><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a></div></nav>}
+      {mobileOpen && <nav aria-label="Mobile navigation" className="rfz-mobile-drawer border-t border-[var(--rfz-line)] bg-[var(--rfz-bg-raised)] px-5 py-4 md:hidden"><div className="flex flex-col gap-4 text-[var(--rfz-text)]"><a href="#games" onClick={() => setMobileOpen(false)}>Top Up</a><a href="#benefits" onClick={() => setMobileOpen(false)}>About</a><a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a><a href="#contact" onClick={() => setMobileOpen(false)}>Contact</a><a href={customerSignedIn ? '/account' : '/login'} onClick={() => setMobileOpen(false)}><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a></div></nav>}
     </header>
 
     <RFZCinematicHero slides={heroSlides} />

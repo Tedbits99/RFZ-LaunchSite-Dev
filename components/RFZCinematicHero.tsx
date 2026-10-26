@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { ArrowRight, ChevronLeft, ChevronRight, Pause, Play, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 
 export type RFZAnimationPreset = 'holographic-reveal' | 'cinematic-depth' | 'futuristic-energy' | 'minimal-motion' | 'static';
 export type RFZMotionSpeed = 'fast' | 'standard' | 'relaxed';
@@ -33,9 +33,9 @@ function SceneLayer({ slide, phase, token }: { slide: RFZCinematicSlide; phase: 
       className={`rfz-cinematic-scene rfz-cinematic-scene--${preset} rfz-cinematic-scene--${phase}`}
       data-testid={phase === 'enter' ? 'rfz-cinematic-scene' : 'rfz-cinematic-exit-scene'}
       data-animation-preset={preset}
-      aria-hidden="true"
+      aria-hidden={phase === 'exit'}
     >
-      <img data-testid={phase === 'enter' ? 'rfz-cinematic-art' : undefined} className="rfz-cinematic-art" src={slide.image} alt="" />
+      <img data-testid={phase === 'enter' ? 'rfz-cinematic-art' : undefined} className="rfz-cinematic-art" src={slide.image} alt={phase === 'enter' ? (slide.title || 'Featured RunFazone promotion') : ''} />
       <span className="rfz-cinematic-depth" />
       <span className="rfz-cinematic-energy" />
       <span className="rfz-cinematic-frame" />
@@ -122,9 +122,6 @@ export default function RFZCinematicHero({ slides }: { slides: RFZCinematicSlide
 
   if (!activeSlide) return null;
   const preset = normalizePreset(activeSlide.animationPreset);
-  const showCopy = Boolean(activeSlide.title || activeSlide.body || activeSlide.ctaHref || activeSlide.ctaText);
-  const ctaHref = activeSlide.ctaHref || '#games';
-  const ctaText = activeSlide.ctaText || 'Explore games';
 
   return (
     <section
@@ -140,7 +137,7 @@ export default function RFZCinematicHero({ slides }: { slides: RFZCinematicSlide
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false); }}
     >
       <div
-        className="rfz-cinematic-hero hero-glow grid-bg relative overflow-hidden rounded-2xl border border-[#1a3553]"
+        className="rfz-cinematic-hero hero-glow relative overflow-hidden rounded-2xl border border-[var(--rfz-line)]"
         data-testid="rfz-cinematic-hero"
         data-scene-index={activeIndex}
         data-animation-preset={preset}
@@ -150,21 +147,16 @@ export default function RFZCinematicHero({ slides }: { slides: RFZCinematicSlide
       >
         {outgoing && <SceneLayer key={`exit-${outgoing.id}-${transitionToken}`} slide={outgoing} phase="exit" token={transitionToken} />}
         <SceneLayer key={`enter-${activeSlide.id}-${transitionToken}`} slide={activeSlide} phase="enter" token={transitionToken} />
-        <div className="rfz-cinematic-scrim" aria-hidden="true" />
-        <div className="rfz-cinematic-copy z-10">
-          <span className="rfz-cinematic-kicker"><Sparkles size={12} aria-hidden="true" /> Featured drop</span>
-          {showCopy && activeSlide.title && <h1>{activeSlide.title}</h1>}
-          {showCopy && activeSlide.body && <p>{activeSlide.body}</p>}
-          {showCopy && <a className="rfz-cinematic-cta" href={ctaHref}>{ctaText} <ArrowRight size={14} aria-hidden="true" /></a>}
-        </div>
-        <div className="rfz-cinematic-controls z-20">
+      </div>
+      <div className="rfz-cinematic-control-strip" aria-label="Featured promotion controls">
+        <div className="rfz-cinematic-controls">
           <button type="button" aria-label="Previous promotion" onClick={() => changeTo(activeIndex - 1)}><ChevronLeft size={17} aria-hidden="true" /></button>
           <button type="button" aria-label={paused ? 'Play banner animation' : 'Pause banner animation'} aria-pressed={paused} onClick={() => setPaused((value) => !value)}>
             {paused ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}
           </button>
           <button type="button" aria-label="Next promotion" onClick={() => changeTo(activeIndex + 1)}><ChevronRight size={17} aria-hidden="true" /></button>
         </div>
-        <div className="rfz-cinematic-indicators z-20" role="tablist" aria-label="Featured promotions">
+        <div className="rfz-cinematic-indicators" role="tablist" aria-label="Featured promotions">
           {safeSlides.map((slide, index) => (
             <button
               key={slide.id}

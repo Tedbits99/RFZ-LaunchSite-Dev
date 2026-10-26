@@ -5,16 +5,16 @@ import { join } from 'node:path';
 const source = readFileSync(join(__dirname, 'ThemeSelector.tsx'), 'utf8');
 
 describe('ThemeSelector keyboard contract', () => {
-  it('keeps native buttons and explicitly handles Enter and Space activation', () => {
+  it('uses one native button with pre-hydration keyboard support', () => {
     expect(source).toContain('type="button"');
-    expect(source).toContain("event.key !== 'Enter' && event.key !== ' '");
-    expect(source).toContain('event.preventDefault()');
-    expect(source).toContain('event.currentTarget.click()');
-    expect(source).toContain('onKeyDown=');
+    expect(source).toContain('data-theme-toggle');
+    expect(source).toContain('onClick={cycleTheme}');
   });
 
-  it('exposes the selected mode through pressed state and keyboard help', () => {
-    expect(source).toContain('aria-pressed={theme === value}');
+  it('exposes current and next modes through an accessible label', () => {
+    expect(source).toContain('data-current-theme={currentTheme}');
+    expect(source).toContain('data-next-theme={nextTheme}');
+    expect(source).toContain('Current theme:');
     expect(source).toContain('aria-keyshortcuts="Enter Space"');
   });
 });

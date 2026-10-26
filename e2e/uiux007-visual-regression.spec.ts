@@ -32,12 +32,12 @@ test.describe('UIUX-007 visual regression', () => {
   test('theme controls remain keyboard-operable with persisted visual state', async ({ page }) => {
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
     const html = page.locator('html');
-    const theme = page.locator('[data-theme-option="night"]');
+    const theme = page.locator('[data-theme-toggle]');
 
     await expect(html).toHaveAttribute('data-theme-ready', 'true');
     await theme.focus();
     await page.keyboard.press('Enter');
-    await expect(theme).toHaveAttribute('aria-pressed', 'true');
+    await expect(theme).toHaveAttribute('data-current-theme', 'night');
     await expect(html).toHaveAttribute('data-theme', 'night');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(html).toHaveAttribute('data-theme', 'night');
@@ -47,7 +47,7 @@ test.describe('UIUX-007 visual regression', () => {
     test.skip((page.viewportSize()?.width ?? 999) > 600, 'mobile navigation case');
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     const menu = page.getByRole('button', { name: 'Open menu' });
-    const appearance = page.locator('.theme-selector-global');
+    const appearance = page.locator('[data-theme-toggle]');
     await expect(menu).toBeVisible();
     await expect(appearance).toBeVisible();
 
@@ -66,7 +66,7 @@ test.describe('UIUX-007 visual regression', () => {
   test('desktop appearance control does not cover header actions', async ({ page }) => {
     test.skip((page.viewportSize()?.width ?? 0) < 768, 'desktop header case');
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const appearance = page.locator('.theme-selector-global');
+    const appearance = page.locator('[data-theme-toggle]');
     const trackOrder = page.locator('header').getByRole('link', { name: 'Track Order' });
     await expect(appearance).toBeVisible();
     await expect(trackOrder).toBeVisible();
@@ -81,7 +81,7 @@ test.describe('UIUX-007 visual regression', () => {
   test('reduced motion keeps storefront content immediate', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const motion = await page.locator('#top h1').evaluate((element) => getComputedStyle(element).animationDuration);
-    expect(parseFloat(motion)).toBeLessThanOrEqual(0.01);
+    await expect(page.getByTestId('rfz-cinematic-art')).toHaveCSS('animation-name', 'none');
+    await expect(page.getByTestId('rfz-cinematic-hero')).toHaveAttribute('data-reduced-motion', 'true');
   });
 });

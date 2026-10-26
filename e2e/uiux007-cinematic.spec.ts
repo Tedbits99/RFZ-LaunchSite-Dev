@@ -14,6 +14,14 @@ test.describe('UIUX-007 cinematic hero', () => {
     const art = page.getByTestId('rfz-cinematic-art');
     await expect(hero).toHaveAttribute('data-animation-preset', 'holographic-reveal');
     await expect(art).toBeVisible();
+    await expect(page.locator('.rfz-cinematic-copy, .rfz-cinematic-scrim, .rfz-cinematic-kicker')).toHaveCount(0);
+    await expect(page.locator('.rfz-cinematic-control-strip')).toBeVisible();
+    const heroBox = await hero.boundingBox();
+    const controlsBox = await page.locator('.rfz-cinematic-control-strip').boundingBox();
+    expect(heroBox).not.toBeNull();
+    expect(controlsBox).not.toBeNull();
+    expect(controlsBox!.y).toBeGreaterThanOrEqual(heroBox!.y + heroBox!.height - 1);
+    expect(await art.evaluate((element) => getComputedStyle(element).objectFit)).toBe('contain');
     expect(await art.evaluate((element) => getComputedStyle(element).animationName)).toContain('rfz-holographic-reveal');
 
     await page.getByRole('button', { name: 'Next promotion' }).click();
@@ -74,5 +82,21 @@ test.describe('UIUX-007 cinematic hero', () => {
     await expect(page.getByTestId('rfz-cinematic-art')).toHaveCSS('animation-name', 'none');
     await page.waitForTimeout(250);
     await expect(hero).toHaveAttribute('data-scene-index', '0');
+  });
+
+  test('keeps one theme control and contained artwork across supported widths', async ({ page }) => {
+    for (const width of [320, 360, 390, 430, 768, 1024, 1440, 1920]) {
+      await page.setViewportSize({ width, height: width < 600 ? 720 : 900 });
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('[data-theme-toggle]:visible')).toHaveCount(1);
+      await expect(page.getByTestId('rfz-cinematic-art')).toBeVisible();
+      const geometry = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+        body: document.body.scrollWidth,
+      }));
+      expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+      expect(geometry.body).toBeLessThanOrEqual(geometry.viewport);
+    }
   });
 });
