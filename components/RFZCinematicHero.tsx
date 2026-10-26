@@ -129,12 +129,6 @@ export default function RFZCinematicHero({ slides }: { slides: RFZCinematicSlide
       className="mx-auto max-w-[1180px] px-5 pt-7"
       aria-label="Featured RunFazone promotions"
       onKeyDown={onKeyDown}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false); }}
     >
       <div
         className="rfz-cinematic-hero hero-glow relative overflow-hidden rounded-2xl border border-[var(--rfz-line)]"
@@ -144,6 +138,12 @@ export default function RFZCinematicHero({ slides }: { slides: RFZCinematicSlide
         data-reduced-motion={reducedMotion ? 'true' : 'false'}
         data-paused={paused || tabHidden ? 'true' : 'false'}
         tabIndex={0}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+        onFocus={() => setPaused(true)}
+        onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false); }}
       >
         {outgoing && <SceneLayer key={`exit-${outgoing.id}-${transitionToken}`} slide={outgoing} phase="exit" token={transitionToken} />}
         <SceneLayer key={`enter-${activeSlide.id}-${transitionToken}`} slide={activeSlide} phase="enter" token={transitionToken} />
