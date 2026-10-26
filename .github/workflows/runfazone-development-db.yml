@@ -7,12 +7,21 @@ on:
         description: 'Exact reviewed PR #14 commit containing the migration set'
         required: true
         type: string
+      cleanup_run_id:
+        description: 'Only for customer-security-cleanup: exact failed run fixture ID'
+        required: false
+        type: string
       operation:
         description: 'Audit/plan only, or explicitly apply migrations to development'
         required: true
         type: choice
         options:
           - audit
+          - behavioral-audit
+          - customer-security-audit
+          - customer-security-cleanup
+          - gate-b-audit
+          - payment-safety-lockdown
           - plan
           - apply
         default: audit
@@ -43,9 +52,12 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SUPABASE_PROJECT_ID_SECRET: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_PROJECT_ID_VAR: ${{ vars.SUPABASE_PROJECT_ID }}
       SOURCE_SHA: ${{ inputs.source_sha }}
+      CLEANUP_RUN_ID: ${{ inputs.cleanup_run_id }}
       OPERATION: ${{ inputs.operation }}
       APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
       REPOSITORY: ${{ github.repository }}
@@ -60,6 +72,15 @@ jobs:
         uses: supabase/setup-cli@v3
         with:
           version: 2.121.0
+
+      - name: Install required audit tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-client ripgrep
+          command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
+          command -v psql >/dev/null || { echo 'BLOCKED: required PostgreSQL diagnostic client is unavailable.' >&2; exit 1; }
 
       - name: Validate protected inputs and project identity
         id: identity
@@ -83,9 +104,17 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          if [[ "$OPERATION" = customer-security-cleanup && "$CLEANUP_RUN_ID" != 40167500569 ]]; then
+            echo 'BLOCKED: cleanup is allow-listed only for failed run 40167500569.' >&2
+            exit 1
+          fi
           if [[ "$OPERATION" = apply && "$APPLY_CONFIRMATION" != APPLY_DEVELOPMENT_MIGRATIONS ]]; then
             echo 'BLOCKED: apply requires the exact confirmation phrase.' >&2
+            exit 1
+          fi
+          if [[ "$OPERATION" = payment-safety-lockdown && "$APPLY_CONFIRMATION" != DISABLE_DEVELOPMENT_LIVE_PAYMENTS ]]; then
+            echo 'BLOCKED: payment-safety-lockdown requires the exact confirmation phrase.' >&2
             exit 1
           fi
           printf '***%s***\n' "$SUPABASE_ACCESS_TOKEN" "$SUPABASE_DB_PASSWORD" | while IFS= read -r value; do echo "::add-mask::$value"; done
@@ -98,8 +127,12 @@ jobs:
             echo 'BLOCKED: Supabase API identity did not match the approved project.' >&2
             exit 1
           }
+          region="$(jq -r '.region // empty' <<<"$project_json")"
+          test -n "$region" || { echo 'BLOCKED: Supabase project region is unavailable.' >&2; exit 1; }
           jq -r '{id, name, region, status}' <<<"$project_json"
           echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
+          echo "region=$region" >> "$GITHUB_OUTPUT"
+          echo 'DB_PASSWORD_SOURCE=runfazone-development-db environment secret'
 
       - name: Verify reviewed source commit and import migration SQL only
         env:
@@ -113,6 +146,24 @@ jobs:
           [[ "$(jq -r '.base.ref' <<<"$pr_json")" = main ]] || { echo 'BLOCKED: PR #14 must target main.' >&2; exit 1; }
           [[ "$(jq -r '.head.repo.full_name' <<<"$pr_json")" = "$REPOSITORY" ]] || { echo 'BLOCKED: source must be same-repository.' >&2; exit 1; }
           [[ "$(jq -r '.head.sha' <<<"$pr_json")" = "$SOURCE_SHA" ]] || { echo 'BLOCKED: source_sha is not the current exact PR #14 head.' >&2; exit 1; }
+          if ! git cat-file -e "$SOURCE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$SOURCE_SHA"
+          fi
+          git cat-file -e "$SOURCE_SHA^{commit}" || { echo 'BLOCKED: exact source commit could not be fetched.' >&2; exit 1; }
+          workflow_runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&per_page=100")"
+          frontend_run="$(jq -c --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.name == "Frontend validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          development_run="$(jq -c --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.name == "Development validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          test -n "$frontend_run" || { echo 'BLOCKED: missing exact-head Frontend validation run.' >&2; exit 1; }
+          test -n "$development_run" || { echo 'BLOCKED: missing exact-head Development validation run.' >&2; exit 1; }
+          [[ "$(jq -r '.status' <<<"$frontend_run")" = completed && "$(jq -r '.conclusion' <<<"$frontend_run")" = success ]] || { echo 'BLOCKED: exact-head Frontend validation did not pass.' >&2; exit 1; }
+          [[ "$(jq -r '.status' <<<"$development_run")" = completed && "$(jq -r '.conclusion' <<<"$development_run")" = success ]] || { echo 'BLOCKED: exact-head Development validation did not pass.' >&2; exit 1; }
+          development_jobs="$(gh api "repos/$REPOSITORY/actions/runs/$(jq -r '.id' <<<"$development_run")/jobs?per_page=100")"
+          for job_name in "Isolated Supabase RPC security tests" "Production release safety"; do
+            job="$(jq -c --arg name "$job_name" '[.jobs[] | select(.name == $name)] | sort_by(.started_at, .completed_at) | last // empty' <<<"$development_jobs")"
+            test -n "$job" || { echo "BLOCKED: missing exact-head job: $job_name" >&2; exit 1; }
+            [[ "$(jq -r '.status' <<<"$job")" = completed && "$(jq -r '.conclusion' <<<"$job")" = success ]] || { echo "BLOCKED: exact-head job did not pass: $job_name" >&2; exit 1; }
+          done
+          echo 'EXACT_HEAD_CI_VERIFIED frontend=success security=success production_safety=success'
           rm -rf "$RUNNER_TEMP/runfazone-migrations"
           mkdir -p "$RUNNER_TEMP/runfazone-migrations"
           git archive "$SOURCE_SHA" supabase/migrations | tar -x -C "$RUNNER_TEMP/runfazone-migrations"
@@ -123,7 +174,14 @@ jobs:
             exit 1
           } || true
           count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          test "$count" = 97 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 97." >&2; exit 1; }
+          test "$count" = 96 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 96." >&2; exit 1; }
+          command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
+          if rg -n -i --glob '*.sql' \
+            '(drop[[:space:]]+(table|schema|database)|truncate([[:space:];]|$)|alter[[:space:]]+table[^;]*(drop[[:space:]]+column)|cron\.schedule|net\.http|http_(post|get)|https?://)' \
+            "$migration_dir"; then
+            echo 'BLOCKED: migration source contains destructive DDL or outbound/scheduled side effects requiring separate review.' >&2
+            exit 1
+          fi
           echo "SOURCE_MIGRATIONS_VERIFIED count=$count"
 
       - name: Link to the verified development project
@@ -131,45 +189,202 @@ jobs:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
         run: supabase link --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
+      - name: Verify hosted PostgreSQL authentication with SELECT 1
+        id: postgres_auth
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v psql >/dev/null || { echo 'BLOCKED: required PostgreSQL diagnostic client is unavailable.' >&2; exit 1; }
+          pooler_host="aws-0-${PROJECT_REGION}.pooler.supabase.com"
+          db_user="postgres.${PROJECT_ID}"
+          for port in 5432 6543; do
+            diagnostic_log="$RUNNER_TEMP/postgres-auth-${port}.log"
+            if PGPASSWORD="$SUPABASE_DB_PASSWORD" \
+              psql "host=$pooler_host port=$port user=$db_user dbname=postgres sslmode=require connect_timeout=10" \
+              -v ON_ERROR_STOP=1 -Atqc 'SELECT 1' >"$diagnostic_log" 2>&1; then
+              test "$(tr -d '[:space:]' <"$diagnostic_log")" = 1 || {
+                echo "BLOCKED: PostgreSQL SELECT 1 returned an unexpected result on pooler port $port." >&2
+                exit 1
+              }
+              echo "POSTGRES_AUTHENTICATION_PASS pooler_port=$port query=SELECT_1"
+              echo "pooler_port=$port" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if grep -q '28P01' "$diagnostic_log"; then
+              echo "OWNER_ACTION_REQUIRED: SUPABASE_DB_PASSWORD rejected by PostgreSQL (SQLSTATE 28P01, pooler_port=$port)." >&2
+              exit 1
+            fi
+          done
+          echo 'BLOCKED: PostgreSQL SELECT 1 could not connect on the verified pooler ports.' >&2
+          exit 1
+
       - name: Capture hosted migration history before changes
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
         shell: bash
         run: |
           set -euo pipefail
-          supabase migration list --project-ref "$PROJECT_ID" > "$RUNNER_TEMP/migrations-before.txt"
+          supabase migration list --linked > "$RUNNER_TEMP/migrations-before.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-before.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
 
-      - name: Audit hosted schema without changing data
-        if: inputs.operation == 'audit' || inputs.operation == 'plan'
+      - name: Run hosted behavioral security assertions
+        if: inputs.operation == 'behavioral-audit'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/supabase/tests/hosted-behavioral-audit.sql" || {
+            echo 'BLOCKED: trusted hosted behavioral audit SQL is missing.' >&2
+            exit 1
+          }
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com port=${{ steps.postgres_auth.outputs.pooler_port }} user=postgres.${{ steps.identity.outputs.project_id }} dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/supabase/tests/hosted-behavioral-audit.sql" \
+            > "$RUNNER_TEMP/hosted-behavioral-audit.log"
+          grep -Eq '^[[:space:]]*HOSTED_BEHAVIORAL_AUDIT_PASS[[:space:]]*$' "$RUNNER_TEMP/hosted-behavioral-audit.log" || {
+            echo 'BLOCKED: hosted behavioral audit did not emit its pass marker.' >&2
+            exit 1
+          }
+          echo 'HOSTED_BEHAVIORAL_AUDIT_PASS mutation_scope=transaction_rollback external_effects=not_invoked'
+
+      - name: Run real customer session security acceptance
+        if: inputs.operation == 'customer-security-audit'
+        env:
+          SUPABASE_URL: https://${{ steps.identity.outputs.project_id }}.supabase.co
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ANON_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_ANON_KEY.' >&2; exit 1; }
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_SERVICE_ROLE_KEY.' >&2; exit 1; }
+          bash scripts/test-hosted-customer-security.sh
+
+      - name: Verify and clean failed customer security fixtures
+        if: inputs.operation == 'customer-security-cleanup'
+        env:
+          SUPABASE_URL: https://${{ steps.identity.outputs.project_id }}.supabase.co
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo 'OWNER_ACTION_REQUIRED: runfazone-development-db needs SUPABASE_SERVICE_ROLE_KEY.' >&2; exit 1; }
+          bash scripts/cleanup-hosted-customer-security-fixtures.sh "$CLEANUP_RUN_ID"
+
+      - name: Run hosted Gate B integration and RPC audit
+        if: inputs.operation == 'gate-b-audit'
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+          POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/supabase/tests/hosted-privileged-rpc-audit.sql" || {
+            echo 'BLOCKED: trusted privileged RPC audit SQL is missing.' >&2
+            exit 1
+          }
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=aws-0-${PROJECT_REGION}.pooler.supabase.com port=${POOLER_PORT} user=postgres.${PROJECT_ID} dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/supabase/tests/hosted-privileged-rpc-audit.sql" \
+            > "$RUNNER_TEMP/hosted-privileged-rpc-audit.log"
+          grep -Eq '^[[:space:]]*HOSTED_PRIVILEGED_RPC_AUDIT_PASS[[:space:]]*$' "$RUNNER_TEMP/hosted-privileged-rpc-audit.log" || {
+            echo 'BLOCKED: privileged RPC audit did not emit its pass marker.' >&2
+            exit 1
+          }
+          SUPABASE_URL="https://${PROJECT_ID}.supabase.co" \
+            SUPABASE_POOLER_HOST="aws-0-${PROJECT_REGION}.pooler.supabase.com" \
+            SUPABASE_POOLER_PORT="$POOLER_PORT" \
+            SUPABASE_DB_USER="postgres.${PROJECT_ID}" \
+            bash scripts/audit-hosted-integrations.sh
+
+      - name: Disable automated development PayMongo configuration
+        if: inputs.operation == 'payment-safety-lockdown'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: bash scripts/lockdown-hosted-development-payments.sh
+
+      - name: Audit hosted schema without changing data
+        if: inputs.operation == 'audit'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+          POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
         shell: bash
         run: |
           set -euo pipefail
           # Schema-only dump; no rows are exported and no write command runs.
-          supabase db dump --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" --schema public --file "$RUNNER_TEMP/hosted-public-schema.sql"
+          supabase db dump --linked --schema public --file "$RUNNER_TEMP/hosted-public-schema.sql"
           test -s "$RUNNER_TEMP/hosted-public-schema.sql"
+          pooler_host="aws-0-${PROJECT_REGION}.pooler.supabase.com"
+          db_user="postgres.${PROJECT_ID}"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=$pooler_host port=$POOLER_PORT user=$db_user dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 -Atqc "SELECT json_build_object(
+              'public_tables', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'),
+              'public_tables_rls_enabled', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity),
+              'public_policies', (SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname = 'public'),
+              'public_functions', (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'),
+              'public_indexes', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'i'),
+              'public_triggers', (SELECT count(*) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal)
+            )" > "$RUNNER_TEMP/hosted-schema-summary.json"
+          test -s "$RUNNER_TEMP/hosted-schema-summary.json"
+          PGPASSWORD="$SUPABASE_DB_PASSWORD" psql \
+            "host=$pooler_host port=$POOLER_PORT user=$db_user dbname=postgres sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 -Atqc "SELECT json_build_object(
+              'tables', COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'name', c.relname,
+                'rls_enabled', c.relrowsecurity,
+                'rls_forced', c.relforcerowsecurity,
+                'policy_count', (SELECT count(*) FROM pg_catalog.pg_policies p WHERE p.schemaname = 'public' AND p.tablename = c.relname)
+              ) ORDER BY c.relname) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'), '[]'::jsonb),
+              'functions', COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'identity', p.proname || '(' || pg_catalog.pg_get_function_identity_arguments(p.oid) || ')',
+                'security_definer', p.prosecdef,
+                'anon_execute', has_function_privilege('anon', p.oid, 'EXECUTE'),
+                'authenticated_execute', has_function_privilege('authenticated', p.oid, 'EXECUTE'),
+                'service_role_execute', has_function_privilege('service_role', p.oid, 'EXECUTE')
+              ) ORDER BY p.proname, p.oid) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'), '[]'::jsonb),
+              'scheduled_jobs', (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'cron' AND c.relname = 'job'),
+              'edge_function_like_http_functions', (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.prokind = 'f' AND pg_catalog.pg_get_functiondef(p.oid) ~* '(net\\.(http|http_post|http_get)|https?://)')
+            )" > "$RUNNER_TEMP/hosted-security-summary.json"
+          test -s "$RUNNER_TEMP/hosted-security-summary.json"
+          echo 'HOSTED_SCHEMA_SUMMARY_CAPTURED metadata_only=true rows=excluded definitions=excluded'
+          echo 'HOSTED_SECURITY_SUMMARY_CAPTURED metadata_only=true rows=excluded definitions=excluded'
           echo 'HOSTED_SCHEMA_DUMP_CAPTURED schema=public rows=excluded'
 
-      - name: Apply reviewed migrations to development only
-        if: inputs.operation == 'apply'
-        env:
-          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+      - name: Plan reviewed migrations without changing data
+        if: inputs.operation == 'plan'
         shell: bash
         run: |
           set -euo pipefail
           rm -rf supabase/migrations
           cp -a "$RUNNER_TEMP/runfazone-migrations/supabase/migrations" supabase/migrations
-          supabase db push --project-ref "$PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" --yes
+          supabase db push --linked --dry-run
 
-      - name: Verify hosted migration history after operation
-        env:
-          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+      - name: Apply reviewed migrations to development only
+        if: inputs.operation == 'apply'
         shell: bash
         run: |
           set -euo pipefail
-          supabase migration list --project-ref "$PROJECT_ID" > "$RUNNER_TEMP/migrations-after.txt"
+          rm -rf supabase/migrations
+          cp -a "$RUNNER_TEMP/runfazone-migrations/supabase/migrations" supabase/migrations
+          supabase db push --linked --yes
+
+      - name: Verify hosted migration history after operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration list --linked > "$RUNNER_TEMP/migrations-after.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-after.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
           if [[ "$OPERATION" != audit ]]; then
             test -s "$RUNNER_TEMP/migrations-after.txt"
@@ -183,4 +398,8 @@ jobs:
           path: |
             ${{ runner.temp }}/migrations-before.txt
             ${{ runner.temp }}/migrations-after.txt
+            ${{ runner.temp }}/hosted-schema-summary.json
+            ${{ runner.temp }}/hosted-security-summary.json
+            ${{ runner.temp }}/hosted-behavioral-audit.log
+            ${{ runner.temp }}/hosted-privileged-rpc-audit.log
           if-no-files-found: ignore
