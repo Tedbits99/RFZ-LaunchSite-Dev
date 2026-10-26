@@ -70,6 +70,17 @@ RETURNS uuid
 LANGUAGE sql
 STABLE
 AS $$ SELECT NULL::uuid $$;
+
+-- Supabase public policies may reference auth.jwt() even though the
+-- disposable restore target is a vanilla PostgreSQL instance.  Provide a
+-- deliberately empty, non-privileged stub so schema restoration can verify
+-- structure and row-count integrity without simulating an authenticated
+-- request or exposing any hosted Auth state.
+CREATE FUNCTION auth.jwt()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+AS $$ SELECT '{}'::jsonb $$;
 SQL
 PGPASSWORD="$local_password" psql "$local_connection" -v ON_ERROR_STOP=1 -f "$SCHEMA_DUMP" >/dev/null
 PGPASSWORD="$local_password" psql "$local_connection" -v ON_ERROR_STOP=1 -f "$DATA_DUMP" >/dev/null
