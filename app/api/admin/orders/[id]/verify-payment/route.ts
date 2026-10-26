@@ -40,10 +40,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const result = rpcResult?.[0] || rpcResult;
 
-    // Send payment-success email (fire-and-forget, duplicate-guarded by email_sent_log).
+    // Complete the payment-success email attempt before returning; otherwise
+    // Next.js/Cloudflare may end an unawaited request when the handler returns.
+    // Duplicate attempts are guarded by email_sent_log.
     // Only sends if payment_status actually transitioned to VERIFIED.
     if (result?.out_payment_status === 'VERIFIED' || !rpcError) {
-      sendPaymentSuccessEmail(client, id).catch(() => {});
+      await sendPaymentSuccessEmail(client, id);
     }
 
     return NextResponse.json({
