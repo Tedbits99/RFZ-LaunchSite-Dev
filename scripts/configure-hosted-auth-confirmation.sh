@@ -46,7 +46,7 @@ new_allowlist="$(awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="\n" }' "$
 # This is the documented Supabase server-side confirmation pattern. The
 # supplied RedirectTo is the already trusted /auth/callback URL from signup;
 # no request-controlled destination is introduced here.
-confirmation_template='<h2>Confirm your signup</h2><p>Follow this link to confirm your user:</p><p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=email">Confirm your email address</a></p>'
+confirmation_template='<h2>Confirm your signup</h2><p>Follow this link to confirm your user:</p><p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">Confirm your email address</a></p>'
 payload="$(jq -n --arg uri_allow_list "$new_allowlist" --arg template "$confirmation_template" \
   '{uri_allow_list: $uri_allow_list, mailer_templates_confirmation_content: $template}')"
 
@@ -57,7 +57,10 @@ patch_status="$(curl --silent --show-error --max-time 30 -X PATCH \
   --data "$payload" "$api_url")"
 if [[ ! "$patch_status" =~ ^2 ]]; then
   api_code="$(jq -r '.code // .error_code // empty' "$after" 2>/dev/null || true)"
-  echo "BLOCKED: Auth confirmation configuration update failed (HTTP $patch_status${api_code:+, code=$api_code})." >&2
+  api_message="$(jq -r '.message // .error // .error_description // .errors[0].message // empty' "$after" 2>/dev/null \
+    | tr '\r\n' ' ' | cut -c1-160 \
+    | sed -E 's#https?://[^[:space:]]+#URL_REDACTED#g; s/<[^>]*>/[TEMPLATE_REDACTED]/g; s/\{\{[^}]+\}\}/[TEMPLATE_VARIABLE]/g')"
+  echo "BLOCKED: Auth confirmation configuration update failed (HTTP $patch_status${api_code:+, code=$api_code}${api_message:+, message=$api_message})." >&2
   exit 1
 fi
 
