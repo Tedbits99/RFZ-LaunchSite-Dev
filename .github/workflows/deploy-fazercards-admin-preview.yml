@@ -101,6 +101,11 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke-test compiled Worker before deployment
+        env:
+          OPEN_NEXT_SMOKE_PORT: 8787
+        run: bash scripts/test-open-next-runtime.sh
+
       - name: Deploy same protected Cloudflare Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
