@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Activity, RefreshCcw, Radio, ShieldCheck } from 'lucide-react';
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients';
+import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 
 type SupplierEvent = {
   id: string;
@@ -41,30 +43,37 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
 
   useEffect(() => {
     void refresh();
-    // Realtime broadcasts INSERT events to RLS-authorized admin sessions.
-    // Periodic revalidation catches missed sockets and existing-event updates.
     const timer = setInterval(() => { void refresh(); }, 10000);
     let closed = false;
-    let client: ReturnType<typeof createAdminBrowserClient> | null = null;
-    try {
-      client = createAdminBrowserClient();
-      const channel = client.channel('admin-fazercards-webhooks')
-        .on('postgres_changes', {
-          event: '*', schema: 'public', table: 'fazercards_webhook_events',
-        }, () => { void refresh(); })
-        .subscribe((status) => { if (!closed) setLive(status === 'SUBSCRIBED'); });
-      return () => {
-        closed = true;
-        clearInterval(timer);
-        void client?.removeChannel(channel);
-      };
-    } catch {
-      setLive(false);
-      return () => {
-        closed = true;
-        clearInterval(timer);
-      };
-    }
+    let client: SupabaseClient | null = null;
+    let channel: RealtimeChannel | null = null;
+
+    const connect = async () => {
+      try {
+        // PR #14 uses a dedicated admin cookie namespace; older deployments
+        // use the original shared namespace. Support both during transition.
+        const adminClient = createAdminBrowserClient();
+        const adminSession = await adminClient.auth.getSession();
+        client = adminSession.data.session ? adminClient : getSupabaseBrowserClient();
+        if (!client || closed) return;
+        const currentSession = await client.auth.getSession();
+        if (!currentSession.data.session || closed) return;
+        channel = client.channel('admin-fazercards-webhooks')
+          .on('postgres_changes', {
+            event: '*', schema: 'public', table: 'fazercards_webhook_events',
+          }, () => { void refresh(); })
+          .subscribe(status => { if (!closed) setLive(status === 'SUBSCRIBED'); });
+      } catch {
+        if (!closed) setLive(false);
+      }
+    };
+    void connect();
+
+    return () => {
+      closed = true;
+      clearInterval(timer);
+      if (client && channel) void client.removeChannel(channel);
+    };
   }, [refresh]);
 
   return (
