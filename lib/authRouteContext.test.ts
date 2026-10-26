@@ -6,6 +6,7 @@ describe('resolveAuthRouteContext', () => {
     ['/admin', 'admin'],
     ['/admin/orders', 'admin'],
     ['/api/admin/orders/123', 'admin'],
+    ['/api/auth/admin-login', 'admin'],
     ['/secure-admin-login?from=logout', 'admin'],
     ['/api/promotions', 'admin'],
     ['/api/payment-config', 'admin'],

@@ -10,6 +10,7 @@ const ADMIN_EXACT_OR_PREFIX = [
 // application. Keep this list explicit so a similarly named public endpoint
 // cannot be classified as an admin route by accident.
 const ADMIN_PROTECTED_API = [
+  '/api/auth/admin-login',
   '/api/announcement',
   '/api/export',
   '/api/games',

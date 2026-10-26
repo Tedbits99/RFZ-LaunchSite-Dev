@@ -60,42 +60,24 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
-    let supabase: ReturnType<typeof createAdminBrowserClient>
     try {
-      supabase = createAdminBrowserClient()
-    } catch {
-      setError('Admin authentication is temporarily unavailable. Please try again later.')
-      setSubmitting(false)
-      return
-    }
-
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (signInError) {
-      setError(
-        signInError.message === 'Invalid login credentials'
-          ? 'Invalid email or password.'
-          : signInError.message,
-      )
-      setSubmitting(false)
-      return
-    }
-
-    try {
-      if (!(await verifyAdminSession())) {
-        await supabase.auth.signOut({ scope: 'local' })
-        setError('This account is not authorized for the admin console.')
+      const response = await fetch('/api/auth/admin-login', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email, password }),
+      })
+      const body = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) {
+        setError(body.error || 'Admin authentication is temporarily unavailable. Please try again.')
         setSubmitting(false)
         return
       }
+      router.replace('/admin')
     } catch {
-      await supabase.auth.signOut({ scope: 'local' })
       setError('Admin authentication is temporarily unavailable. Please try again.')
       setSubmitting(false)
-      return
     }
-
-    router.replace('/admin')
   }
 
   if (!ready) {
@@ -119,13 +101,15 @@ export default function SecureAdminLoginPage() {
           </p>
         </div>
 
-        <form className="space-y-3" method="post" action="/secure-admin-login" onSubmit={handleSubmit}>
+        <form className="space-y-3" method="post" action="/api/auth/admin-login" onSubmit={handleSubmit}>
           <label className="block">
             <span className="mb-1 block text-xs text-slate-400">Email</span>
             <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
               <Mail size={15} className="text-slate-500" />
               <input
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -140,6 +124,8 @@ export default function SecureAdminLoginPage() {
               <Lock size={15} className="text-slate-500" />
               <input
                 type="password"
+                name="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

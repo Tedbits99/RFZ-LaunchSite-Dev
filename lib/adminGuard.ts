@@ -16,6 +16,46 @@ export type AdminSessionResult =
 
 const ADMIN_ROLES = new Set(['ADMIN', 'SUPER_ADMIN'])
 
+type AdminIdentity = {
+  email?: string | null
+  name?: string | null
+  role?: string | null
+  is_active?: boolean | null
+}
+
+type AuthIdentity = {
+  id: string
+  email?: string | null
+}
+
+type AuthorizedAdminIdentity = AdminIdentity & {
+  email: string
+  name?: string | null
+  role: string
+  is_active: true
+}
+
+/**
+ * The Auth identity and the application admin record are a deliberate
+ * two-part authorization decision. Matching the UUID prevents an arbitrary
+ * account from inheriting a role; matching the normalized email catches stale
+ * or manually-corrupted admin records before they authorize an operator.
+ */
+export function isAuthorizedAdminIdentity(
+  user: AuthIdentity,
+  admin: AdminIdentity | null | undefined,
+): admin is AuthorizedAdminIdentity {
+  const authEmail = user.email?.trim().toLowerCase()
+  const adminEmail = admin?.email?.trim().toLowerCase()
+  return Boolean(
+    admin?.is_active
+      && ADMIN_ROLES.has(admin.role || '')
+      && authEmail
+      && adminEmail
+      && authEmail === adminEmail,
+  )
+}
+
 function authFailureReason(message?: string): 'unauthenticated' | 'unavailable' {
   const normalized = (message || '').toLowerCase()
   return /auth session missing|invalid jwt|invalid token|jwt expired|session not found|not authenticated/.test(normalized)
@@ -39,7 +79,7 @@ async function resolveAdminSessionWithClient(
     .eq('id', user.id)
     .maybeSingle()
   if (adminError) return { ok: false, reason: 'unavailable' }
-  if (!admin?.is_active || !ADMIN_ROLES.has(admin.role)) {
+  if (!isAuthorizedAdminIdentity(user, admin)) {
     return { ok: false, reason: 'forbidden' }
   }
 
@@ -131,7 +171,7 @@ export async function requireAdmin(
     if (adminError) {
       return { ok: false, response: jsonError(503, 'Authentication service temporarily unavailable.') }
     }
-    if (!admin || !admin.is_active || !ADMIN_ROLES.has(admin.role)) {
+    if (!isAuthorizedAdminIdentity(user, admin)) {
       return { ok: false, response: jsonError(403, 'Forbidden.') }
     }
 

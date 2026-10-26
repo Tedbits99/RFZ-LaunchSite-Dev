@@ -16,7 +16,7 @@ vi.mock('@supabase/ssr', () => ({
 vi.mock('@/lib/supabaseAdmin', () => ({ adminSupabase: null }));
 vi.mock('@/lib/supabaseServer', () => ({ createSupabaseServerClient: vi.fn() }));
 
-import { getAdminSession, requireAdmin, resolveAdminSession } from './adminGuard';
+import { getAdminSession, isAuthorizedAdminIdentity, requireAdmin, resolveAdminSession } from './adminGuard';
 
 const request = { cookies: { getAll: () => [], set: vi.fn() } } as unknown as NextRequest;
 
@@ -62,6 +62,14 @@ describe('requireAdmin authorization boundary', () => {
     if (!result.ok) expect(result.response.status).toBe(403);
   });
 
+  it('requires the Auth email to match the UUID-bound active admin record', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'admin-1', email: 'different@example.com' } }, error: null });
+    mocks.maybeSingle.mockResolvedValue({ data: { email: 'admin@example.com', name: 'Admin', role: 'SUPER_ADMIN', is_active: true }, error: null });
+    const result = await requireAdmin(request);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
+  });
+
   it('resolves an active admin through the admin cookie client without a service-role lookup', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: { id: 'admin-1', email: 'admin@example.com' } }, error: null });
     mocks.maybeSingle.mockResolvedValue({ data: { email: 'admin@example.com', name: 'Admin', role: 'SUPER_ADMIN', is_active: true }, error: null });
@@ -90,5 +98,18 @@ describe('requireAdmin authorization boundary', () => {
 
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: { message: 'fetch failed' } });
     await expect(resolveAdminSession()).resolves.toEqual({ ok: false, reason: 'unavailable' });
+  });
+});
+
+describe('admin identity contract', () => {
+  it.each([
+    [{ id: 'a', email: 'owner@example.com' }, { email: 'owner@example.com', role: 'SUPER_ADMIN', is_active: true }, true],
+    [{ id: 'a', email: 'OWNER@EXAMPLE.COM' }, { email: ' owner@example.com ', role: 'ADMIN', is_active: true }, true],
+    [{ id: 'a', email: 'owner@example.com' }, { email: 'other@example.com', role: 'SUPER_ADMIN', is_active: true }, false],
+    [{ id: 'a', email: null }, { email: 'owner@example.com', role: 'SUPER_ADMIN', is_active: true }, false],
+    [{ id: 'a', email: 'owner@example.com' }, { email: 'owner@example.com', role: 'STAFF', is_active: true }, false],
+    [{ id: 'a', email: 'owner@example.com' }, { email: 'owner@example.com', role: 'SUPER_ADMIN', is_active: false }, false],
+  ])('returns %s for an Auth/admin identity pair', (user, admin, expected) => {
+    expect(isAuthorizedAdminIdentity(user, admin)).toBe(expected);
   });
 });
