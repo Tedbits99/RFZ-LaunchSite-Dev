@@ -88,6 +88,10 @@ export async function proxy(req: NextRequest) {
   return res
 }
 
+// The homepage and secure admin sign-in are build-time public shells. They
+// perform any browser session inspection client-side, and do not require
+// server-side Supabase cookie refresh on GET. Preserve refresh handling for
+// /admin, /account, /api, checkout and other sensitive dynamic routes.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  matcher: ['/((?!$|secure-admin-login(?:/|$)|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 }
