@@ -36,6 +36,7 @@ export default function ResetPasswordPage() {
   const [confirmation, setConfirmation] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
   const [preparing, setPreparing] = useState(true);
+  const [signInPath, setSignInPath] = useState('/login');
 
   useEffect(() => {
     let active = true;
@@ -102,7 +103,18 @@ export default function ResetPasswordPage() {
       });
 
       if (response.ok) {
+        // Only the server-verified recovery identity may select an admin
+        // destination. Explicitly allowlist the two internal sign-in routes:
+        // forged response destinations can never become open redirects.
+        const body = await response.json().catch(() => null) as { signInPath?: unknown } | null;
+        if (body?.signInPath !== '/login' && body?.signInPath !== '/secure-admin-login') {
+          setState('success');
+          return;
+        }
+        const destination = body.signInPath;
+        setSignInPath(destination);
         setState('success');
+        window.location.replace(destination);
         return;
       }
       if (response.status === 503) {
@@ -127,7 +139,7 @@ export default function ResetPasswordPage() {
             <CheckCircle2 size={36} className="mx-auto text-emerald-400" />
             <h1 className="font-display mt-3 text-2xl font-bold">Password set</h1>
             <p className="mt-2 text-sm text-slate-400">{GENERIC_OK}</p>
-            <a href="/login" className="mt-6 inline-block rounded-lg border border-[#22314d] px-4 py-2 text-sm text-slate-300 transition-colors hover:border-[#31456b] hover:text-slate-100">Sign in</a>
+            <a href={signInPath} className="mt-6 inline-block rounded-lg border border-[#22314d] px-4 py-2 text-sm text-slate-300 transition-colors hover:border-[#31456b] hover:text-slate-100">Sign in</a>
           </div>
         ) : (
           <>
@@ -165,7 +177,7 @@ export default function ResetPasswordPage() {
                 {preparing ? 'Verifying reset link…' : state === 'pending' ? 'Updating…' : 'Update password'}
               </button>
             </form>
-            <p className="mt-4 text-center text-xs text-slate-500"><a href="/login" className="text-cyan-300">Back to sign in</a></p>
+            <p className="mt-4 text-center text-xs text-slate-500"><a href="/login" className="text-cyan-300">Customer sign in</a></p>
           </>
         )}
       </div>
