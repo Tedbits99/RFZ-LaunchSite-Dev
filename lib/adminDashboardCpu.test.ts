@@ -21,6 +21,15 @@ describe('Cloudflare admin dashboard CPU regression', () => {
     expect(page).toContain("export const dynamic = 'force-dynamic'");
   });
 
+  it('keeps admin-header actions and customer email responsive on narrow screens', () => {
+    const shell = readFileSync('app/admin/AdminShell.tsx', 'utf8');
+    const account = readFileSync('app/account/page.tsx', 'utf8');
+    expect(shell).toContain('max-w-[92px]');
+    expect(shell).toContain('aria-label="Log out of admin dashboard"');
+    expect(shell).toContain('hidden sm:inline">Log out');
+    expect(account).toContain('font-display break-all text-base');
+  });
+
   it('retains backend admin authorization for the supplier event API', () => {
     const route = readFileSync('app/api/admin/fazercards-webhooks/route.ts', 'utf8');
     expect(route).toMatch(/requireAdmin|createAdminServerClient|getAdminSession/);
