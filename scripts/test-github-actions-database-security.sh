@@ -2,8 +2,8 @@
 set -euo pipefail
 
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-local_api_port=54321
-local_db_port=54322
+local_api_port=""
+local_db_port=""
 upgrade_mode=false
 
 if [ "${1:-}" = "--existing-schema-upgrade" ]; then
@@ -16,6 +16,39 @@ if ! command -v node >/dev/null 2>&1; then
   exit 2
 fi
 node_bin="$(command -v node)"
+
+# GitHub-hosted runners can retain listeners from unrelated jobs. Ask the
+# kernel for free loopback ports instead of assuming the conventional Supabase
+# ports are available. The values are written into the disposable config and
+# then revalidated from Supabase CLI output before any connection is allowed.
+find_free_loopback_port() {
+  "$node_bin" -e '
+const net = require("node:net");
+const server = net.createServer();
+server.once("error", () => process.exit(1));
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  if (!address || typeof address === "string") process.exit(1);
+  process.stdout.write(String(address.port));
+  server.close(() => process.exit(0));
+});
+' 2>/dev/null
+}
+
+local_api_port="$(find_free_loopback_port)" || {
+  echo "ERROR: Could not reserve a disposable Supabase API port." >&2
+  exit 2
+}
+local_db_port="$(find_free_loopback_port)" || {
+  echo "ERROR: Could not reserve a disposable Supabase database port." >&2
+  exit 2
+}
+while [ "$local_db_port" = "$local_api_port" ]; do
+  local_db_port="$(find_free_loopback_port)" || {
+    echo "ERROR: Could not reserve a distinct disposable Supabase database port." >&2
+    exit 2
+  }
+done
 
 # One implementation is used both for the actual DB_URL and socket-free test
 # inputs. It returns only a normalized, literal-loopback PostgreSQL URL.
@@ -65,7 +98,7 @@ test_db_url_validator() {
     "postgresql://postgres:pass@localhost.attacker.example:${local_db_port}/postgres" \
     "postgresql://postgres:pass@remote-localhost.example:${local_db_port}/postgres" \
     "postgresql://postgres:pass@127.0.0.1.evil:${local_db_port}/postgres" \
-    "postgresql://postgres:pass@127.0.0.1:54323/postgres" \
+    "postgresql://postgres:pass@127.0.0.1:1/postgres" \
     "postgresql://postgres:pass@127.0.0.1/postgres" \
     "https://postgres:pass@127.0.0.1:${local_db_port}/postgres" \
     "postgresql://user@127.0.0.1:${local_db_port}/postgres" \
@@ -216,7 +249,7 @@ test_psql_invocation_validator() {
   assert_psql_args_rejected --command 'SELECT 1;' -- || return 1
 
   # A mismatched primary URL must fail even when all trailing options are safe.
-  if validate_psql_invocation 'postgresql://postgres@127.0.0.1:54323/postgres' "$valid_url" --command "SELECT 1;"; then
+  if validate_psql_invocation 'postgresql://postgres@127.0.0.1:1/postgres' "$valid_url" --command "SELECT 1;"; then
     echo "ERROR: psql invocation validator accepted a non-approved connection URL." >&2
     return 1
   fi
