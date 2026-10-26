@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Activity, RefreshCcw, Radio, ShieldCheck } from 'lucide-react';
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients';
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { categorizeFazerCardsEvent, titleForFazerCardsEvent, summarizeFazerCardsStatus } from '@/lib/suppliers/fazercardsEvents';
 
@@ -57,11 +56,9 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
 
     const connect = async () => {
       try {
-        // PR #14 uses a dedicated admin cookie namespace; older deployments
-        // use the original shared namespace. Support both during transition.
         const adminClient = createAdminBrowserClient();
         const adminSession = await adminClient.auth.getSession();
-        client = adminSession.data.session ? adminClient : getSupabaseBrowserClient();
+        client = adminSession.data.session ? adminClient : null;
         if (!client || closed) return;
         const currentSession = await client.auth.getSession();
         if (!currentSession.data.session || closed) return;

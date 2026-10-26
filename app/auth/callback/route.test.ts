@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   defaultExchangeCodeForSession: vi.fn(),
   defaultGetUser: vi.fn(),
   defaultRpc: vi.fn(),
+  defaultVerifyOtp: vi.fn(),
   recoveryExchangeCodeForSession: vi.fn(),
+  recoveryVerifyOtp: vi.fn(),
   recoveryGetUser: vi.fn(),
 }));
 
@@ -18,6 +20,7 @@ vi.mock('@/lib/supabaseServer', () => ({
   createSupabaseServerClient: vi.fn(() => ({
     auth: {
       exchangeCodeForSession: mocks.defaultExchangeCodeForSession,
+      verifyOtp: mocks.defaultVerifyOtp,
       getUser: mocks.defaultGetUser,
     },
     rpc: mocks.defaultRpc,
@@ -28,6 +31,7 @@ vi.mock('@/lib/authSessionClients', () => ({
   createRecoveryServerClient: vi.fn(() => ({
     auth: {
       exchangeCodeForSession: mocks.recoveryExchangeCodeForSession,
+      verifyOtp: mocks.recoveryVerifyOtp,
       getUser: mocks.recoveryGetUser,
     },
   })),
@@ -90,6 +94,8 @@ describe('email confirmation callback (default namespace)', () => {
     });
     mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'no recovery verifier' } });
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
+    mocks.defaultVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: null });
   });
 
@@ -103,6 +109,23 @@ describe('email confirmation callback (default namespace)', () => {
     expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
     expect(location(response)).not.toContain('one-time-code');
     expect(location(response)).not.toContain('evil.example');
+  });
+
+  it('verifies a documented token_hash email confirmation without a browser PKCE verifier', async () => {
+    mocks.defaultVerifyOtp.mockResolvedValue({
+      data: { session: { user: { id: 'customer-1' } } },
+      error: null,
+    });
+
+    const response = await GET(request('?token_hash=opaque-confirmation-token&type=email'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
+    expect(mocks.defaultVerifyOtp).toHaveBeenCalledWith({ token_hash: 'opaque-confirmation-token', type: 'email' });
+    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(location(response)).not.toContain('opaque-confirmation-token');
+    expect(await response.text()).not.toContain('opaque-confirmation-token');
   });
 
   it('uses only the default client on the confirmation path (never the recovery client)', async () => {
@@ -123,6 +146,16 @@ describe('email confirmation callback (default namespace)', () => {
     expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.defaultRpc).not.toHaveBeenCalled();
     expect((await response.text())).not.toContain('expired');
+  });
+
+  it('rejects an unsupported token_hash confirmation type before verification', async () => {
+    const response = await GET(request('?token_hash=opaque-confirmation-token&type=unknown'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
+    expect(mocks.defaultVerifyOtp).not.toHaveBeenCalled();
+    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(location(response)).not.toContain('opaque-confirmation-token');
   });
 
   it.each(['expired', 'reused'])('rejects an %s confirmation code', async (kind) => {
@@ -213,6 +246,21 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(decoded.claims.purpose).toBe('password-reset');
     expect(decoded.claims.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
     expect(decoded.claims.exp).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 600);
+  });
+
+  it('supports a Supabase token_hash recovery link without a browser PKCE verifier', async () => {
+    mocks.recoveryVerifyOtp.mockResolvedValue({
+      data: { session: { access_token: ACCESS_TOKEN, user: { id: USER_ID } } },
+      error: null,
+    });
+
+    const response = await GET(request('?token_hash=opaque-token&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(mocks.recoveryVerifyOtp).toHaveBeenCalledWith({ token_hash: 'opaque-token', type: 'recovery' });
+    expect(mocks.recoveryExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(proofCookie(response)).toBeDefined();
+    expect(location(response)).not.toContain('opaque-token');
   });
 
   it('issues the proof even when getUser() returns ONLY data.user (no data.session)', async () => {

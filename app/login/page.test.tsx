@@ -21,4 +21,11 @@ describe('login page source invariants (automated static checks)', () => {
   it('never logs credentials or tokens', () => {
     expect(source).not.toMatch(/console\.(log|error|warn|info|debug)/);
   });
+
+  it('renders the customer email/password recovery entry points', () => {
+    expect(source).toContain('href="/forgot-password"');
+    expect(source).not.toContain('CustomerOAuthButton');
+    expect(source).not.toContain('or continue with');
+    expect(source).toContain('Don&apos;t have an account?');
+  });
 });

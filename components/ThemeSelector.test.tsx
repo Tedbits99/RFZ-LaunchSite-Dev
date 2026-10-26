@@ -14,11 +14,15 @@ describe('one-button appearance selector', () => {
     expect(markup).toContain('aria-hidden="true"');
     expect(markup).toContain('transition-transform');
     expect(markup).toContain('motion-reduce:transition-none');
+    expect(markup).not.toContain('>Light</span>');
+    expect(markup).not.toContain('>Dark</span>');
+    expect(markup).not.toContain('>Night</span>');
+    expect(markup).toContain('class="theme-selector');
   });
 
   it('remains a single icon-only button in compact mode', () => {
     const markup = renderToStaticMarkup(
-      <ThemeProvider><ThemeSelector compact /></ThemeProvider>,
+      <ThemeProvider><ThemeSelector /></ThemeProvider>,
     );
     expect(markup.match(/<button\b/g)).toHaveLength(1);
     expect(markup).not.toContain('>Dark</span>');

@@ -49,6 +49,12 @@ describe('register page source invariants (automated static checks)', () => {
     expect(source).toContain('href="/login"');
   });
 
+  it('renders the reusable password control without social authentication', () => {
+    expect(source).toContain('<PasswordInput');
+    expect(source).not.toContain('CustomerOAuthButton');
+    expect(source).not.toContain('or continue with');
+  });
+
   it('does not navigate the browser to the API endpoint', () => {
     expect(source).not.toMatch(/action=|method="POST"|window\.location/);
   });

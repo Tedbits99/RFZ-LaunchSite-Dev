@@ -18,7 +18,7 @@ silently accepted.
 Before `apply`, the workflow verifies the latest terminal success of the three
 required exact-head PR checks and rejects destructive DDL or outbound/scheduled
 side effects in the migration source. `apply` also requires the exact phrase
-`APPLY_DEVELOPMENT_MIGRATIONS` and applies only the 98 SQL migrations from the
+`APPLY_DEVELOPMENT_MIGRATIONS` and applies only the 99 SQL migrations from the
 verified current `main` commit. It does not reset the project, mark
 migrations as applied, execute PR scripts, or run production integrations.
 

@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Lock, Mail, ShieldCheck } from 'lucide-react'
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import { Mail, ShieldCheck } from 'lucide-react'
+import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 import ThemeSelector from '@/components/ThemeSelector'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function SecureAdminLoginPage() {
   const router = useRouter()
@@ -15,15 +16,20 @@ export default function SecureAdminLoginPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient()
-    if (!supabase) { setReady(true); return }
+    let supabase
+    try {
+      supabase = createAdminBrowserClient()
+    } catch {
+      setReady(true)
+      return
+    }
     supabase.auth.getSession().then(({ data }: { data: { session: unknown | null } }) => {
       if (data?.session) {
         router.replace('/admin')
       } else {
         setReady(true)
       }
-    })
+    }).catch(() => setReady(true))
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,29 +37,37 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
-    const supabase = getSupabaseBrowserClient()
-    if (!supabase) {
+    let supabase
+    try {
+      supabase = createAdminBrowserClient()
+    } catch {
       setError('Database is not configured.')
       setSubmitting(false)
       return
     }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
-    if (signInError) {
-      setError(
-        signInError.message === 'Invalid login credentials'
-          ? 'Invalid email or password.'
-          : signInError.message,
-      )
+    if (signInError || !signInData.user) {
+      setError(signInError?.message === 'Invalid login credentials' ? 'Invalid email or password.' : signInError?.message || 'Invalid email or password.')
       setSubmitting(false)
       return
     }
 
-    try { await supabase.rpc('claim_first_admin') } catch { /* Bootstrap is one-time; subsequent logins proceed normally. */ }
+    const { data: admin, error: adminError } = await supabase
+      .from('admins')
+      .select('id, is_active, role')
+      .eq('id', signInData.user.id)
+      .maybeSingle()
+    if (adminError || !admin || !admin.is_active || !['ADMIN', 'SUPER_ADMIN'].includes(admin.role)) {
+      await supabase.auth.signOut({ scope: 'local' })
+      setError('Invalid email or password.')
+      setSubmitting(false)
+      return
+    }
 
     router.push('/admin')
   }
@@ -67,9 +81,9 @@ export default function SecureAdminLoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#030718] px-5 text-slate-100">
-      <div className="w-full max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
-        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
+    <main className="grid min-h-screen w-full min-w-0 place-items-center bg-[#030718] px-5 text-slate-100">
+      <div className="w-full min-w-0 max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector /></div>
         <div className="mb-6 text-center">
           <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white">
             <ShieldCheck size={24} />
@@ -95,20 +109,8 @@ export default function SecureAdminLoginPage() {
               />
             </div>
           </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-400">Password</span>
-            <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
-              <Lock size={15} className="text-slate-500" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={submitting}
-                className="w-full bg-transparent py-2.5 text-sm outline-none"
-              />
-            </div>
-          </label>
+          <PasswordInput label="Password" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={submitting} autoComplete="current-password" />
+          <div className="text-right"><a href="/forgot-password" className="text-xs text-cyan-300 hover:underline">Forgot your admin password?</a></div>
 
           <button
             disabled={submitting}

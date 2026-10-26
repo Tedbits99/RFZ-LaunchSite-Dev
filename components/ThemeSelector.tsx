@@ -9,7 +9,7 @@ const icons = { light: Sun, dark: Moon, night: Star } satisfies Record<Theme, ty
 const names = { light: 'Light', dark: 'Dark', night: 'Night' } satisfies Record<Theme, string>;
 
 /** One keyboard-accessible control that cycles Light → Dark → Night → Light. */
-export default function ThemeSelector({ compact = false }: { compact?: boolean }) {
+export default function ThemeSelector() {
   const { theme, setTheme } = useTheme();
   const [turns, setTurns] = useState(0);
   const Icon = icons[theme];
@@ -24,7 +24,7 @@ export default function ThemeSelector({ compact = false }: { compact?: boolean }
     <button
       data-theme-selector
       type="button"
-      className="theme-selector inline-flex min-h-10 min-w-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[var(--rfz-line)] bg-[var(--rfz-surface)] px-3 py-2 text-xs font-semibold text-[var(--rfz-text)] shadow-md transition-colors hover:border-[var(--rfz-accent)] hover:bg-[var(--rfz-surface-raised)] focus-visible:outline focus-visible:outline-2"
+      className="theme-selector inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-[var(--rfz-line)] bg-[var(--rfz-surface)] p-2 text-[var(--rfz-text)] shadow-md transition-colors hover:border-[var(--rfz-accent)] hover:bg-[var(--rfz-surface-raised)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--rfz-accent)]"
       aria-label={`Appearance: ${names[theme]}. Switch to ${names[following]} mode`}
       title={`Current: ${names[theme]}. Click for ${names[following]} mode`}
       onClick={cycle}
@@ -36,7 +36,6 @@ export default function ThemeSelector({ compact = false }: { compact?: boolean }
       >
         <Icon size={17} strokeWidth={2} />
       </span>
-      {!compact && <span>{names[theme]}</span>}
     </button>
   );
 }

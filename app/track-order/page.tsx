@@ -153,7 +153,7 @@ export default function TrackOrder() {
 
   return (
     <main className="rfz-track-page min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto flex max-w-[1180px] items-center justify-between gap-4 px-5 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a><ThemeSelector compact={false} /></div></header>
+      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto flex max-w-[1180px] items-center justify-between gap-4 px-5 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a><ThemeSelector /></div></header>
       <div className="mx-auto max-w-2xl px-5 py-16">
         <h1 className="font-display text-3xl font-bold">Track Your Order</h1>
         <p className="mt-2 text-sm text-slate-400">Enter your order reference and email to check status.</p>

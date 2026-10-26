@@ -36,7 +36,10 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const code = params.get('code');
-  const isRecovery = params.get('type') === 'recovery';
+  const tokenHash = params.get('token_hash');
+  const tokenType = params.get('type');
+  const isRecovery = tokenType === 'recovery';
+  const isSupportedConfirmationTokenType = tokenType === 'email' || tokenType === 'signup' || tokenType === 'invite';
   // The SDK appends sb_flow_id to the email link when the PKCE flow starts so
   // the exchange reads the matching verifier slot. A tampered value simply
   // fails the exchange; it can never select another flow's verifier.
@@ -47,7 +50,7 @@ export async function GET(request: NextRequest) {
   // by Supabase Auth email links. type=recovery is an internal marker set by
   // the forgot-password redirect target, not a caller-controlled destination;
   // all redirects from this route stay on the configured application origin.
-  if (!code || params.has('error')) {
+  if ((!code && !tokenHash) || params.has('error') || (tokenHash && (!tokenType || !isRecovery && !isSupportedConfirmationTokenType))) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
@@ -73,12 +76,14 @@ export async function GET(request: NextRequest) {
     // recovery code has none in the default namespace, so editing type= in
     // the URL can never cross the flows.
     if (recovery) {
-      const { data: exchangeData, error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
-      if (recoveryExchangeError) return redirectToResetPassword(origin);
+      const recoveryResult = tokenHash
+        ? await recovery.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+        : await recovery.auth.exchangeCodeForSession(code!, exchangeOptions);
+      if (recoveryResult.error) return redirectToResetPassword(origin);
 
       // The documented contract: exchangeCodeForSession returns the session
       // via data.session. getUser() is used only to confirm the identity.
-      const session = exchangeData?.session;
+      const session = recoveryResult.data?.session;
       const accessToken = session?.access_token;
       if (!session?.user?.id || !accessToken) return redirectToResetPassword(origin);
 
@@ -104,8 +109,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const { error: exchangeError } = await supabase!.auth.exchangeCodeForSession(code, exchangeOptions);
-    if (exchangeError) return redirectToConfirmation('invalid');
+    const confirmationResult = tokenHash
+      ? await supabase!.auth.verifyOtp({ token_hash: tokenHash, type: tokenType as 'signup' | 'email' | 'invite' })
+      : await supabase!.auth.exchangeCodeForSession(code!, exchangeOptions);
+    if (confirmationResult.error) return redirectToConfirmation('invalid');
 
     const { data: userData, error: userError } = await supabase!.auth.getUser();
     if (userError || !userData.user) return redirectToConfirmation('error');

@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, TextInput } from '@/components/ui';
 import ThemeSelector from '@/components/ThemeSelector';
+import PasswordInput from '@/components/PasswordInput';
 
 export default function Login() {
   const router = useRouter();
@@ -13,6 +14,11 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth') === 'restricted') setError('This account is not available for customer access.');
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,14 +52,15 @@ export default function Login() {
   }
 
   return (
-    <main className="rfz-auth-page grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
-      <div className="surface w-full max-w-sm p-6 sm:p-8">
-        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
+    <main className="rfz-auth-page grid min-h-screen w-full min-w-0 place-items-center bg-[#030718] px-5 py-8 text-slate-100">
+      <div className="surface w-full min-w-0 max-w-sm p-6 sm:p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector /></div>
         <h1 className="font-display text-2xl font-bold">Sign in</h1>
-        <p className="mt-1 text-sm text-slate-400">Access your RunFazone account and order history.</p>
+        <p className="mt-1 text-sm text-slate-400">Access your RunFazone account.</p>
         <form className="mt-6 space-y-3" onSubmit={submit}>
           <TextInput label="Email" name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={submitting} placeholder="you@example.com" />
-          <TextInput label="Password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} disabled={submitting} placeholder="Your password" />
+          <PasswordInput label="Password" name="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} disabled={submitting} placeholder="Your password" />
+          <div className="text-right"><Link href="/forgot-password" className="text-xs text-cyan-300 hover:underline">Forgot password?</Link></div>
           <Button type="submit" disabled={submitting} className="w-full">
             {submitting ? 'Signing in…' : 'Sign In'}
           </Button>
@@ -65,7 +72,7 @@ export default function Login() {
             <a href={`/auth/confirmation?status=pending&email=${encodeURIComponent(email)}`} className="text-cyan-300">Resend the confirmation email</a>
           </p>
         )}
-        <p className="mt-4 text-center text-xs text-slate-500">New to RunFazone? <Link href="/register" className="text-cyan-300">Create Account</Link></p>
+        <p className="mt-5 text-center text-xs text-slate-500">Don&apos;t have an account? <Link href="/register" className="text-cyan-300">Sign up</Link></p>
       </div>
     </main>
   );

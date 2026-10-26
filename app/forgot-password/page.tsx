@@ -47,9 +47,9 @@ export default function ForgotPassword() {
   }
 
   return (
-    <main className="rfz-auth-page grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
-      <div className="w-full max-w-sm rounded-2xl border border-[#1b2a2e] bg-[#0b1225] p-8">
-        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
+    <main className="rfz-auth-page grid min-h-screen w-full min-w-0 place-items-center bg-[#030718] px-5 py-8 text-slate-100">
+      <div className="w-full min-w-0 max-w-sm rounded-2xl border border-[#1b2a2e] bg-[#0b1225] p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector /></div>
         {state === 'sent' ? (
           <div className="text-center">
             <CheckCircle2 size={36} className="mx-auto text-emerald-400" />

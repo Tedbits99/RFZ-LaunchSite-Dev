@@ -1,5 +1,5 @@
 import { adminSupabase } from '@/lib/supabaseAdmin'
-import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { createAdminServerClient } from '@/lib/authSessionClients'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import PackagesManager from './PackagesManager'
@@ -25,9 +25,9 @@ type PackageRecord = {
 
 export default async function AdminGamePackagesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  let db: Awaited<ReturnType<typeof createSupabaseServerClient>>
+  let db: Awaited<ReturnType<typeof createAdminServerClient>>
   try {
-    db = adminSupabase || await createSupabaseServerClient()
+    db = adminSupabase || await createAdminServerClient()
   } catch {
     return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>
   }
