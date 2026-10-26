@@ -1,8 +1,10 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Mail, Lock, UserRound, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Mail, UserRound, CheckCircle2, AlertCircle } from 'lucide-react';
 import ThemeSelector from '@/components/ThemeSelector';
+import PasswordInput from '@/components/PasswordInput';
+import CustomerOAuthButton from '@/components/CustomerOAuthButton';
 
 type SubmitState = 'idle' | 'pending' | 'success' | 'error';
 
@@ -66,9 +68,9 @@ export default function Register() {
   }
 
   return (
-    <main className="rfz-auth-page grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
-      <div className="w-full max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
-        <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
+    <main className="rfz-auth-page grid min-h-screen w-full min-w-0 place-items-center bg-[#030718] px-5 py-8 text-slate-100">
+      <div className="w-full min-w-0 max-w-sm rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-8">
+        <div className="mb-5 flex justify-end"><ThemeSelector /></div>
         {submitState === 'success' ? (
           <div className="text-center">
             <CheckCircle2 size={36} className="mx-auto text-emerald-400" />
@@ -88,7 +90,7 @@ export default function Register() {
             <form className="mt-6 space-y-3" onSubmit={handleSubmit} noValidate={false}>
               <label className="block"><span className="mb-1 block text-xs text-slate-400">Full name</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><UserRound size={15} className="text-slate-500" /><input name="name" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
               <label className="block"><span className="mb-1 block text-xs text-slate-400">Email</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Mail size={15} className="text-slate-500" /><input name="email" type="email" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
-              <label className="block"><span className="mb-1 block text-xs text-slate-400">Password</span><div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3"><Lock size={15} className="text-slate-500" /><input name="password" type="password" required className="w-full bg-transparent py-2.5 text-sm outline-none" /></div></label>
+              <PasswordInput label="Password" name="password" autoComplete="new-password" required />
               {submitState === 'error' && errorMessage ? (
                 <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2.5 text-xs text-red-300" role="alert">
                   <AlertCircle size={15} className="mt-0.5 shrink-0 text-red-400" />
@@ -103,8 +105,10 @@ export default function Register() {
                 {submitState === 'pending' ? 'Creating account…' : 'Create Account'}
               </button>
             </form>
-            <p className="mt-4 text-center text-xs text-slate-500">
-              Already have an account? <a href="/login" className="text-slate-300 underline-offset-2 transition-colors hover:text-slate-100 hover:underline">Sign in</a>
+            <div className="mt-6 flex items-center gap-3 text-[10px] uppercase tracking-[.18em] text-[var(--rfz-subtle)]"><span className="h-px flex-1 bg-[var(--rfz-line)]" /><span>or continue with</span><span className="h-px flex-1 bg-[var(--rfz-line)]" /></div>
+            <CustomerOAuthButton />
+            <p className="mt-5 text-center text-xs text-slate-500">
+              Already have an account? <a href="/login" className="text-cyan-300">Sign in</a>
             </p>
           </>
         )}

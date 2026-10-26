@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createAdminServerClient } from '@/lib/authSessionClients';
 import GamesVisibilityPanel from './GamesVisibilityPanel';
 import FazerCardsWebhookFeed from './suppliers/FazerCardsWebhookFeed';
 import Link from 'next/link';
@@ -19,7 +19,7 @@ async function getMetrics(): Promise<{
   error: string | null;
 }> {
   const empty = { orders: [], games: [], packages: [], customerEmails: [], error: null as string | null };
-  let db: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  let db: Awaited<ReturnType<typeof createAdminServerClient>>;
   try {
     // This page is nested under app/admin/layout.tsx which already performs
     // the authoritative getAdminSession() check and denies unauthorized
@@ -27,7 +27,7 @@ async function getMetrics(): Promise<{
     // network call and JWT verification in the same SSR request: it wastes
     // scarce Cloudflare Worker CPU and adds no independent authorization.
     // The following Supabase reads remain RLS-backed by the user's session.
-    db = await createSupabaseServerClient();
+    db = await createAdminServerClient();
   } catch {
     return { ...empty, error: 'Database not configured' };
   }

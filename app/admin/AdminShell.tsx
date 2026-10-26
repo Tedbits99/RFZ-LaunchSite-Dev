@@ -2,8 +2,9 @@
 
 import { useState, type ReactNode } from 'react'
 import { Activity, Bell, LogOut, Menu, Search } from 'lucide-react'
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 import AdminNavigation from '@/components/admin/AdminNavigation'
+import ThemeSelector from '@/components/ThemeSelector'
 import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets'
 
 export default function AdminShell({ children }: { children: ReactNode }) {
@@ -35,6 +36,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                   Dashboard
                 </p>
               </div>
+              <ThemeSelector />
             </div>
             <div className="flex shrink-0 items-center gap-1 text-xs text-slate-400 sm:gap-3">
               <a
@@ -65,8 +67,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               <button
                 aria-label="Log out of admin dashboard"
                 onClick={async () => {
-                  const supabase = getSupabaseBrowserClient()
-                  if (supabase) await supabase.auth.signOut()
+                  try { await createAdminBrowserClient().auth.signOut({ scope: 'local' }) } catch { /* The protected route still receives a fresh login boundary. */ }
                   window.location.href = '/secure-admin-login'
                 }}
                 className="flex items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-rose-400 hover:text-rose-200"

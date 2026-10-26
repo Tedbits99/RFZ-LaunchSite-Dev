@@ -27,6 +27,7 @@ const CUSTOMER_EXACT_OR_PREFIX = [
 const CUSTOMER_EXACT = [
   '/api/auth/register',
   '/auth/callback',
+  '/auth/customer/callback',
 ];
 
 const PUBLIC_EXACT_OR_PREFIX = [

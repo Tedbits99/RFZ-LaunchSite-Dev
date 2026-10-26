@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Check, Loader2, Package, Save, Sparkles } from 'lucide-react'
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 
 type PackageRecord = {
   id: string
@@ -40,12 +41,8 @@ export default function PackagesManager({ packages: initialPackages, gameId, isM
     if (!isMobileLegends) return
     let cancelled = false
     const loadPackages = async () => {
-      const supabase = getSupabaseBrowserClient()
-      if (!supabase) {
-        setError('Admin database session is unavailable.')
-        setLoading(false)
-        return
-      }
+      let supabase: SupabaseClient
+      try { supabase = createAdminBrowserClient() } catch { setError('Admin database session is unavailable.'); setLoading(false); return }
       const { data, error: loadError } = await supabase
         .from('packages')
         .select('id, name, sku, amount, price_cents, original_price_cents, bonus, is_active, sort_order, badge, image_url, supplier_offer_id, supplier_category_id, supplier_cost_usd')

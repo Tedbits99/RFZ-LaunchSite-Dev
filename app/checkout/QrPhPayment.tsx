@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { BadgeCheck, Loader2, QrCode, Clock, CheckCircle2, AlertTriangle, RefreshCw, X, Maximize2 } from 'lucide-react';
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
+import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
 
 interface QrPhPaymentProps {
   orderReference: string;
@@ -100,8 +101,8 @@ export default function QrPhPayment({
 
   // Realtime subscription to order status (same behavior as the previous standalone card)
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    let supabase: SupabaseClient;
+    try { supabase = createCustomerBrowserClient(); } catch { return; }
 
     const channel = supabase
       .channel(`order-status-${orderId}`)

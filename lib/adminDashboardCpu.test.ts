@@ -16,7 +16,7 @@ describe('Cloudflare admin dashboard CPU regression', () => {
 
   it('does not repeat the expensive Supabase auth.getUser call in metrics rendering', () => {
     const page = readFileSync('app/admin/page.tsx', 'utf8');
-    expect(page).toContain("createSupabaseServerClient()");
+    expect(page).toContain("createAdminServerClient()");
     expect(page).not.toMatch(/db\.auth\.getUser\s*\(/);
     expect(page).toContain("export const dynamic = 'force-dynamic'");
   });

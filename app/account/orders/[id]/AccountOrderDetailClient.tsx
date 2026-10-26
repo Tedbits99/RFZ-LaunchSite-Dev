@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { ChevronRight, CheckCircle2, Clock, XCircle, Circle, RefreshCw } from 'lucide-react';
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
+import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
 import SiteFooter from '@/components/SiteFooter';
 
 type Order = {
@@ -149,8 +150,8 @@ export default function AccountOrderDetailClient({
 
   // Supabase Realtime: receive order status changes instantly.
   useEffect(() => {
-    const browserClient = getSupabaseBrowserClient();
-    if (!browserClient) {
+    let browserClient: SupabaseClient;
+    try { browserClient = createCustomerBrowserClient(); } catch {
       console.log(LOG_PREFIX, 'Realtime: browser client unavailable — falling back to polling only');
       setRealtimeStatus('unavailable');
       return;

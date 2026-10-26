@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { createAdminServerClient } from '@/lib/authSessionClients'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Gamepad2, Plus, Package as PackageIcon } from 'lucide-react'
@@ -26,7 +26,7 @@ export default async function AdminGamesPage() {
   let loadError: string | null = null
 
   try {
-    const db = await createSupabaseServerClient()
+    const db = await createAdminServerClient()
     const { data: { user } } = await db.auth.getUser()
     if (!user) throw new Error('Not authenticated')
     dbReady = true
