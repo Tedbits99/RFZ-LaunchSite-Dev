@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stdout } from 'node:process';
 
 // Prevent activating a metadata-only Worker version after deploying CSS/JS.
 const yaml = readFileSync('.github/workflows/runfazone-preview.yml', 'utf8');
@@ -21,4 +22,4 @@ assert.ok(yaml.includes('include-hidden-files: true'));
 assert.ok(yaml.includes('.open-next/**'));
 assert.ok(yaml.slice(assets, upload).includes('css_count'));
 assert.ok(yaml.slice(assets, upload).includes('js_count'));
-process.stdout.write('PREVIEW_STATIC_ASSETS_ORDER_PASS signer -> CSS/JS verification -> Worker deploy -> version verification\n');
+stdout.write('PREVIEW_STATIC_ASSETS_ORDER_PASS signer -> CSS/JS verification -> Worker deploy -> version verification\n');
