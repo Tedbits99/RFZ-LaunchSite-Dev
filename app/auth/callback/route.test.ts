@@ -111,6 +111,23 @@ describe('email confirmation callback (default namespace)', () => {
     expect(location(response)).not.toContain('evil.example');
   });
 
+  it('verifies a documented token_hash email confirmation without a browser PKCE verifier', async () => {
+    mocks.defaultVerifyOtp.mockResolvedValue({
+      data: { session: { user: { id: 'customer-1' } } },
+      error: null,
+    });
+
+    const response = await GET(request('?token_hash=opaque-confirmation-token&type=email'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
+    expect(mocks.defaultVerifyOtp).toHaveBeenCalledWith({ token_hash: 'opaque-confirmation-token', type: 'email' });
+    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(location(response)).not.toContain('opaque-confirmation-token');
+    expect(await response.text()).not.toContain('opaque-confirmation-token');
+  });
+
   it('uses only the default client on the confirmation path (never the recovery client)', async () => {
     await GET(request('?code=one-time-code'));
 
@@ -129,6 +146,16 @@ describe('email confirmation callback (default namespace)', () => {
     expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.defaultRpc).not.toHaveBeenCalled();
     expect((await response.text())).not.toContain('expired');
+  });
+
+  it('rejects an unsupported token_hash confirmation type before verification', async () => {
+    const response = await GET(request('?token_hash=opaque-confirmation-token&type=unknown'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
+    expect(mocks.defaultVerifyOtp).not.toHaveBeenCalled();
+    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(location(response)).not.toContain('opaque-confirmation-token');
   });
 
   it.each(['expired', 'reused'])('rejects an %s confirmation code', async (kind) => {

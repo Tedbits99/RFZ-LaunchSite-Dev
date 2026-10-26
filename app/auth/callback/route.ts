@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
   const tokenHash = params.get('token_hash');
   const tokenType = params.get('type');
   const isRecovery = tokenType === 'recovery';
+  const isSupportedConfirmationTokenType = tokenType === 'email' || tokenType === 'signup' || tokenType === 'invite';
   // The SDK appends sb_flow_id to the email link when the PKCE flow starts so
   // the exchange reads the matching verifier slot. A tampered value simply
   // fails the exchange; it can never select another flow's verifier.
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
   // by Supabase Auth email links. type=recovery is an internal marker set by
   // the forgot-password redirect target, not a caller-controlled destination;
   // all redirects from this route stay on the configured application origin.
-  if ((!code && !tokenHash) || params.has('error') || (tokenHash && !tokenType)) {
+  if ((!code && !tokenHash) || params.has('error') || (tokenHash && (!tokenType || !isRecovery && !isSupportedConfirmationTokenType))) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
