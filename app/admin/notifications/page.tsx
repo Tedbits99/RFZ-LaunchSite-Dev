@@ -2,6 +2,7 @@ import { adminSupabase } from '@/lib/supabaseAdmin'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Bell } from 'lucide-react'
+import FazerCardsWebhookFeed from '../suppliers/FazerCardsWebhookFeed'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,8 @@ export default async function AdminNotificationsPage() {
   return (
     <AdminPage title="Notifications">
       <PageHeader title="Notifications" subtitle={unread > 0 ? `${unread} unread` : 'All caught up'} />
+
+      <div className="mb-6"><FazerCardsWebhookFeed /></div>
 
       {!dbReady ? (
         <DbNotReady />
