@@ -102,8 +102,9 @@ Native pre-hydration submission and the hydrated JSON flow are both covered by
 regression tests. Live owner-admin sign-in, password-reset email delivery,
 Auth callback settings, and same-browser/fresh-browser hosted recovery remain
 UNVERIFIED because this environment has no authorized live Supabase/Auth
-binding or owner mailbox session. The earlier hosted preview result is
-historical and is not evidence that this exact head is deployed.
+binding or owner mailbox session. Protected deployment `40270959320` verified
+this exact head and anonymous Access denial, but it does not substitute for
+owner-authenticated recovery or admin-session evidence.
 
 ## Route identifiers covered by this matrix
 

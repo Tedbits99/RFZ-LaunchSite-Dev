@@ -19,8 +19,8 @@ operation, email, or webhook.
 | Supplier isolation | Source/test guards only; hosted FazerCards configuration unverified | BLOCKED | Verify no live supplier secret or route is enabled |
 | Webhook isolation | Signature tests are isolated; hosted endpoint/configuration unverified | BLOCKED | Verify live webhook routing is disabled or sandbox-only |
 | Email isolation | Local tests and secret-name inventory only | BLOCKED | Verify sink/test recipient and disabled production SMTP delivery |
-| Cloudflare Access all traffic | Earlier protected deployment `40184035348` verified Access protection for `runfazone-preview.mondigoted732.workers.dev` and its versioned URL; the current PR head has not been redeployed | PASS (historical deployment) | Redeploy the exact current head only through the protected preview workflow |
-| Anonymous denial | Earlier deployment returned HTTP 302 on normal and versioned URLs; the current PR head response is unverified because it is not deployed | UNVERIFIED (current head) | Run normal/versioned denial and owner-access tests after exact-head deployment |
+| Cloudflare Access all traffic | Protected preview deployment `40270959320` verified the exact current PR head `9df7a6388d9ff37d6dcd6de0e813847ffd8ba58f` through the trusted main workflow; saved account-wide Access policy passed | PASS | Owner-authenticated access and unauthorized-identity denial remain owner-assisted |
+| Anonymous denial | Deployment `40270959320` returned HTTP 302 for both the normal Worker URL and immutable version URL, with no application data markers | PASS | Complete owner-authenticated and unauthorized-identity tests without sharing credentials or tokens |
 
 ## P0 authentication gate evidence
 
