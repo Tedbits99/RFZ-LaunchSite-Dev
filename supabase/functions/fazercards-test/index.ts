@@ -28,6 +28,13 @@ Deno.serve(async (req: Request) => {
   try {
     const url = new URL(req.url);
     const path = url.pathname.replace("/fazercards-test", "");
+    // Public clients can browse supplier catalog data only; privileged reads
+    // and real supplier purchasing require authenticated server-side routes.
+    if (req.method !== "GET" || !["/categories", "/offers"].includes(path)) {
+      return new Response(JSON.stringify({ error: "Authorized server-side supplier endpoint required" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    }
     const apiKey = Deno.env.get("SUPPLIER_FAZERCARDS_API_KEY");
 
     if (!apiKey) {
