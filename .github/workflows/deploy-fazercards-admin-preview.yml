@@ -8,6 +8,8 @@ on:
       - 'app/admin/notifications/page.tsx'
       - 'app/admin/suppliers/FazerCardsWebhookFeed.tsx'
       - 'app/api/admin/fazercards-webhooks/route.ts'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/deploy-fazercards-admin-preview.yml'
 
 permissions:
