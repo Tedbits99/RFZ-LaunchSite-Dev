@@ -27,8 +27,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               <img
                 src={RFZ_PUBLIC_ASSETS.logo}
                 alt="RunFazone"
-                width={3772}
-                height={840}
+                width={2172}
+                height={724}
                 className="h-auto max-h-9 w-auto max-w-[92px] object-contain sm:h-10 sm:max-h-none sm:max-w-none"
               />
               <div className="hidden sm:block">
