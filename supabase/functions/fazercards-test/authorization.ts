@@ -4,8 +4,12 @@ export function isActiveAdmin(admin: AdminAccess): admin is { role: string; is_a
   return Boolean(admin?.is_active);
 }
 
-export function mayCreateSupplierOrder(admin: AdminAccess): boolean {
+export function isActiveSuperAdmin(admin: AdminAccess): boolean {
   return isActiveAdmin(admin) && admin.role === 'SUPER_ADMIN';
+}
+
+export function mayCreateSupplierOrder(admin: AdminAccess): boolean {
+  return isActiveSuperAdmin(admin);
 }
 
 export function mayUseServiceCredential(isOrderRequest: boolean): boolean {

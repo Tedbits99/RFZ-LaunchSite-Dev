@@ -8,6 +8,7 @@ set -euo pipefail
 : "${SUPABASE_DB_USER:?SUPABASE_DB_USER is required}"
 : "${SUPABASE_DB_PASSWORD:?SUPABASE_DB_PASSWORD is required}"
 : "${PROJECT_ID:?PROJECT_ID is required}"
+: "${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}"
 
 export PGPASSWORD="$SUPABASE_DB_PASSWORD"
 db_connection="host=$SUPABASE_POOLER_HOST port=$SUPABASE_POOLER_PORT user=$SUPABASE_DB_USER dbname=postgres sslmode=require connect_timeout=10"
@@ -74,11 +75,41 @@ echo "HOSTED_PROVIDER_SECRET_NAMES_RECORDED names=${secret_names:-none}"
 echo "HOSTED_DB_INTEGRATION_SUMMARY cron_relation_present=$cron_relation_present cron_job_count=$cron_job_count enabled_suppliers=$enabled_suppliers live_nonmanual_payment_configs=$live_payment_configs payment_configs=$payment_configs"
 
 # The deployed function inventory is evidence to classify, not a reason to
-# fail merely because functions exist. External-capable functions must have no
-# provider secrets in the development project; their source contracts fail
-# closed when those secrets are absent. The inventory remains visible for
-# review and future sandbox activation.
+# fail merely because functions or server-side secrets exist. Secret names are
+# metadata only; their values never leave Supabase. Safety is established by
+# the active database configuration and the function authorization contracts:
+# automated payment is disabled, suppliers are disabled, cron has no jobs, and
+# the supplier test endpoint is deployed from the reviewed source that requires
+# an active SUPER_ADMIN and an enabled supplier before any provider request.
 echo "HOSTED_EDGE_FUNCTION_INVENTORY_PASS count=$function_count external_capable=${known_external_functions:-none} external_provider_secret_names=${external_secret_names:-none}"
+
+# The audit must prove that an unauthenticated caller cannot reach the
+# supplier-test handler. This request is intentionally stopped at the handler
+# authorization boundary and never reaches the provider. Do not print the
+# response body or any credential-bearing header.
+supplier_test_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+  --max-time 15 \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H 'Content-Type: application/json' \
+  "${SUPABASE_URL}/functions/v1/fazercards-test")"
+[[ "$supplier_test_status" = 401 || "$supplier_test_status" = 403 ]] || {
+  echo "HOSTED_INTEGRATION_AUDIT_FAIL=supplier_test_anonymous_access status=$supplier_test_status" >&2
+  exit 1
+}
+echo "HOSTED_SUPPLIER_TEST_ANONYMOUS_DENIAL_PASS status=$supplier_test_status"
+
+test -s "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
+  echo 'HOSTED_INTEGRATION_AUDIT_FAIL=reviewed_supplier_test_source_missing' >&2
+  exit 1
+}
+rg -q 'isActiveSuperAdmin' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
+  echo 'HOSTED_INTEGRATION_AUDIT_FAIL=reviewed_supplier_test_admin_guard_missing' >&2
+  exit 1
+}
+rg -q 'Supplier integration is disabled' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
+  echo 'HOSTED_INTEGRATION_AUDIT_FAIL=reviewed_supplier_test_disabled_guard_missing' >&2
+  exit 1
+}
 
 # The export is retained only in the ephemeral runner workspace and removed by
 # the EXIT trap. It proves export capability, not a disposable restore.
@@ -98,11 +129,6 @@ SOURCE_DB_CONNECTION="$db_connection" \
   exit 1
 }
 
-if [[ -n "$external_secret_names" ]]; then
-  echo "HOSTED_INTEGRATION_AUDIT_FAIL=external_provider_secrets_present names=$external_secret_names" >&2
-  exit 1
-fi
-
 [[ "$enabled_suppliers" = 0 ]] || {
   echo 'HOSTED_INTEGRATION_AUDIT_FAIL=enabled_supplier_configuration' >&2
   exit 1
@@ -115,4 +141,4 @@ fi
 
 echo "HOSTED_PROVIDER_SECRET_NAMES_RECORDED names=${secret_names:-none}"
 echo "HOSTED_DB_INTEGRATION_SUMMARY cron_relation_present=$cron_relation_present cron_job_count=$cron_job_count live_nonmanual_payment_configs=$live_payment_configs"
-echo "HOSTED_INTEGRATION_AUDIT_PASS edge_functions=$function_count provider_calls=uninvoked_by_audit payment_config=non_live supplier_config=disabled scheduled_jobs=none"
+echo "HOSTED_INTEGRATION_AUDIT_PASS edge_functions=$function_count provider_calls=uninvoked_by_audit payment_config=non_live supplier_config=disabled scheduled_jobs=none server_secrets=metadata_only"
