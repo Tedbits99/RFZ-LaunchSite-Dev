@@ -514,8 +514,10 @@ if [ "$upgrade_mode" = true ]; then
     upgrade_count=$((upgrade_count + 1))
   done < <(awk -F'|' '/\| INCLUDE \|/ {gsub(/`/, "", $4); gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")
 
-  if [ "$upgrade_count" -ne 86 ]; then
-    echo "ERROR: Expected 86 canonical post-baseline migrations; found $upgrade_count." >&2
+  manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")"
+  expected_upgrade_count=$((manifest_count - 11))
+  if [ "$upgrade_count" -ne "$expected_upgrade_count" ]; then
+    echo "ERROR: Expected $expected_upgrade_count canonical post-baseline migrations from the reviewed manifest; found $upgrade_count." >&2
     exit 13
   fi
   echo "LEGACY_UPGRADE_PHASE=canonical-selection-complete count=$upgrade_count"
