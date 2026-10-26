@@ -11,6 +11,10 @@ on:
         description: 'Only for customer-security-cleanup: exact failed run fixture ID'
         required: false
         type: string
+      admin_email:
+        description: 'Only for admin-auth-audit: existing development admin email (never logged)'
+        required: false
+        type: string
       operation:
         description: 'Audit/plan only, or explicitly apply migrations to development'
         required: true
@@ -20,6 +24,7 @@ on:
           - behavioral-audit
           - customer-security-audit
           - customer-security-cleanup
+          - admin-auth-audit
           - gate-b-audit
           - payment-safety-lockdown
           - plan
@@ -58,6 +63,7 @@ jobs:
       SUPABASE_PROJECT_ID_VAR: ${{ vars.SUPABASE_PROJECT_ID }}
       SOURCE_SHA: ${{ inputs.source_sha }}
       CLEANUP_RUN_ID: ${{ inputs.cleanup_run_id }}
+      ADMIN_EMAIL: ${{ inputs.admin_email }}
       OPERATION: ${{ inputs.operation }}
       APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
       REPOSITORY: ${{ github.repository }}
@@ -104,7 +110,10 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          if [[ "$OPERATION" = admin-auth-audit ]]; then
+            test -n "$ADMIN_EMAIL" || { echo 'BLOCKED: admin-auth-audit requires admin_email.' >&2; exit 1; }
+          fi
           if [[ "$OPERATION" = customer-security-cleanup && "$CLEANUP_RUN_ID" != 40167500569 ]]; then
             echo 'BLOCKED: cleanup is allow-listed only for failed run 40167500569.' >&2
             exit 1
@@ -174,7 +183,12 @@ jobs:
             exit 1
           } || true
           count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          test "$count" = 96 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 96." >&2; exit 1; }
+          if [[ "$count" == 97 && -f "$migration_dir/20261025150000_promotions_cinematic_presets.sql" ]]; then
+            echo 'SOURCE_MIGRATIONS_VERIFIED count=97 known_additive_promotions_cinematic_presets=true'
+          elif [[ "$count" != 96 ]]; then
+            echo "BLOCKED: reviewed source contains $count SQL migrations; expected the 96-file baseline or the explicitly reviewed additive promotions migration." >&2
+            exit 1
+          fi
           command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
           if rg -n -i --glob '*.sql' \
             '(drop[[:space:]]+(table|schema|database)|truncate([[:space:];]|$)|alter[[:space:]]+table[^;]*(drop[[:space:]]+column)|cron\.schedule|net\.http|http_(post|get)|https?://)' \
@@ -229,6 +243,16 @@ jobs:
           set -euo pipefail
           supabase migration list --linked > "$RUNNER_TEMP/migrations-before.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-before.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
+
+      - name: Audit the existing admin Auth identity
+        if: inputs.operation == 'admin-auth-audit'
+        env:
+          SUPABASE_URL: https://${{ steps.identity.outputs.project_id }}.supabase.co
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: bash scripts/audit-hosted-admin-auth.sh
 
       - name: Run hosted behavioral security assertions
         if: inputs.operation == 'behavioral-audit'
