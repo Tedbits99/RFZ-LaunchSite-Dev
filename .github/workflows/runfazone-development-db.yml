@@ -183,10 +183,12 @@ jobs:
             exit 1
           } || true
           count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          if [[ "$count" == 97 && -f "$migration_dir/20261025150000_promotions_cinematic_presets.sql" ]]; then
-            echo 'SOURCE_MIGRATIONS_VERIFIED count=97 known_additive_promotions_cinematic_presets=true'
+          if [[ "$count" == 98 \
+            && -f "$migration_dir/20261025150000_promotions_cinematic_presets.sql" \
+            && -f "$migration_dir/20261026053026_fazercards_signed_webhook_inbox.sql" ]]; then
+            echo 'SOURCE_MIGRATIONS_VERIFIED count=98 known_additive_promotions_cinematic_presets=true known_additive_fazercards_signed_webhook_inbox=true'
           elif [[ "$count" != 96 ]]; then
-            echo "BLOCKED: reviewed source contains $count SQL migrations; expected the 96-file baseline or the explicitly reviewed additive promotions migration." >&2
+            echo "BLOCKED: reviewed source contains $count SQL migrations; expected the 96-file baseline or the explicitly reviewed additive migrations." >&2
             exit 1
           fi
           command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
