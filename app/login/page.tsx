@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Button, TextInput } from '@/components/ui';
 import ThemeSelector from '@/components/ThemeSelector';
 import PasswordInput from '@/components/PasswordInput';
-import CustomerOAuthButton from '@/components/CustomerOAuthButton';
 
 export default function Login() {
   const router = useRouter();
@@ -19,7 +18,6 @@ export default function Login() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'restricted') setError('This account is not available for customer access.');
-    if (params.get('auth') === 'oauth_error') setError('Google sign-in could not be completed. Please try again.');
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -67,8 +65,6 @@ export default function Login() {
             {submitting ? 'Signing in…' : 'Sign In'}
           </Button>
         </form>
-        <div className="mt-6 flex items-center gap-3 text-[10px] uppercase tracking-[.18em] text-[var(--rfz-subtle)]"><span className="h-px flex-1 bg-[var(--rfz-line)]" /><span>or continue with</span><span className="h-px flex-1 bg-[var(--rfz-line)]" /></div>
-        <CustomerOAuthButton />
         {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-center text-sm text-rose-200">{error}</p>}
         {awaitingConfirmation && (
           <p className="mt-3 text-center text-xs text-slate-400">

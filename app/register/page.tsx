@@ -4,7 +4,6 @@ import { FormEvent, useState } from 'react';
 import { Mail, UserRound, CheckCircle2, AlertCircle } from 'lucide-react';
 import ThemeSelector from '@/components/ThemeSelector';
 import PasswordInput from '@/components/PasswordInput';
-import CustomerOAuthButton from '@/components/CustomerOAuthButton';
 
 type SubmitState = 'idle' | 'pending' | 'success' | 'error';
 
@@ -105,8 +104,6 @@ export default function Register() {
                 {submitState === 'pending' ? 'Creating account…' : 'Create Account'}
               </button>
             </form>
-            <div className="mt-6 flex items-center gap-3 text-[10px] uppercase tracking-[.18em] text-[var(--rfz-subtle)]"><span className="h-px flex-1 bg-[var(--rfz-line)]" /><span>or continue with</span><span className="h-px flex-1 bg-[var(--rfz-line)]" /></div>
-            <CustomerOAuthButton />
             <p className="mt-5 text-center text-xs text-slate-500">
               Already have an account? <a href="/login" className="text-cyan-300">Sign in</a>
             </p>

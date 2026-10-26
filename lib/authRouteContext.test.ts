@@ -24,7 +24,6 @@ describe('resolveAuthRouteContext', () => {
     ['/login', 'customer'],
     ['/api/auth/register', 'customer'],
     ['/auth/callback?code=synthetic', 'customer'],
-    ['/auth/customer/callback?code=synthetic', 'customer'],
   ] as const)('classifies customer path %s as %s', (path, expected) => {
     expect(resolveAuthRouteContext(path)).toBe(expected);
   });
