@@ -374,6 +374,62 @@ jobs:
             exit 1
           fi
 
+      - name: Provision preview recovery proof signer before assets deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RFZ_RECOVERY_PROOF_HMAC_SECRET: ${{ secrets.RFZ_RECOVERY_PROOF_HMAC_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The signer is runtime-only. It must never be part of the OpenNext
+          # artifact, a GitHub output, or a log line. Prefer the protected
+          # environment secret when configured; otherwise create a fresh
+          # preview-only signer for this deployment. Rotating it invalidates
+          # only outstanding preview reset links, which are short-lived.
+          signer="$RFZ_RECOVERY_PROOF_HMAC_SECRET"
+          if [[ -z "$signer" ]]; then
+            signer="$(openssl rand -hex 32)"
+            echo 'Preview recovery signer generated in-memory for this deployment.'
+          fi
+          [[ "$signer" =~ ^[0-9a-fA-F]{64,}$ ]] || {
+            echo 'BLOCKED: RFZ_RECOVERY_PROOF_HMAC_SECRET must be at least 32 bytes.' >&2
+            exit 1
+          }
+          secret_log="$RUNNER_TEMP/wrangler-recovery-secret.log"
+          set +e
+          printf '%s' "$signer" | npx --yes wrangler@4.151.3 secret put RFZ_RECOVERY_PROOF_HMAC_SECRET \
+            --config wrangler.jsonc --name runfazone-preview >"$secret_log" 2>&1
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            echo "BLOCKED: preview recovery signer provisioning failed (exit_code=$status)." >&2
+            if ! grep -F -- "$signer" "$secret_log" >/dev/null 2>&1; then
+              grep -Ei 'error|fail|forbidden|unauthori[sz]ed|permission|account|worker|script|api|code' "$secret_log" \
+                | head -20 \
+                | sed -E \
+                  -e 's/(Bearer[[:space:]]+|api[_ -]?token[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+                  -e 's#https?://[^[:space:]]+#URL_REDACTED#Ig' \
+                  -e 's/[0-9a-f]{32,}/[REDACTED_ID]/Ig' || true
+            fi
+            exit "$status"
+          fi
+          echo 'Preview recovery proof signer provisioned; secret value withheld.'
+
+      - name: Assert immutable artifact contains website CSS and JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .open-next/worker.js
+          test -d .open-next/assets/_next/static
+          css_count="$(find .open-next/assets/_next/static -type f -name '*.css' | wc -l | tr -d ' ')"
+          js_count="$(find .open-next/assets/_next/static -type f -name '*.js' | wc -l | tr -d ' ')"
+          (( css_count > 0 && js_count > 0 )) || {
+            echo "BLOCKED: immutable Cloudflare artifact is missing Next.js CSS or JavaScript static assets." >&2
+            exit 1
+          }
+          echo "IMMUTABLE_STATIC_ASSETS_PASS css_files=$css_count js_files=$js_count"
+
       - name: Deploy only the named Worker on workers.dev
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -426,49 +482,11 @@ jobs:
             fi
             exit "$deploy_status"
           fi
-          echo 'Cloudflare Worker deployment completed for runfazone-preview; deployment diagnostics redacted.'
-
-      - name: Provision preview recovery proof signer
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
-          RFZ_RECOVERY_PROOF_HMAC_SECRET: ${{ secrets.RFZ_RECOVERY_PROOF_HMAC_SECRET }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The signer is runtime-only. It must never be part of the OpenNext
-          # artifact, a GitHub output, or a log line. Prefer the protected
-          # environment secret when configured; otherwise create a fresh
-          # preview-only signer for this deployment. Rotating it invalidates
-          # only outstanding preview reset links, which are short-lived.
-          signer="$RFZ_RECOVERY_PROOF_HMAC_SECRET"
-          if [[ -z "$signer" ]]; then
-            signer="$(openssl rand -hex 32)"
-            echo 'Preview recovery signer generated in-memory for this deployment.'
-          fi
-          [[ "$signer" =~ ^[0-9a-fA-F]{64,}$ ]] || {
-            echo 'BLOCKED: RFZ_RECOVERY_PROOF_HMAC_SECRET must be at least 32 bytes.' >&2
-            exit 1
-          }
-          secret_log="$RUNNER_TEMP/wrangler-recovery-secret.log"
-          set +e
-          printf '%s' "$signer" | npx --yes wrangler@4.151.3 secret put RFZ_RECOVERY_PROOF_HMAC_SECRET \
-            --config wrangler.jsonc --name runfazone-preview >"$secret_log" 2>&1
-          status=$?
-          set -e
-          if (( status != 0 )); then
-            echo "BLOCKED: preview recovery signer provisioning failed (exit_code=$status)." >&2
-            if ! grep -F -- "$signer" "$secret_log" >/dev/null 2>&1; then
-              grep -Ei 'error|fail|forbidden|unauthori[sz]ed|permission|account|worker|script|api|code' "$secret_log" \
-                | head -20 \
-                | sed -E \
-                  -e 's/(Bearer[[:space:]]+|api[_ -]?token[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
-                  -e 's#https?://[^[:space:]]+#URL_REDACTED#Ig' \
-                  -e 's/[0-9a-f]{32,}/[REDACTED_ID]/Ig' || true
-            fi
-            exit "$status"
-          fi
-          echo 'Preview recovery proof signer provisioned; secret value withheld.'
+          # IMPORTANT: final Worker version-changing operation must always be
+          # the full asset-bearing deploy. A subsequent "wrangler secret put"
+          # creates a metadata-only Worker version that may lack the Next.js
+          # CSS/JS bundle and leave the entire site unstyled.
+          echo 'Cloudflare Worker and static assets deployed as final version-changing operation.'
 
       - name: Resolve normal and immutable version URLs
         id: urls
