@@ -20,6 +20,36 @@ function recoveryClientError(origin: string) {
   return NextResponse.redirect(`${origin}/auth/reset-password?unavailable=1`);
 }
 
+async function issueRecoveryProof(
+  recovery: Awaited<ReturnType<typeof createRecoveryServerClient>>,
+  origin: string,
+  session: { access_token?: string; user?: { id?: string } | null } | null | undefined,
+) {
+  const accessToken = session?.access_token;
+  const sessionUserId = session?.user?.id;
+  if (!sessionUserId || !accessToken) return redirectToResetPassword(origin);
+
+  const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
+  if (recoveryUserError || !recoveryUser.user || recoveryUser.user.id !== sessionUserId) {
+    return redirectToResetPassword(origin);
+  }
+
+  // The proof is signed over the verified recovery user ID and a SHA-256
+  // fingerprint of the exchange-issued access token. The raw token never
+  // enters the cookie or a redirect URL.
+  try {
+    const res = redirectToResetPassword(origin);
+    const proof = newRecoveryProofCookie({
+      userId: recoveryUser.user.id,
+      sessionFingerprint: sessionFingerprint(accessToken),
+    });
+    res.cookies.set(proof.name, proof.value, proof.options);
+    return res;
+  } catch {
+    return redirectToResetPassword(origin);
+  }
+}
+
 function activationResult(data: unknown): { status?: string; error?: string | null } | null {
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row !== 'object') return null;
@@ -36,6 +66,7 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const code = params.get('code');
+  const tokenHash = params.get('token_hash');
   const isRecovery = params.get('type') === 'recovery';
   // The SDK appends sb_flow_id to the email link when the PKCE flow starts so
   // the exchange reads the matching verifier slot. A tampered value simply
@@ -47,7 +78,7 @@ export async function GET(request: NextRequest) {
   // by Supabase Auth email links. type=recovery is an internal marker set by
   // the forgot-password redirect target, not a caller-controlled destination;
   // all redirects from this route stay on the configured application origin.
-  if (!code || params.has('error')) {
+  if ((!code && !tokenHash) || params.has('error')) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
@@ -73,37 +104,29 @@ export async function GET(request: NextRequest) {
     // recovery code has none in the default namespace, so editing type= in
     // the URL can never cross the flows.
     if (recovery) {
-      const { data: exchangeData, error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
-      if (recoveryExchangeError) return redirectToResetPassword(origin);
-
-      // The documented contract: exchangeCodeForSession returns the session
-      // via data.session. getUser() is used only to confirm the identity.
-      const session = exchangeData?.session;
-      const accessToken = session?.access_token;
-      if (!session?.user?.id || !accessToken) return redirectToResetPassword(origin);
-
-      const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
-      if (recoveryUserError || !recoveryUser.user) return redirectToResetPassword(origin);
-      if (recoveryUser.user.id !== session.user.id) return redirectToResetPassword(origin);
-
-      // The proof is signed over the verified recovery user ID and a SHA-256
-      // fingerprint of the exchange-issued access token, so the reset
-      // endpoint can re-verify both against its own recovery-namespace
-      // session. The raw token never enters the cookie. If signing fails
-      // (e.g. the HMAC secret is missing) no proof is issued.
-      try {
-        const res = redirectToResetPassword(origin);
-        const proof = newRecoveryProofCookie({
-          userId: recoveryUser.user.id,
-          sessionFingerprint: sessionFingerprint(accessToken),
-        });
-        res.cookies.set(proof.name, proof.value, proof.options);
-        return res;
-      } catch {
-        return redirectToResetPassword(origin);
+      if (code) {
+        // The documented contract: exchangeCodeForSession returns the session
+        // via data.session. getUser() is used only to confirm the identity.
+        const { data: exchangeData, error: recoveryExchangeError } = await recovery.auth.exchangeCodeForSession(code, exchangeOptions);
+        if (recoveryExchangeError) return redirectToResetPassword(origin);
+        return issueRecoveryProof(recovery, origin, exchangeData?.session);
       }
+
+      // Some Supabase projects retain the token-hash email template rather
+      // than the PKCE code template. Accept only a recovery token hash and let
+      // Supabase verify it; never accept a raw access/refresh token here.
+      const { data: otpData, error: otpError } = await recovery.auth.verifyOtp({
+        type: 'recovery',
+        token_hash: tokenHash!,
+      });
+      if (otpError) return redirectToResetPassword(origin);
+      return issueRecoveryProof(recovery, origin, otpData?.session);
     }
 
+    // Token-hash verification is recovery-only. Confirmation flows continue
+    // to require the authorization code exchange and never accept a token
+    // hash as a signup confirmation.
+    if (!code) return redirectToConfirmation('invalid');
     const { error: exchangeError } = await supabase!.auth.exchangeCodeForSession(code, exchangeOptions);
     if (exchangeError) return redirectToConfirmation('invalid');
 

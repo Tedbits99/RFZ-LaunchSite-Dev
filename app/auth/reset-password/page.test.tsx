@@ -41,7 +41,7 @@ describe('reset password page source invariants (automated static checks)', () =
     expect(source).toContain("method: 'POST'");
     expect(source).toContain("headers: { 'Content-Type': 'application/json' }");
     expect(source).toContain("credentials: 'same-origin'");
-    expect(source).toContain('JSON.stringify({ password })');
+    expect(source).toContain('JSON.stringify({ password: nextPassword })');
   });
 
   it('never manipulates cookies or storage in the browser', () => {
@@ -50,9 +50,15 @@ describe('reset password page source invariants (automated static checks)', () =
   });
 
   it('preserves the password length requirements in the form', () => {
-    expect(source).toContain('minLength={8}');
-    expect(source).toContain('maxLength={128}');
+    expect(source).toContain('const PASSWORD_MIN = 8');
+    expect(source).toContain('const PASSWORD_MAX = 128');
+    expect(source).toContain('minLength={PASSWORD_MIN}');
+    expect(source).toContain('maxLength={PASSWORD_MAX}');
     expect(source).toContain('autoComplete="new-password"');
+    expect(source).toContain('name="confirmPassword"');
+    expect(source).toContain('Passwords do not match.');
+    expect(source).toContain('aria-pressed={showPasswords}');
+    expect(source).toContain('role="progressbar"');
   });
 
   it('shows only generic error messages and never leaks provider details', () => {
@@ -76,6 +82,7 @@ describe('reset password page SSR render (executed render check)', () => {
     const html = renderToString(React.createElement(ResetPasswordPage));
     expect(html).toContain('Choose a new password');
     expect(html).toContain('name="password"');
+    expect(html).toContain('name="confirmPassword"');
     expect(html).toContain('type="password"');
     expect(html).toContain('Update password');
   });

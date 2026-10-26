@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   defaultGetUser: vi.fn(),
   defaultRpc: vi.fn(),
   recoveryExchangeCodeForSession: vi.fn(),
+  recoveryVerifyOtp: vi.fn(),
   recoveryGetUser: vi.fn(),
 }));
 
@@ -28,6 +29,7 @@ vi.mock('@/lib/authSessionClients', () => ({
   createRecoveryServerClient: vi.fn(() => ({
     auth: {
       exchangeCodeForSession: mocks.recoveryExchangeCodeForSession,
+      verifyOtp: mocks.recoveryVerifyOtp,
       getUser: mocks.recoveryGetUser,
     },
   })),
@@ -90,6 +92,7 @@ describe('email confirmation callback (default namespace)', () => {
     });
     mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'no recovery verifier' } });
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'no token hash' } });
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: null });
   });
 
@@ -221,6 +224,31 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     const response = await GET(request('?code=recovery-code&type=recovery'));
 
     expect(proofCookie(response)).toBeDefined();
+  });
+
+  it('accepts a Supabase recovery token_hash callback and still requires a verified recovery session', async () => {
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: { access_token: ACCESS_TOKEN, user: { id: USER_ID } } }, error: null });
+
+    const response = await GET(request('?token_hash=one-time-token-hash&type=recovery'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(mocks.recoveryVerifyOtp).toHaveBeenCalledWith({ type: 'recovery', token_hash: 'one-time-token-hash' });
+    expect(mocks.recoveryGetUser).toHaveBeenCalledOnce();
+    expect(proofCookie(response)).toBeDefined();
+    expect(location(response)).not.toContain('one-time-token-hash');
+  });
+
+  it('rejects a failed token_hash without issuing a proof or calling the default client', async () => {
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'expired provider detail' } });
+
+    const response = await GET(request('?token_hash=expired-secret&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(mocks.recoveryGetUser).not.toHaveBeenCalled();
+    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(await response.text()).not.toContain('expired provider detail');
   });
 
   it('never activates a profile or calls activation RPC from the recovery branch', async () => {

@@ -1,4 +1,5 @@
 const callbackPath = '/auth/callback';
+const recoveryCallbackQuery = '?type=recovery';
 
 export function getConfiguredAppOrigin(): string | null {
   const configured = process.env.NEXT_PUBLIC_APP_URL;
@@ -17,6 +18,16 @@ export function getConfiguredAppOrigin(): string | null {
 export function getAuthCallbackUrl(): string | null {
   const origin = getConfiguredAppOrigin();
   return origin ? `${origin}${callbackPath}` : null;
+}
+
+/**
+ * The only redirect target used for password recovery. Keeping this in the
+ * trusted-origin module prevents callers from constructing a destination from
+ * request headers or user-controlled `next` parameters.
+ */
+export function getPasswordRecoveryCallbackUrl(): string | null {
+  const origin = getConfiguredAppOrigin();
+  return origin ? `${origin}${callbackPath}${recoveryCallbackQuery}` : null;
 }
 
 export function getConfirmationUrl(status: 'success' | 'pending' | 'restricted' | 'invalid' | 'error'): string | null {

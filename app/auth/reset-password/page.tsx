@@ -1,25 +1,50 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Lock, CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, Lock } from 'lucide-react';
 
 type PageState = 'form' | 'pending' | 'success' | 'error';
 
 const GENERIC_INVALID = 'This reset link is invalid or has expired. Please request a new one.';
 const GENERIC_OK = 'Password updated. You can now sign in with your new password.';
 const GENERIC_503 = 'Password reset is temporarily unavailable. Please try again later.';
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 128;
+
+function passwordStrength(password: string): { label: string; value: number } {
+  if (!password) return { label: 'Not set', value: 0 };
+  let score = password.length >= PASSWORD_MIN ? 1 : 0;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password) || /[^\p{L}\p{N}\s]/u.test(password)) score += 1;
+  if (password.length >= 12) score += 1;
+  return { label: score < 2 ? 'Needs improvement' : score === 2 ? 'Fair' : score === 3 ? 'Good' : 'Strong', value: score };
+}
 
 export default function ResetPasswordPage() {
   const [state, setState] = useState<PageState>('form');
   const [error, setError] = useState<string>('');
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (state === 'pending') return;
+    const formData = new FormData(event.currentTarget);
+    const nextPassword = String(formData.get('password') ?? '');
+    const nextConfirmation = String(formData.get('confirmPassword') ?? '');
+    if (nextPassword !== nextConfirmation) {
+      setError('Passwords do not match.');
+      setState('error');
+      return;
+    }
+    if (nextPassword.length < PASSWORD_MIN || nextPassword.length > PASSWORD_MAX || !/\S/.test(nextPassword)) {
+      setError(`Password must be between ${PASSWORD_MIN} and ${PASSWORD_MAX} characters.`);
+      setState('error');
+      return;
+    }
     setState('pending');
     setError('');
-
-    const password = String(new FormData(event.currentTarget).get('password') ?? '');
 
     try {
       // The password change happens server-side: the endpoint re-verifies the
@@ -29,7 +54,7 @@ export default function ResetPasswordPage() {
       const response = await fetch('/auth/reset-password/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password: nextPassword }),
         credentials: 'same-origin',
       });
 
@@ -62,15 +87,32 @@ export default function ResetPasswordPage() {
         ) : (
           <>
             <h1 className="font-display text-2xl font-bold">Choose a new password</h1>
-            <p className="mt-1 text-sm text-slate-400">Enter a new password for your account.</p>
+            <p className="mt-1 text-sm text-slate-400">Enter and confirm a new password for your account.</p>
             <form className="mt-6 space-y-3" method="post" action="/auth/reset-password/complete" onSubmit={submit}>
               <label className="block">
                 <span className="mb-1 block text-xs text-slate-400">New password</span>
                 <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
                   <Lock size={15} className="text-slate-500" />
-                  <input name="password" type="password" autoComplete="new-password" required minLength={8} maxLength={128} className="w-full bg-transparent py-2.5 text-sm outline-none" />
+                  <input name="password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required minLength={PASSWORD_MIN} maxLength={PASSWORD_MAX} value={password} onChange={(event) => setPassword(event.target.value)} className="w-full bg-transparent py-2.5 text-sm outline-none" />
                 </div>
               </label>
+              <div aria-live="polite" className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>Password strength: {passwordStrength(password).label}</span>
+                <span aria-label={`${passwordStrength(password).value} of 4 strength`} role="progressbar" aria-valuemin={0} aria-valuemax={4} aria-valuenow={passwordStrength(password).value} className="flex gap-1">
+                  {[1, 2, 3, 4].map((segment) => <span key={segment} aria-hidden="true" className={`h-1.5 w-7 rounded-full ${segment <= passwordStrength(password).value ? 'bg-cyan-300' : 'bg-slate-700'}`} />)}
+                </span>
+              </div>
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-400">Confirm new password</span>
+                <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
+                  <Lock size={15} className="text-slate-500" />
+                  <input name="confirmPassword" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required minLength={PASSWORD_MIN} maxLength={PASSWORD_MAX} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="w-full bg-transparent py-2.5 text-sm outline-none" />
+                </div>
+              </label>
+              <button type="button" aria-pressed={showPasswords} onClick={() => setShowPasswords((visible) => !visible)} className="inline-flex min-h-10 items-center gap-2 text-xs text-cyan-300 hover:text-cyan-200">
+                {showPasswords ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                {showPasswords ? 'Hide passwords' : 'Show passwords'}
+              </button>
               {state === 'error' && error ? (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert">{error}</div>
               ) : null}

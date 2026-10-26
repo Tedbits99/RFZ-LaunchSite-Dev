@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
-import { getConfiguredAppOrigin } from '@/lib/authRedirect';
+import { getConfiguredAppOrigin, getPasswordRecoveryCallbackUrl } from '@/lib/authRedirect';
 import { validateEmailInput } from '@/lib/authValidation';
 
 const GENERIC_OK = 'If the address can receive mail, reset instructions will be sent.';
@@ -13,13 +13,11 @@ function json(body: Record<string, string>, status: number) {
   });
 }
 
-function hasTrustedOrigin(request: NextRequest): boolean {
-  const origin = getConfiguredAppOrigin();
-  return Boolean(origin && request.headers.get('origin') === origin);
-}
-
 export async function POST(request: NextRequest) {
-  if (!hasTrustedOrigin(request)) return json({ error: 'Request origin is not allowed.' }, 403);
+  const origin = getConfiguredAppOrigin();
+  if (!origin || request.headers.get('origin') !== origin) {
+    return json({ error: 'Request origin is not allowed.' }, 403);
+  }
 
   let body: unknown;
   try {
@@ -42,7 +40,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const redirectTo = `${getConfiguredAppOrigin()}/auth/callback?type=recovery`;
+    const redirectTo = getPasswordRecoveryCallbackUrl();
+    if (!redirectTo) return json({ error: GENERIC_503 }, 503);
     const { error } = await client.auth.resetPasswordForEmail(validation.value, { redirectTo });
     if (error) {
       // Never reveal whether the address exists. The Auth provider's own
