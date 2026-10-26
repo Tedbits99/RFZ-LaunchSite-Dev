@@ -19,8 +19,8 @@ operation, email, or webhook.
 | Supplier isolation | Source/test guards only; hosted FazerCards configuration unverified | BLOCKED | Verify no live supplier secret or route is enabled |
 | Webhook isolation | Signature tests are isolated; hosted endpoint/configuration unverified | BLOCKED | Verify live webhook routing is disabled or sandbox-only |
 | Email isolation | Local tests and secret-name inventory only | BLOCKED | Verify sink/test recipient and disabled production SMTP delivery |
-| Cloudflare Access all traffic | Protected preview deployment `40270959320` verified the then-current PR head through the trusted main workflow; saved account-wide Access policy passed. The PR body records the exact deployed SHA. | PASS | Owner-authenticated access and unauthorized-identity denial remain owner-assisted |
-| Anonymous denial | Deployment `40270959320` returned HTTP 302 for both the normal Worker URL and immutable version URL, with no application data markers | PASS | Complete owner-authenticated and unauthorized-identity tests without sharing credentials or tokens |
+| Cloudflare Access all traffic | The latest successful protected preview workflow is recorded in the PR body and verifies the current exact head through the trusted main workflow; saved account-wide Access policy passed | PASS | Owner-authenticated access and unauthorized-identity denial remain owner-assisted |
+| Anonymous denial | The latest protected deployment returned HTTP 302 for both the normal Worker URL and immutable version URL, with no application data markers; the PR body records the exact run and SHA | PASS | Complete owner-authenticated and unauthorized-identity tests without sharing credentials or tokens |
 
 ## P0 authentication gate evidence
 
