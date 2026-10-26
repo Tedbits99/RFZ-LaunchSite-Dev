@@ -11,6 +11,15 @@ const GENERIC_503 = 'Password reset is temporarily unavailable. Please try again
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 128;
 
+async function prepareRecoverySession(): Promise<Response> {
+  return fetch('/auth/reset-password/prepare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: '{}',
+  });
+}
+
 function passwordStrength(password: string): { label: string; value: number } {
   if (!password) return { label: 'Not set', value: 0 };
   let score = password.length >= PASSWORD_MIN ? 1 : 0;
@@ -30,12 +39,7 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let active = true;
-    fetch('/auth/reset-password/prepare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: '{}',
-    })
+    prepareRecoverySession()
       .then((response) => {
         if (!active) return;
         if (response.ok) return;
@@ -71,8 +75,21 @@ export default function ResetPasswordPage() {
     }
     setState('pending');
     setError('');
+    setPreparing(true);
 
     try {
+      // Rebind immediately before the password update. Auth may refresh the
+      // recovery session while the user is reading or typing, so a proof
+      // issued only during the initial page load can be stale by submission.
+      // The prepare endpoint re-verifies the recovery session and refreshes
+      // the HttpOnly proof without exposing any token to the browser.
+      const prepareResponse = await prepareRecoverySession();
+      if (!prepareResponse.ok) {
+        setError(prepareResponse.status === 503 ? GENERIC_503 : GENERIC_INVALID);
+        setState('error');
+        return;
+      }
+
       // The password change happens server-side: the endpoint re-verifies the
       // recovery-namespace session and the signed HttpOnly proof cookie. The
       // browser never calls the Auth provider directly and never touches the
@@ -97,6 +114,8 @@ export default function ResetPasswordPage() {
     } catch {
       setError(GENERIC_503);
       setState('error');
+    } finally {
+      setPreparing(false);
     }
   }
 

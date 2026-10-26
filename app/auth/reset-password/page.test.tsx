@@ -51,6 +51,13 @@ describe('reset password page source invariants (automated static checks)', () =
     expect(source).toContain('Verifying reset link…');
   });
 
+  it('refreshes the proof again immediately before completing the password update', () => {
+    expect(source).toContain('Rebind immediately before the password update.');
+    expect(source).toContain('const prepareResponse = await prepareRecoverySession();');
+    expect(source).toContain('if (!prepareResponse.ok)');
+    expect(source).toContain("fetch('/auth/reset-password/complete'");
+  });
+
   it('never manipulates cookies or storage in the browser', () => {
     expect(source).not.toMatch(/document\.cookie/);
     expect(source).not.toMatch(/localStorage|sessionStorage/);
