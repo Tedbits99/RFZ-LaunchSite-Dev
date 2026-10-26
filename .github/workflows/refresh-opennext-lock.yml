@@ -52,4 +52,8 @@ jobs:
             exit 1
           fi
           git commit -m 'fix: upgrade OpenNext adapter for Next.js 16.4 manifest compatibility'
+          # The PR branch may acquire independent reviewed workflow fixes
+          # while the dependency build runs. Integrate them without force.
+          git fetch origin fix/opennext-164-preview-props
+          git merge --no-edit origin/fix/opennext-164-preview-props
           git push origin HEAD:fix/opennext-164-preview-props
