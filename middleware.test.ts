@@ -327,9 +327,14 @@ describe('proxy session refresh', () => {
     expect(res.headers.get('x-middleware-next')).toBe('1');
   });
 
-  it('keeps the existing matcher compatible with static assets and api routes', () => {
-    expect(config.matcher).toEqual([
-      '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
-    ]);
+  it('exempts build-time public pages but keeps protected routes behind the auth proxy', () => {
+    expect(config.matcher).toHaveLength(1);
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+    for (const publicPath of ['/', '/secure-admin-login', '/secure-admin-login/', '/_next/static/chunks/app.js', '/favicon.ico']) {
+      expect(matcher.test(publicPath)).toBe(false);
+    }
+    for (const protectedPath of ['/admin', '/admin/orders', '/account', '/checkout', '/api/auth/login', '/api/admin/orders']) {
+      expect(matcher.test(protectedPath)).toBe(true);
+    }
   });
 });
