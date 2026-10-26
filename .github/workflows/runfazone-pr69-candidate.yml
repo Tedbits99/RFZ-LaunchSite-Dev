@@ -208,7 +208,7 @@ jobs:
           log="$RUNNER_TEMP/wrangler-version-upload.log"
           set +e
           npx --yes wrangler@4.151.3 versions upload .open-next/worker.js \
-            --config wrangler.jsonc --name runfazone-preview --no-bundle \
+            --config wrangler.jsonc --name runfazone-preview \
             --assets .open-next/assets --tag "$PREVIEW_ALIAS" \
             --preview-alias "$PREVIEW_ALIAS" \
             --message "PR69 candidate $CANDIDATE_SHA" --strict >"$log" 2>&1
