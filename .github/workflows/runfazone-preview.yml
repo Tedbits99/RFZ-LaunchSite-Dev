@@ -435,6 +435,48 @@ jobs:
           fi
           echo 'Cloudflare Worker deployment completed for runfazone-preview; deployment diagnostics redacted.'
 
+      - name: Provision preview recovery proof signer
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RFZ_RECOVERY_PROOF_HMAC_SECRET: ${{ secrets.RFZ_RECOVERY_PROOF_HMAC_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The signer is runtime-only. It must never be part of the OpenNext
+          # artifact, a GitHub output, or a log line. Prefer the protected
+          # environment secret when configured; otherwise create a fresh
+          # preview-only signer for this deployment. Rotating it invalidates
+          # only outstanding preview reset links, which are short-lived.
+          signer="$RFZ_RECOVERY_PROOF_HMAC_SECRET"
+          if [[ -z "$signer" ]]; then
+            signer="$(openssl rand -hex 32)"
+            echo 'Preview recovery signer generated in-memory for this deployment.'
+          fi
+          [[ "$signer" =~ ^[0-9a-fA-F]{64,}$ ]] || {
+            echo 'BLOCKED: RFZ_RECOVERY_PROOF_HMAC_SECRET must be at least 32 bytes.' >&2
+            exit 1
+          }
+          secret_log="$RUNNER_TEMP/wrangler-recovery-secret.log"
+          set +e
+          printf '%s' "$signer" | npx --yes wrangler@4.151.3 secret put RFZ_RECOVERY_PROOF_HMAC_SECRET \
+            --config wrangler.jsonc --name runfazone-preview >"$secret_log" 2>&1
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            echo "BLOCKED: preview recovery signer provisioning failed (exit_code=$status)." >&2
+            if ! grep -F -- "$signer" "$secret_log" >/dev/null 2>&1; then
+              grep -Ei 'error|fail|forbidden|unauthori[sz]ed|permission|account|worker|script|api|code' "$secret_log" \
+                | head -20 \
+                | sed -E \
+                  -e 's/(Bearer[[:space:]]+|api[_ -]?token[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+                  -e 's#https?://[^[:space:]]+#URL_REDACTED#Ig' \
+                  -e 's/[0-9a-f]{32,}/[REDACTED_ID]/Ig' || true
+            fi
+            exit "$status"
+          fi
+          echo 'Preview recovery proof signer provisioned; secret value withheld.'
+
       - name: Resolve normal and immutable version URLs
         id: urls
         env:
