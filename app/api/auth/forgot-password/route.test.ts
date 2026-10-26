@@ -58,6 +58,21 @@ describe('POST /api/auth/forgot-password', () => {
     );
   });
 
+  it('always sends the configured same-origin callback, never the request host or a caller-supplied destination', async () => {
+    const response = await POST(new NextRequest('https://preview.example/api/auth/forgot-password?next=https%3A%2F%2Fevil.example', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin },
+      body: JSON.stringify({ email: 'customer@example.com', next: 'https://evil.example' }),
+    }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
+      'customer@example.com',
+      { redirectTo: `${origin}/auth/callback?type=recovery` },
+    );
+    expect(JSON.stringify(mocks.resetPasswordForEmail.mock.calls)).not.toContain('evil.example');
+  });
+
   it('does not set any cookies (no session material in the initiation response)', async () => {
     const response = await POST(request({ email: 'customer@example.com' }));
 

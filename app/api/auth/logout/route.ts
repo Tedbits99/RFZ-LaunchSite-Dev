@@ -19,6 +19,9 @@ export async function POST(request: NextRequest) {
     const client = await createCustomerServerClient();
     const { error } = await client.auth.signOut({ scope: 'local' });
     if (error) return json({ error: 'Could not sign out.' }, 503);
+    if (request.headers.get('accept')?.includes('text/html')) {
+      return NextResponse.redirect(new URL('/login?from=logout', request.url), 303);
+    }
     return json({ message: 'Signed out.' }, 200);
   } catch {
     return json({ error: 'Customer authentication is temporarily unavailable.' }, 503);

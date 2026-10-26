@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
       .select('id, package_id')
       .eq('supplier_id', FAZERCARDS_SUPPLIER_ID);
 
-    const mappedPackageIds = new Set((existingMappings || []).map((m) => m.package_id));
+    const mappedPackageIds = new Set(((existingMappings || []) as Array<{ package_id: string }>).map((m) => m.package_id));
 
     let mappingsCreated = 0;
     let packagesDeactivated = 0;

@@ -35,5 +35,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en" data-theme="dark" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: themeBootScript() }} /></head><body className={`${inter.className} ${spaceGrotesk.variable}`}><ThemeProvider><ThemeSelector /><div className="rfz-theme-content">{children}</div></ThemeProvider></body></html>;
+  return <html lang="en" data-theme="dark" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: themeBootScript() }} /></head><body className={`${inter.className} ${spaceGrotesk.variable}`}><ThemeProvider><ThemeSelector compact className="theme-selector-global" /><div className="rfz-theme-content">{children}</div></ThemeProvider></body></html>;
 }

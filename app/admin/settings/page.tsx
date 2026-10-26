@@ -1,5 +1,5 @@
-import { adminSupabase } from '@/lib/supabaseAdmin';
 import { Settings } from 'lucide-react';
+import GuestCheckoutPolicyCard from './GuestCheckoutPolicyCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +16,7 @@ export default function AdminSettingsPage() {
       <div className="mx-auto max-w-2xl px-5 py-8">
         <h1 className="font-display text-2xl font-bold">Settings</h1>
         <p className="text-xs text-slate-500">Environment configuration. Update via your hosting provider.</p>
+        <GuestCheckoutPolicyCard />
         <div className="mt-6 space-y-3">{settings.map((s) => (
           <div key={s.key} className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><div className="flex items-center justify-between"><span className="flex items-center gap-2 text-sm font-medium"><Settings size={14} className="text-cyan-300" />{s.label}</span><code className="text-[10px] text-slate-600">{s.key}</code></div><p className="mt-2 text-sm text-slate-400">{s.value}</p></div>
         ))}</div>

@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const vouchers = data || [];
+  const vouchers = (data || []) as Array<{ id: string }>;
 
   // Usage counts per voucher (total + per-email breakdown handled client-side).
   const ids = vouchers.map((v) => v.id);

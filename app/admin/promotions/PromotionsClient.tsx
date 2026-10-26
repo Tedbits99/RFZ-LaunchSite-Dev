@@ -5,6 +5,7 @@ import {
   Save, Loader2, CheckCircle2, AlertTriangle, Megaphone, Plus, X,
   Calendar, Image as ImageIcon, ExternalLink, Layout, Gamepad2,
 } from 'lucide-react';
+import { RFZ_IMAGE_PRESETS } from '@/lib/storefrontAssets';
 
 type Placement = 'HOMEPAGE_HERO' | 'GAME_CARD' | 'GAME_DETAIL_HERO';
 
@@ -24,7 +25,13 @@ type Promotion = {
   sort_order: number;
   placement: string;
   target_game_id: string | null;
+  animation_preset?: AnimationPreset;
+  motion_speed?: MotionSpeed;
+  autoplay_enabled?: boolean;
 };
+
+type AnimationPreset = 'holographic-reveal' | 'cinematic-depth' | 'futuristic-energy' | 'minimal-motion' | 'static';
+type MotionSpeed = 'fast' | 'standard' | 'relaxed';
 
 type NewPromo = {
   title: string;
@@ -39,6 +46,9 @@ type NewPromo = {
   sort_order: number;
   starts_at: string;
   ends_at: string;
+  animation_preset: AnimationPreset;
+  motion_speed: MotionSpeed;
+  autoplay_enabled: boolean;
 };
 
 type GameOption = { id: string; name: string };
@@ -56,6 +66,9 @@ const emptyNewPromo: NewPromo = {
   sort_order: 0,
   starts_at: '',
   ends_at: '',
+  animation_preset: 'holographic-reveal',
+  motion_speed: 'standard',
+  autoplay_enabled: true,
 };
 
 const targetColor: Record<string, string> = {
@@ -92,9 +105,10 @@ function isValidHttpsUrl(url: string): boolean {
 
 function isValidUrl(url: string): boolean {
   if (!url) return true;
+  if (url.startsWith('#')) return true;
+  if (url.startsWith('/') && !url.startsWith('//')) return true;
   try {
-    new URL(url);
-    return true;
+    return new URL(url).protocol === 'https:';
   } catch {
     return false;
   }
@@ -140,6 +154,9 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
           is_active: promo.is_active,
           placement: promo.placement,
           target_game_id: promo.target_game_id || null,
+          animation_preset: promo.animation_preset || 'holographic-reveal',
+          motion_speed: promo.motion_speed || 'standard',
+          autoplay_enabled: promo.autoplay_enabled !== false,
         }),
       });
       if (!res.ok) {
@@ -193,6 +210,9 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
           sort_order: newPromo.sort_order,
           starts_at: newPromo.starts_at || undefined,
           ends_at: newPromo.ends_at || undefined,
+          animation_preset: newPromo.animation_preset,
+          motion_speed: newPromo.motion_speed,
+          autoplay_enabled: newPromo.autoplay_enabled,
         }),
       });
       if (!res.ok) {
@@ -329,6 +349,17 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
               {newImageUrlError && (
                 <p className="mt-1 text-xs text-rose-400">URL must start with https://</p>
               )}
+              <div className="mt-3 rounded-lg border border-cyan-400/10 bg-cyan-400/[.04] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-300">RunFazone asset library</p>
+                <p className="mt-1 text-xs text-slate-500">Use an approved starter asset, then replace it with your own HTTPS artwork when needed.</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {RFZ_IMAGE_PRESETS.map((preset) => (
+                    <button key={preset.url} type="button" onClick={() => setNewPromo(p => ({ ...p, image_url: preset.url }))} className="rounded-md border border-[#294264] px-2.5 py-1.5 text-[10px] font-semibold text-slate-300 transition hover:border-cyan-300/60 hover:text-cyan-200">
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {newPromo.image_url && !newImageUrlError && (
                 <div className="mt-2">
                   <span className={labelCls}>Preview</span>
@@ -370,6 +401,31 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
             {newCtaError && (
               <p className="text-xs text-rose-400">CTA link must be a valid URL.</p>
             )}
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="block">
+                <span className={labelCls}>Artwork motion preset</span>
+                <select value={newPromo.animation_preset} onChange={e => setNewPromo(p => ({ ...p, animation_preset: e.target.value as AnimationPreset }))} className={inputCls}>
+                  <option value="holographic-reveal">Holographic reveal</option>
+                  <option value="cinematic-depth">Cinematic depth</option>
+                  <option value="futuristic-energy">Futuristic energy</option>
+                  <option value="minimal-motion">Minimal motion</option>
+                  <option value="static">Static</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className={labelCls}>Motion speed</span>
+                <select value={newPromo.motion_speed} onChange={e => setNewPromo(p => ({ ...p, motion_speed: e.target.value as MotionSpeed }))} className={inputCls}>
+                  <option value="fast">Fast</option>
+                  <option value="standard">Standard</option>
+                  <option value="relaxed">Relaxed</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 self-end pb-2 text-xs text-slate-400">
+                <input type="checkbox" checked={newPromo.autoplay_enabled} onChange={e => setNewPromo(p => ({ ...p, autoplay_enabled: e.target.checked }))} className="accent-cyan-400" />
+                Autoplay artwork
+              </label>
+            </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="block">
@@ -563,6 +619,31 @@ export default function PromotionsClient({ initialPromos, games }: { initialProm
                     No image URL set — the default background will be used.
                   </div>
                 )}
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="block">
+                    <span className={labelCls}>Artwork motion preset</span>
+                    <select value={p.animation_preset || 'holographic-reveal'} onChange={e => update(p.id, 'animation_preset', e.target.value as AnimationPreset)} className={inputCls}>
+                      <option value="holographic-reveal">Holographic reveal</option>
+                      <option value="cinematic-depth">Cinematic depth</option>
+                      <option value="futuristic-energy">Futuristic energy</option>
+                      <option value="minimal-motion">Minimal motion</option>
+                      <option value="static">Static</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className={labelCls}>Motion speed</span>
+                    <select value={p.motion_speed || 'standard'} onChange={e => update(p.id, 'motion_speed', e.target.value as MotionSpeed)} className={inputCls}>
+                      <option value="fast">Fast</option>
+                      <option value="standard">Standard</option>
+                      <option value="relaxed">Relaxed</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 self-end pb-2 text-xs text-slate-400">
+                    <input type="checkbox" checked={p.autoplay_enabled !== false} onChange={e => update(p.id, 'autoplay_enabled', e.target.checked)} className="accent-cyan-400" />
+                    Autoplay artwork
+                  </label>
+                </div>
 
                 <div className="flex justify-end">
                   <button

@@ -56,8 +56,8 @@ export async function POST(request: NextRequest) {
     // client and can never satisfy these checks.
     const { data: sessionData, error: sessionError } = await recovery.auth.getSession();
     const session = sessionData?.session;
-    const accessToken = session?.access_token;
-    if (sessionError || !session?.user?.id || !accessToken) {
+    const initialAccessToken = session?.access_token;
+    if (sessionError || !session?.user?.id || !initialAccessToken) {
       return json({ error: GENERIC_INVALID }, 403);
     }
 
@@ -67,15 +67,52 @@ export async function POST(request: NextRequest) {
       return json({ error: GENERIC_INVALID }, 403);
     }
 
+    // getUser() may refresh a short-lived recovery access token. Re-read the
+    // namespace after verification so a valid session can be accepted with
+    // the current token, while retaining the initial token as a safe fallback
+    // for a proof issued immediately before that refresh.
+    const { data: currentSessionData, error: currentSessionError } = await recovery.auth.getSession();
+    const currentSession = currentSessionData?.session;
+    const currentAccessToken = currentSession?.access_token;
+    if (currentSessionError || !currentSession?.user?.id || currentSession.user.id !== user.id || !currentAccessToken) {
+      return json({ error: GENERIC_INVALID }, 403);
+    }
+
     // The signed proof must be valid, unexpired, issued for exactly this
     // recovery user and this recovery session (SHA-256 access-token
     // fingerprint, same derivation as the callback), and carry the
     // password-reset purpose. Fail closed on any mismatch.
-    const proof = verifyRecoveryProof(request.cookies.get(RECOVERY_PROOF_COOKIE)?.value, {
+    const proofCookie = request.cookies.get(RECOVERY_PROOF_COOKIE)?.value;
+    const proof = verifyRecoveryProof(proofCookie, {
       userId: user.id,
-      sessionFingerprint: sessionFingerprint(accessToken),
+      sessionFingerprint: sessionFingerprint(currentAccessToken),
     });
-    if (!proof.ok) return json({ error: GENERIC_INVALID }, 403);
+    const initialProof = proof.ok ? proof : verifyRecoveryProof(proofCookie, {
+      userId: user.id,
+      sessionFingerprint: sessionFingerprint(initialAccessToken),
+    });
+    if (!initialProof.ok) return json({ error: GENERIC_INVALID }, 403);
+
+    // The redirect destination is determined only after a valid, signed,
+    // user-bound recovery proof. Never trust a query parameter, submitted role,
+    // or browser cookie to decide whether this is an admin recovery.
+    // This read uses the recovery user's authenticated RLS context; an
+    // unrelated user cannot inspect another administrator's record.
+    const { data: admin, error: adminLookupError } = await recovery
+      .from('admins')
+      .select('id, email, role, is_active')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (adminLookupError) return json({ error: GENERIC_503 }, 503);
+    const isVerifiedAdmin = Boolean(
+      admin?.id === user.id
+        && admin.is_active === true
+        && (admin.role === 'ADMIN' || admin.role === 'SUPER_ADMIN')
+        && typeof user.email === 'string'
+        && typeof admin.email === 'string'
+        && admin.email.trim().toLowerCase() === user.email.trim().toLowerCase(),
+    );
+    const signInPath = isVerifiedAdmin ? '/secure-admin-login' : '/login';
 
     const { error: updateError } = await recovery.auth.updateUser({ password });
     if (updateError) return json({ error: GENERIC_INVALID }, 403);
@@ -87,7 +124,7 @@ export async function POST(request: NextRequest) {
     // provider-level authorization boundary.
     await recovery.auth.signOut({ scope: 'local' });
 
-    const res = json({ message: 'Password updated.' }, 200);
+    const res = json({ message: 'Password updated.', signInPath }, 200);
     const cleared = clearRecoveryProofCookie();
     res.cookies.set(cleared.name, cleared.value, cleared.options);
     return res;

@@ -33,6 +33,29 @@ describe('privileged route authorization contracts', () => {
   });
 });
 
+describe('admin authentication contracts', () => {
+  it('uses the server-side admin login endpoint and safe native form target', () => {
+    const code = source('app/secure-admin-login/page.tsx');
+    expect(code).toContain('createAdminBrowserClient');
+    expect(code).toContain('auth.signInWithPassword');
+    expect(code).toContain("fetch('/api/auth/admin-session'");
+    expect(code).toContain('action="/api/auth/admin-login"');
+    expect(code).toContain('name="email"');
+    expect(code).toContain('name="password"');
+    expect(code).toContain("supabase.auth.signOut({ scope: 'local' })");
+    expect(code).toContain('href="/forgot-password"');
+    expect(code).toContain('Reset it securely');
+  });
+
+  it('keeps the admin login endpoint inside the server-side admin context', () => {
+    const code = source('app/api/auth/admin-login/route.ts');
+    expect(code).toContain("createAdminServerClient");
+    expect(code).toContain('isAuthorizedAdminIdentity');
+    expect(code).toContain("request.headers.get('origin')");
+    expect(code).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
+  });
+});
+
 describe('customer order ownership contracts', () => {
   it('uses verified customer-namespace auth and profile status before checkout', () => {
     const code = source('app/api/orders/route.ts');

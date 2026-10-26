@@ -107,7 +107,7 @@ export default function ResendConfirmationForm({ initialEmail }: FormProps = {})
     <div className="mt-8 border-t border-[#1b2a45] pt-6">
       <h2 className="text-sm font-semibold text-slate-200">Resend confirmation email</h2>
       <p className="mt-1 text-xs text-slate-500">Enter the email address you registered with.</p>
-      <form className="mt-4 space-y-3" onSubmit={submit} noValidate>
+      <form className="mt-4 space-y-3" method="post" action="/api/auth/resend-confirmation" onSubmit={submit} noValidate>
         <label className="block">
           <span className="mb-1 block text-xs text-slate-400">Email</span>
           <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">

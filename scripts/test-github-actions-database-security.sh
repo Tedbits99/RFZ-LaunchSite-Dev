@@ -514,8 +514,8 @@ if [ "$upgrade_mode" = true ]; then
     upgrade_count=$((upgrade_count + 1))
   done < <(awk -F'|' '/\| INCLUDE \|/ {gsub(/`/, "", $4); gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")
 
-  if [ "$upgrade_count" -ne 86 ]; then
-    echo "ERROR: Expected 86 canonical post-baseline migrations; found $upgrade_count." >&2
+  if [ "$upgrade_count" -ne 87 ]; then
+    echo "ERROR: Expected 87 canonical post-baseline migrations; found $upgrade_count." >&2
     exit 13
   fi
   echo "LEGACY_UPGRADE_PHASE=canonical-selection-complete count=$upgrade_count"
@@ -575,6 +575,7 @@ PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
 # any deployed function or production database.
 api_url="$(printf '%s\n' "$status_env" | sed -n 's/^API_URL=//p' | sed 's/^"//; s/"$//')"
 disposable_service_role_key="$(printf '%s\n' "$status_env" | sed -n 's/^SERVICE_ROLE_KEY=//p' | sed 's/^"//; s/"$//')"
+disposable_anon_key="$(printf '%s\n' "$status_env" | sed -n 's/^ANON_KEY=//p' | sed 's/^"//; s/"$//')"
 api_url="$(printf '%s' "$api_url" | RFZ_EXPECTED_API_PORT="$local_api_port" node -e '
 let raw = "";
 process.stdin.setEncoding("utf8");
@@ -772,6 +773,14 @@ PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/reconciliation-concurrency-cleanup.sql
+
+if [ "${RFZ_RUN_UIUX_BROWSER:-0}" = "1" ]; then
+  export NEXT_PUBLIC_SUPABASE_URL="$api_url"
+  export NEXT_PUBLIC_SUPABASE_ANON_KEY="$disposable_anon_key"
+  export SUPABASE_SERVICE_ROLE_KEY="$disposable_service_role_key"
+  export RFZ_UIUX_FIXTURE_FILE="$test_root/uiux-browser-fixtures.json"
+  bash "$project_root/scripts/run-uiux-browser-acceptance.sh"
+fi
 
 echo "Reapplying the isolated baseline to verify reset/retry behavior..."
 supabase_local db reset >/dev/null

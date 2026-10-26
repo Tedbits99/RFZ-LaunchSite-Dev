@@ -41,7 +41,21 @@ describe('reset password page source invariants (automated static checks)', () =
     expect(source).toContain("method: 'POST'");
     expect(source).toContain("headers: { 'Content-Type': 'application/json' }");
     expect(source).toContain("credentials: 'same-origin'");
-    expect(source).toContain('JSON.stringify({ password })');
+    expect(source).toContain('JSON.stringify({ password: nextPassword })');
+  });
+
+  it('refreshes the server-side recovery proof before enabling submission', () => {
+    expect(source).toContain("fetch('/auth/reset-password/prepare'");
+    expect(source).toContain("method: 'POST'");
+    expect(source).toContain("credentials: 'same-origin'");
+    expect(source).toContain('Verifying reset link…');
+  });
+
+  it('refreshes the proof again immediately before completing the password update', () => {
+    expect(source).toContain('Rebind immediately before the password update.');
+    expect(source).toContain('const prepareResponse = await prepareRecoverySession();');
+    expect(source).toContain('if (!prepareResponse.ok)');
+    expect(source).toContain("fetch('/auth/reset-password/complete'");
   });
 
   it('never manipulates cookies or storage in the browser', () => {
@@ -50,9 +64,15 @@ describe('reset password page source invariants (automated static checks)', () =
   });
 
   it('preserves the password length requirements in the form', () => {
-    expect(source).toContain('minLength={8}');
-    expect(source).toContain('maxLength={128}');
+    expect(source).toContain('const PASSWORD_MIN = 8');
+    expect(source).toContain('const PASSWORD_MAX = 128');
+    expect(source).toContain('minLength={PASSWORD_MIN}');
+    expect(source).toContain('maxLength={PASSWORD_MAX}');
     expect(source).toContain('autoComplete="new-password"');
+    expect(source).toContain('name="confirmPassword"');
+    expect(source).toContain('Passwords do not match.');
+    expect(source).toContain('aria-pressed={showPasswords}');
+    expect(source).toContain('role="progressbar"');
   });
 
   it('shows only generic error messages and never leaks provider details', () => {
@@ -63,7 +83,15 @@ describe('reset password page source invariants (automated static checks)', () =
   });
 
   it('does not expose recovery codes or tokens from the URL', () => {
-    expect(source).not.toMatch(/searchParams|window\.location|URLSearchParams/);
+    expect(source).not.toMatch(/searchParams|window\.location\.(?:search|hash|href)\b|URLSearchParams/);
+  });
+
+  it('only follows the server-verified internal sign-in destination after reset', () => {
+    expect(source).toContain('const destination = body?.signInPath;');
+    expect(source).toContain("destination !== '/login'");
+    expect(source).toContain("destination !== '/secure-admin-login'");
+    expect(source).toContain('window.location.replace(destination)');
+    expect(source).not.toMatch(/new URL\(|redirectTo|returnTo|nextUrl/);
   });
 
   it('links to the existing login page', () => {
@@ -76,8 +104,9 @@ describe('reset password page SSR render (executed render check)', () => {
     const html = renderToString(React.createElement(ResetPasswordPage));
     expect(html).toContain('Choose a new password');
     expect(html).toContain('name="password"');
+    expect(html).toContain('name="confirmPassword"');
     expect(html).toContain('type="password"');
-    expect(html).toContain('Update password');
+    expect(html).toMatch(/Verifying reset link…|Update password/);
   });
 
   it('does not pre-render the success or error panels in the idle state', () => {

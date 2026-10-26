@@ -2,8 +2,9 @@
 
 import { useState, type ReactNode } from 'react'
 import { Activity, Bell, LogOut, Menu, Search } from 'lucide-react'
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 import AdminNavigation from '@/components/admin/AdminNavigation'
+import RunfazoneLogo from '@/components/RunfazoneLogo'
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const [navigationOpen, setNavigationOpen] = useState(false)
@@ -22,13 +23,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               >
                 <Menu size={18} />
               </button>
-              <img
-                src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1789837643/R_logo_1_au2g5c.png"
-                alt="RunFazone"
-                width={1701}
-                height={378}
-                className="h-10 w-auto object-contain"
-              />
+              <RunfazoneLogo />
               <div className="hidden sm:block">
                 <p className="text-[10px] uppercase tracking-widest text-slate-500">
                   Dashboard
@@ -62,10 +57,14 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 <Activity size={13} className="text-cyan-300" /> Admin
               </span>
               <button
+                type="button"
                 onClick={async () => {
-                  const supabase = getSupabaseBrowserClient()
-                  if (supabase) await supabase.auth.signOut()
-                  window.location.href = '/secure-admin-login'
+                  try {
+                    const supabase = createAdminBrowserClient()
+                    await supabase.auth.signOut({ scope: 'local' })
+                  } finally {
+                    window.location.replace('/secure-admin-login?reason=logout')
+                  }
                 }}
                 className="flex items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-rose-400 hover:text-rose-200"
               >

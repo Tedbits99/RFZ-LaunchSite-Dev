@@ -21,6 +21,13 @@ function request(includeOrigin = true) {
   });
 }
 
+function browserRequest() {
+  return new NextRequest(`${origin}/api/auth/logout`, {
+    method: 'POST',
+    headers: { origin, accept: 'text/html' },
+  });
+}
+
 describe('POST /api/auth/logout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -34,6 +41,14 @@ describe('POST /api/auth/logout', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ message: 'Signed out.' });
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  });
+
+  it('redirects browser form submissions after invalidating the session', async () => {
+    const response = await POST(browserRequest());
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(`${origin}/login?from=logout`);
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 

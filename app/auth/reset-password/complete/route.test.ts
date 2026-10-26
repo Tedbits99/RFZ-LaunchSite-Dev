@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   updateUser: vi.fn(),
   signOut: vi.fn(),
+  adminMaybeSingle: vi.fn(),
 }));
 
 vi.mock('@/lib/authSessionClients', () => ({
@@ -21,6 +22,10 @@ vi.mock('@/lib/authSessionClients', () => ({
       getUser: mocks.getUser,
       updateUser: mocks.updateUser,
       signOut: mocks.signOut,
+    },
+    from: (table: string) => {
+      if (table !== 'admins') throw new Error('Unexpected table in recovery test');
+      return { select: () => ({ eq: () => ({ maybeSingle: mocks.adminMaybeSingle }) }) };
     },
   })),
 }));
@@ -89,9 +94,10 @@ const VALID_COOKIE = `rfz-recovery-proof=${makeProof()}`;
 
 function validAuthMocks() {
   mocks.getSession.mockResolvedValue(recoverySessionResult());
-  mocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
+  mocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID, email: 'customer@example.test' } }, error: null });
   mocks.updateUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null });
   mocks.signOut.mockResolvedValue({ error: null });
+  mocks.adminMaybeSingle.mockResolvedValue({ data: null, error: null });
 }
 
 describe('POST /auth/reset-password/complete (server-verified password reset)', () => {
@@ -111,6 +117,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
 
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await response.clone().json()).signInPath).toBe('/login');
     expect(mocks.updateUser).toHaveBeenCalledOnce();
     expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-1' });
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
@@ -121,6 +128,47 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/);
     expect(cleared).toContain('Path=/auth/reset-password');
     expect(cleared).toContain('HttpOnly');
+  });
+
+  it('routes an active matching SUPER_ADMIN to the separate admin login', async () => {
+    mocks.adminMaybeSingle.mockResolvedValue({
+      data: { id: USER_ID, email: 'CUSTOMER@example.test', role: 'SUPER_ADMIN', is_active: true },
+      error: null,
+    });
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).signInPath).toBe('/secure-admin-login');
+    expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-1' });
+  });
+
+  it.each([
+    ['inactive', { id: USER_ID, email: 'customer@example.test', role: 'SUPER_ADMIN', is_active: false }],
+    ['wrong email', { id: USER_ID, email: 'other@example.test', role: 'SUPER_ADMIN', is_active: true }],
+    ['wrong UUID', { id: 'other-user', email: 'customer@example.test', role: 'SUPER_ADMIN', is_active: true }],
+    ['invalid role', { id: USER_ID, email: 'customer@example.test', role: 'CUSTOMER', is_active: true }],
+  ])('does not advertise admin login for a %s record', async (_name, data) => {
+    mocks.adminMaybeSingle.mockResolvedValue({ data, error: null });
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).signInPath).toBe('/login');
+  });
+
+  it('does not update a password when admin identity lookup is unavailable', async () => {
+    mocks.adminMaybeSingle.mockResolvedValue({ data: null, error: { code: '42501' } });
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+    expect(response.status).toBe(503);
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('accepts a proof issued immediately before an Auth token refresh in the same recovery session', async () => {
+    mocks.getSession
+      .mockResolvedValueOnce(recoverySessionResult({ accessToken: ACCESS_TOKEN }))
+      .mockResolvedValueOnce(recoverySessionResult({ accessToken: 'refreshed-recovery-access-token' }));
+
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-1' });
   });
 
   it('rejects a request with NO recovery proof cookie', async () => {

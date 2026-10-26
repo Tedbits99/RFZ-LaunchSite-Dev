@@ -2,8 +2,25 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Lock, Mail, ShieldCheck } from 'lucide-react'
-import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser'
+import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
+
+async function verifyAdminSession() {
+  const response = await fetch('/api/auth/admin-session', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  return { ok: response.ok, status: response.status }
+}
+
+async function clearAdminSession(supabase: ReturnType<typeof createAdminBrowserClient>) {
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } catch {
+    // A failed cleanup must not replace the safe generic login error.
+  }
+}
 
 export default function SecureAdminLoginPage() {
   const router = useRouter()
@@ -14,15 +31,40 @@ export default function SecureAdminLoginPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient()
-    if (!supabase) { setReady(true); return }
-    supabase.auth.getSession().then(({ data }: { data: { session: unknown | null } }) => {
-      if (data?.session) {
-        router.replace('/admin')
-      } else {
+    let active = true
+    try {
+      const supabase = createAdminBrowserClient()
+      // Render the form immediately. Session discovery is an enhancement and
+      // must never leave an administrator-facing route in an indefinite
+      // loading state when Auth is unavailable or slow.
+      setReady(true)
+      void supabase.auth.getSession()
+        .then(async ({ data, error }) => {
+          if (!active) return
+          if (data?.session) {
+            try {
+              const result = await verifyAdminSession()
+              if (result.ok) router.replace('/admin')
+              else if (active) setError(result.status === 403
+                ? 'This account is not authorized for the admin console.'
+                : 'Admin authentication is temporarily unavailable. You can retry signing in.')
+            } catch {
+              if (active) setError('Admin authentication is temporarily unavailable. You can retry signing in.')
+            }
+          } else if (error) {
+            setError('We could not verify an existing admin session. Sign in to continue.')
+          }
+        })
+        .catch(() => {
+          if (active) setError('We could not verify an existing admin session. Sign in to continue.')
+        })
+    } catch {
+      if (active) {
+        setError('Admin authentication is temporarily unavailable. You can retry signing in.')
         setReady(true)
       }
-    })
+    }
+    return () => { active = false }
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,31 +72,50 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
-    const supabase = getSupabaseBrowserClient()
-    if (!supabase) {
-      setError('Database is not configured.')
+    let supabase: ReturnType<typeof createAdminBrowserClient>
+    try {
+      supabase = createAdminBrowserClient()
+    } catch {
+      setError('Admin authentication is temporarily unavailable. Please try again.')
       setSubmitting(false)
       return
     }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    let signInError: { message?: string } | null = null
+    try {
+      ({ error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      }))
+    } catch {
+      setError('Admin authentication is temporarily unavailable. Please try again.')
+      setSubmitting(false)
+      return
+    }
 
     if (signInError) {
-      setError(
-        signInError.message === 'Invalid login credentials'
-          ? 'Invalid email or password.'
-          : signInError.message,
-      )
+      await clearAdminSession(supabase)
+      setError('Invalid email or password.')
       setSubmitting(false)
       return
     }
 
-    try { await supabase.rpc('claim_first_admin') } catch { /* Bootstrap is one-time; subsequent logins proceed normally. */ }
-
-    router.push('/admin')
+    try {
+      const result = await verifyAdminSession()
+      if (!result.ok) {
+        await clearAdminSession(supabase)
+        setError(result.status === 403
+          ? 'This account is not authorized for the admin console.'
+          : 'Admin authentication is temporarily unavailable. Please try again.')
+        setSubmitting(false)
+        return
+      }
+      router.replace('/admin')
+    } catch {
+      await clearAdminSession(supabase)
+      setError('Admin authentication is temporarily unavailable. Please try again.')
+      setSubmitting(false)
+    }
   }
 
   if (!ready) {
@@ -78,13 +139,15 @@ export default function SecureAdminLoginPage() {
           </p>
         </div>
 
-        <form className="space-y-3" onSubmit={handleSubmit}>
+        <form className="space-y-3" method="post" action="/api/auth/admin-login" onSubmit={handleSubmit}>
           <label className="block">
             <span className="mb-1 block text-xs text-slate-400">Email</span>
             <div className="flex items-center gap-2 rounded-lg border border-[#22314d] bg-[#0a1124] px-3">
               <Mail size={15} className="text-slate-500" />
               <input
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -99,6 +162,8 @@ export default function SecureAdminLoginPage() {
               <Lock size={15} className="text-slate-500" />
               <input
                 type="password"
+                name="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -114,6 +179,12 @@ export default function SecureAdminLoginPage() {
           >
             {submitting ? 'Signing in\u2026' : 'Sign In'}
           </button>
+          <p className="text-center text-xs text-slate-400">
+            Forgot your admin password?{' '}
+            <Link href="/forgot-password" className="text-cyan-300 underline-offset-2 hover:underline">
+              Reset it securely
+            </Link>
+          </p>
         </form>
 
         {error && (

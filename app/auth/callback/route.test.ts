@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   defaultGetUser: vi.fn(),
   defaultRpc: vi.fn(),
   recoveryExchangeCodeForSession: vi.fn(),
+  recoveryVerifyOtp: vi.fn(),
   recoveryGetUser: vi.fn(),
 }));
 
@@ -28,6 +29,7 @@ vi.mock('@/lib/authSessionClients', () => ({
   createRecoveryServerClient: vi.fn(() => ({
     auth: {
       exchangeCodeForSession: mocks.recoveryExchangeCodeForSession,
+      verifyOtp: mocks.recoveryVerifyOtp,
       getUser: mocks.recoveryGetUser,
     },
   })),
@@ -90,6 +92,7 @@ describe('email confirmation callback (default namespace)', () => {
     });
     mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'no recovery verifier' } });
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'no token hash' } });
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: null });
   });
 
@@ -223,6 +226,31 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(proofCookie(response)).toBeDefined();
   });
 
+  it('accepts a Supabase recovery token_hash callback and still requires a verified recovery session', async () => {
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: { access_token: ACCESS_TOKEN, user: { id: USER_ID } } }, error: null });
+
+    const response = await GET(request('?token_hash=one-time-token-hash&type=recovery'));
+
+    expect(response.status).toBe(307);
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(mocks.recoveryVerifyOtp).toHaveBeenCalledWith({ type: 'recovery', token_hash: 'one-time-token-hash' });
+    expect(mocks.recoveryGetUser).toHaveBeenCalledOnce();
+    expect(proofCookie(response)).toBeDefined();
+    expect(location(response)).not.toContain('one-time-token-hash');
+  });
+
+  it('rejects a failed token_hash without issuing a proof or calling the default client', async () => {
+    mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'expired provider detail' } });
+
+    const response = await GET(request('?token_hash=expired-secret&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(mocks.recoveryGetUser).not.toHaveBeenCalled();
+    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(await response.text()).not.toContain('expired provider detail');
+  });
+
   it('never activates a profile or calls activation RPC from the recovery branch', async () => {
     await GET(request('?code=recovery-code&type=recovery'));
 
@@ -243,6 +271,44 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(mocks.defaultRpc).not.toHaveBeenCalled();
     expect(location(response)).not.toContain('secret-code');
     expect(await response.text()).not.toContain('provider detail');
+  });
+
+  it('keeps unexpected recovery exceptions on the reset boundary', async () => {
+    mocks.recoveryExchangeCodeForSession.mockRejectedValueOnce(new Error('provider transport detail'));
+
+    const response = await GET(request('?code=secret-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password?unavailable=1');
+    expect(location(response)).not.toContain('confirmation');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(await response.text()).not.toContain('provider transport detail');
+  });
+
+  it('fails closed when a recovery PKCE code is opened without its verifier', async () => {
+    // A code link opened on another browser/device has no verifier in the
+    // recovery namespace. It must not be treated like a token-hash link.
+    mocks.recoveryExchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: null },
+      error: { code: 'pkce_code_verifier_not_found' },
+    });
+
+    const response = await GET(request('?code=cross-device-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(mocks.recoveryVerifyOtp).not.toHaveBeenCalled();
+    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a recovery-session exception on the reset boundary', async () => {
+    mocks.recoveryGetUser.mockRejectedValueOnce(new Error('session transport detail'));
+
+    const response = await GET(request('?code=recovery-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password?unavailable=1');
+    expect(location(response)).not.toContain('confirmation');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(await response.text()).not.toContain('session transport detail');
   });
 
   it('fails closed when the exchange succeeds but returns no access token', async () => {

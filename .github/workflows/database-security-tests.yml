@@ -116,8 +116,23 @@ jobs:
           deno check supabase/functions/send-transactional-email/index.ts
           deno check supabase/functions/completion-receipt-email-worker/index.ts
 
+      - name: Install Chromium for isolated browser acceptance
+        run: npx playwright install --with-deps chromium
+
       - name: Run isolated database security tests
+        env:
+          RFZ_RUN_UIUX_BROWSER: "1"
         run: bash scripts/test-github-actions-database-security.sh
+
+      - name: Upload isolated browser acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uiux-007-browser-acceptance-${{ github.sha }}
+          if-no-files-found: ignore
+          path: |
+            playwright-report/
+            test-results/
 
       - name: Run legacy-to-current upgrade tests
         run: bash scripts/test-github-actions-database-security.sh --existing-schema-upgrade

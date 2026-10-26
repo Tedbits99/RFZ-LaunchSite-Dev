@@ -21,6 +21,10 @@ export default function AnnouncementPopup() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    // Local/OpenNext smoke builds intentionally omit Supabase configuration.
+    // Avoid a noisy request to the unavailable announcement route in that
+    // mode; the hosted preview still fetches announcements normally.
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return;
     fetch('/api/announcement')
       .then((r) => r.json())
       .then((json) => {
