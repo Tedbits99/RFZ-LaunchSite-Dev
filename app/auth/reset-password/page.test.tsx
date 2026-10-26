@@ -83,7 +83,14 @@ describe('reset password page source invariants (automated static checks)', () =
   });
 
   it('does not expose recovery codes or tokens from the URL', () => {
-    expect(source).not.toMatch(/searchParams|window\.location|URLSearchParams/);
+    expect(source).not.toMatch(/searchParams|window\.location\.(?:search|hash|href)\b|URLSearchParams/);
+  });
+
+  it('only follows the server-verified internal sign-in destination after reset', () => {
+    expect(source).toContain("body?.signInPath !== '/login'");
+    expect(source).toContain("body?.signInPath !== '/secure-admin-login'");
+    expect(source).toContain('window.location.replace(destination)');
+    expect(source).not.toMatch(/new URL\(|redirectTo|returnTo|nextUrl/);
   });
 
   it('links to the existing login page', () => {
