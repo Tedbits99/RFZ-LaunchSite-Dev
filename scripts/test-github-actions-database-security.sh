@@ -514,8 +514,8 @@ if [ "$upgrade_mode" = true ]; then
     upgrade_count=$((upgrade_count + 1))
   done < <(awk -F'|' '/\| INCLUDE \|/ {gsub(/`/, "", $4); gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")
 
-  if [ "$upgrade_count" -ne 86 ]; then
-    echo "ERROR: Expected 86 canonical post-baseline migrations; found $upgrade_count." >&2
+  if [ "$upgrade_count" -ne 87 ]; then
+    echo "ERROR: Expected 87 canonical post-baseline migrations; found $upgrade_count." >&2
     exit 13
   fi
   echo "LEGACY_UPGRADE_PHASE=canonical-selection-complete count=$upgrade_count"

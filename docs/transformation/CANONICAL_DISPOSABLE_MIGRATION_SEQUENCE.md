@@ -11,7 +11,7 @@
 3. The corrected fulfillment, RPC, and slug-based Honor of Kings migrations are the executable replacements for their archived predecessors.
 4. Fail closed if an executable migration contains an external scheduler or HTTP target. Development must have no `pg_cron`, `pg_net`, payment, supplier, SMTP, webhook, or external HTTP activity.
 5. Treat Vault/provider migrations as schema-only with synthetic values; no secrets or external endpoints may be inherited. Verify RLS, grants, `SECURITY DEFINER` authorization, ownership, payment boundaries, supplier reconciliation, receipt outbox, and concurrency after reset.
-6. A fresh-install PASS requires the complete 97-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
+6. A fresh-install PASS requires the complete 98-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
 
 ## Generated file selection
 
