@@ -1,0 +1,55 @@
+name: One-shot OpenNext 16.4 compatibility lockfile generation
+
+on:
+  push:
+    branches: [fix/opennext-164-preview-props]
+    paths:
+      - '.github/workflows/refresh-opennext-lock.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Generate tested OpenNext adapter lockfile
+    if: github.repository == 'Tedbits99/RFZ-LaunchSite-Dev' && github.ref == 'refs/heads/fix/opennext-164-preview-props'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/opennext-164-preview-props
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - name: Upgrade adapter and resolve exact dependency lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --save-dev --save-exact @opennextjs/cloudflare@1.20.12
+          npm ci
+          test "$(node -p "require('./package.json').devDependencies['@opennextjs/cloudflare']")" = 1.20.12
+          test "$(node -p "require('./package-lock.json').packages['node_modules/@opennextjs/cloudflare'].version")" = 1.20.12
+      - name: Verify updated OpenNext Worker runtime
+        env:
+          NEXT_PUBLIC_APP_URL: https://runfazone-preview.mondigoted732.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run cloudflare:build
+          bash scripts/test-open-next-runtime.sh
+      - name: Commit tested dependency upgrade to isolated PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo 'No dependency changes detected'
+            exit 1
+          fi
+          git commit -m 'fix: upgrade OpenNext adapter for Next.js 16.4 manifest compatibility'
+          git push origin HEAD:fix/opennext-164-preview-props
