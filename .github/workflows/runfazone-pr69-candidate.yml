@@ -1,0 +1,249 @@
+name: Runfazone PR69 candidate validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Exact open/draft PR #69 head SHA'
+        required: true
+        type: string
+      operation:
+        description: 'Build-only validation or immutable Worker version upload'
+        required: true
+        type: choice
+        options:
+          - candidate-preflight
+          - deploy-candidate
+        default: candidate-preflight
+      deployment_confirmation:
+        description: 'Required only for deploy-candidate: DEPLOY_PR69_CANDIDATE'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: runfazone-pr69-candidate
+  cancel-in-progress: false
+
+env:
+  REPOSITORY: Tedbits99/RFZ-LaunchSite-Dev
+  PR_NUMBER: '69'
+
+jobs:
+  verify-candidate:
+    name: Verify PR identity, exact checks, and Access
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: runfazone-preview
+    outputs:
+      candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+      preview_alias: ${{ steps.identity.outputs.preview_alias }}
+      account_subdomain: ${{ steps.cloudflare.outputs.account_subdomain }}
+    steps:
+      - name: Check out trusted main workflow code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Verify exact PR #69 head and mandatory checks
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo 'BLOCKED: dispatch must run from main.' >&2; exit 1; }
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: candidate_sha must be a full commit SHA.' >&2; exit 1; }
+          pr_json="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          jq -e --arg sha "$CANDIDATE_SHA" '
+            .state == "open"
+            and .draft == true
+            and .base.ref == "main"
+            and .head.sha == $sha
+            and .head.repo.full_name == "Tedbits99/RFZ-LaunchSite-Dev"
+          ' <<<"$pr_json" >/dev/null || {
+            echo 'BLOCKED: supplied SHA is not the exact open/draft same-repository head of PR #69.' >&2
+            exit 1
+          }
+          workflow_runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$CANDIDATE_SHA&per_page=100")"
+          frontend_run="$(jq -c --arg sha "$CANDIDATE_SHA" '[.workflow_runs[] | select(.name == "Frontend validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          development_run="$(jq -c --arg sha "$CANDIDATE_SHA" '[.workflow_runs[] | select(.name == "Development validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          test -n "$frontend_run" && test -n "$development_run" || { echo 'BLOCKED: exact-head required workflows are missing.' >&2; exit 1; }
+          [[ "$(jq -r '.status' <<<"$frontend_run")" == completed && "$(jq -r '.conclusion' <<<"$frontend_run")" == success ]] || { echo 'BLOCKED: exact-head Frontend validation did not pass.' >&2; exit 1; }
+          [[ "$(jq -r '.status' <<<"$development_run")" == completed && "$(jq -r '.conclusion' <<<"$development_run")" == success ]] || { echo 'BLOCKED: exact-head Development validation did not pass.' >&2; exit 1; }
+          development_jobs="$(gh api "repos/$REPOSITORY/actions/runs/$(jq -r '.id' <<<"$development_run")/jobs?per_page=100")"
+          for job_name in "Isolated Supabase RPC security tests" "Production release safety"; do
+            job="$(jq -c --arg name "$job_name" '[.jobs[] | select(.name == $name)] | sort_by(.started_at, .completed_at) | last // empty' <<<"$development_jobs")"
+            test -n "$job" || { echo "BLOCKED: required job is missing: $job_name" >&2; exit 1; }
+            [[ "$(jq -r '.status' <<<"$job")" == completed && "$(jq -r '.conclusion' <<<"$job")" == success ]] || { echo "BLOCKED: required job did not pass: $job_name" >&2; exit 1; }
+          done
+          preview_alias="pr69-${CANDIDATE_SHA:0:12}"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "preview_alias=$preview_alias" >> "$GITHUB_OUTPUT"
+          echo "CANDIDATE_EXACT_HEAD_VERIFIED sha=$CANDIDATE_SHA frontend=success development=success"
+
+      - name: Verify saved account-wide Access policy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/verify-cloudflare-access-policy.sh
+
+      - name: Resolve the existing Worker account subdomain
+        id: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$RUNNER_TEMP/worker-subdomain.json"
+          status="$(curl --silent --show-error --max-time 20 --output "$response" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Accept: application/json' \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain")"
+          [[ "$status" =~ ^2 ]] || { echo "BLOCKED: Worker account subdomain lookup failed (HTTP $status)." >&2; exit 1; }
+          subdomain="$(jq -r '.result.subdomain // empty' "$response")"
+          [[ "$subdomain" =~ ^[a-z0-9-]+$ ]] || { echo 'BLOCKED: Worker account subdomain is missing or malformed.' >&2; exit 1; }
+          echo "account_subdomain=$subdomain" >> "$GITHUB_OUTPUT"
+          echo 'CLOUDFLARE_ACCESS_AND_ACCOUNT_VERIFIED=true'
+
+  build-candidate:
+    name: Build and scan PR69 without deployment credentials
+    needs: verify-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: runfazone-preview
+    steps:
+      - name: Check out exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-candidate.outputs.candidate_sha }}
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build candidate with public development configuration only
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_APP_URL: https://${{ needs.verify-candidate.outputs.preview_alias }}-runfazone-preview.${{ needs.verify-candidate.outputs.account_subdomain }}.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$NEXT_PUBLIC_SUPABASE_URL" || { echo 'BLOCKED: public Supabase URL is unavailable to candidate build.' >&2; exit 1; }
+          test -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" || { echo 'BLOCKED: public Supabase anon key is unavailable to candidate build.' >&2; exit 1; }
+          [[ "$NEXT_PUBLIC_SUPABASE_URL" == https://ketdhcmwowzztcdlmris.supabase.co ]] || { echo 'BLOCKED: candidate build is not bound to development Supabase.' >&2; exit 1; }
+          npm run cloudflare:build
+          node scripts/verify-tailwind-output.mjs
+          test -s .open-next/worker.js
+          test -d .open-next/assets/_next/static
+          if rg -n --hidden --glob '!node_modules/**' --glob '!**/*.map' \
+            '(SUPABASE_SERVICE_ROLE_KEY|PAYMONGO_SECRET_KEY|PAYMENT_PAYMONGO_SECRET_KEY|FAZERCARDS_API_KEY|SUPPLIER_FAZERCARDS_API_KEY|SMTP_PASSWORD)=' \
+            .open-next; then
+            echo 'BLOCKED: privileged secret assignment found in candidate artifact.' >&2
+            exit 1
+          fi
+          jq -e '.name == "runfazone-preview" and .main == ".open-next/worker.js" and ((.routes // []) | length == 0) and ((.domains // []) | length == 0) and ((.triggers // {}) | length == 0)' wrangler.jsonc >/dev/null || {
+            echo 'BLOCKED: candidate Wrangler config targets routes, domains, triggers, or another Worker.' >&2
+            exit 1
+          }
+          echo 'CANDIDATE_ARTIFACT_PASS privileged_credentials=absent target=runfazone-preview'
+
+      - name: Upload immutable candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runfazone-pr69-candidate-${{ needs.verify-candidate.outputs.candidate_sha }}
+          include-hidden-files: true
+          path: |
+            .open-next/**
+            wrangler.jsonc
+          if-no-files-found: error
+
+  upload-candidate-version:
+    name: Upload protected PR69 Worker version without activation
+    needs: [verify-candidate, build-candidate]
+    if: inputs.operation == 'deploy-candidate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: runfazone-preview
+    steps:
+      - name: Require explicit candidate deployment confirmation
+        env:
+          CONFIRMATION: ${{ inputs.deployment_confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == DEPLOY_PR69_CANDIDATE ]] || { echo 'BLOCKED: deploy-candidate requires DEPLOY_PR69_CANDIDATE.' >&2; exit 1; }
+
+      - name: Download immutable candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runfazone-pr69-candidate-${{ needs.verify-candidate.outputs.candidate_sha }}
+
+      - name: Upload a version preview only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CANDIDATE_SHA: ${{ needs.verify-candidate.outputs.candidate_sha }}
+          PREVIEW_ALIAS: ${{ needs.verify-candidate.outputs.preview_alias }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.name == "runfazone-preview" and .main == ".open-next/worker.js" and ((.routes // []) | length == 0) and ((.domains // []) | length == 0) and ((.triggers // {}) | length == 0)' wrangler.jsonc >/dev/null
+          log="$RUNNER_TEMP/wrangler-version-upload.log"
+          set +e
+          npx --yes wrangler@4.151.3 versions upload .open-next/worker.js \
+            --config wrangler.jsonc --name runfazone-preview \
+            --assets .open-next/assets --tag "$PREVIEW_ALIAS" \
+            --preview-alias "$PREVIEW_ALIAS" \
+            --message "PR69 candidate $CANDIDATE_SHA" --strict >"$log" 2>&1
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            echo "BLOCKED: immutable candidate version upload failed (exit_code=$status)." >&2
+            grep -Ei 'error|fail|forbidden|unauthori[sz]ed|permission|worker|script|api|code' "$log" | head -20 \
+              | sed -E 's/(Bearer[[:space:]]+|api[_ -]?token[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s#https?://[^[:space:]]+#URL_REDACTED#Ig; s/[0-9a-f]{32,}/[REDACTED_ID]/Ig' || true
+            exit "$status"
+          fi
+          echo "CANDIDATE_VERSION_UPLOAD_PASS alias=$PREVIEW_ALIAS worker=runfazone-preview activation=none"
+
+      - name: Verify anonymous denial on candidate version URL
+        env:
+          PREVIEW_ALIAS: ${{ needs.verify-candidate.outputs.preview_alias }}
+          ACCOUNT_SUBDOMAIN: ${{ needs.verify-candidate.outputs.account_subdomain }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://${PREVIEW_ALIAS}-runfazone-preview.${ACCOUNT_SUBDOMAIN}.workers.dev/"
+          for attempt in 1 2 3 4 5; do
+            headers="$RUNNER_TEMP/candidate-headers"
+            body="$RUNNER_TEMP/candidate-body"
+            status="$(curl --silent --show-error --max-time 20 --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$endpoint")" || status=000
+            if [[ "$status" =~ ^(302|401|403)$ ]]; then
+              if grep -Ein '(order|payment|customer|profile|supabase|dashboard|admin)' "$body"; then
+                echo 'BLOCKED: candidate anonymous response exposed protected application markers.' >&2
+                exit 1
+              fi
+              echo "CANDIDATE_ANONYMOUS_DENIAL_PASS http=$status endpoint=version-preview"
+              echo 'OWNER_AUTHENTICATED_BROWSER_ACCEPTANCE_REQUIRED=true'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "BLOCKED: candidate version URL did not return an Access denial (last_http=$status)." >&2
+          exit 1
