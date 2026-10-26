@@ -6,7 +6,7 @@ operation, email, or webhook.
 
 | Requirement | Evidence | Status | Next evidence/action |
 |---|---|---|---|
-| PR exact head and Gate A checks | PR #14 current head is `e5444f1804f3f7fa4befdf30dc0220794124ab45`; Frontend run `40263570276` and Development run `40263570558` both completed SUCCESS on this exact head; browser acceptance reported 101 passed and 3 skipped | PASS (Gate A) | Hosted owner-authenticated admin and recovery evidence remains separate |
+| PR exact head and Gate A checks | PR #14 current head is `d020440114a2610cd4c8783603ffd9f23e1ee58e`; Frontend run `40264513457` and Development run `40264513560` both completed SUCCESS on this exact head; browser acceptance reported 101 passed and 3 skipped | PASS (Gate A) | Hosted owner-authenticated admin and recovery evidence remains separate |
 | Cloudflare account authorization | Preflight run `40146567430` | PASS | Preserve environment restriction |
 | OpenNext artifact and privileged-secret scan | Preflight build job passed | PASS | No deploy authorization implied |
 | Existing Supabase project identity | Project `ketdhcmwowzztcdlmris`, URL recorded in prior project-scoped audit | PASS (historical) | Owner-confirm current identity |
@@ -33,9 +33,9 @@ admin session and remain denied.
 
 Exact-head validation:
 
-- Frontend run `40263570276`: SUCCESS, including tests, TypeScript, lint,
+- Frontend run `40264513457`: SUCCESS, including tests, TypeScript, lint,
   Next.js build, and OpenNext build.
-- Development run `40263570558`: SUCCESS, including isolated RPC/RLS
+- Development run `40264513560`: SUCCESS, including isolated RPC/RLS
   security, browser acceptance, legacy upgrade, and production release safety.
 - Local unit/integration validation: 55 files, 890 passed, 1 skipped.
 

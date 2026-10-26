@@ -52,7 +52,7 @@ it must not be silently treated as the missing historical specification.
 
 - PR #13 is merged at `886f1f8864acf727ec5649203c5bcd564d6a56c3`.
 - PR #14 is intentionally draft at
-  `e5444f1804f3f7fa4befdf30dc0220794124ab45`.
+  `d020440114a2610cd4c8783603ffd9f23e1ee58e`.
 - The previous exact-head validation at
   `c759e48fd617387f09e608fb0c86de840d96ac77` had frontend and production
   release safety PASS, but the development run failed in browser acceptance.
@@ -61,8 +61,8 @@ it must not be silently treated as the missing historical specification.
   a customer fixture redirect under the large parallel fan-out. The browser
   artifact is available from
   [Development validation run 39862775809](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/39862775809/artifacts/12462688150).
-- The current exact-head Frontend validation run `40263570276` and
-  Development validation run `40263570558` are terminal SUCCESS. The
+- The current exact-head Frontend validation run `40264513457` and
+  Development validation run `40264513560` are terminal SUCCESS. The
   Development run includes successful isolated database/security, browser,
   legacy-upgrade, and production release-safety jobs; its browser result was
   101 passed and 3 skipped.
