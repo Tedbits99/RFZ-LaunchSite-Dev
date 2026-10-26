@@ -9,7 +9,7 @@ DECLARE
   v_policy_count integer;
   v_search_path text[];
 BEGIN
-  IF (SELECT count(*) FROM supabase_migrations.schema_migrations) <> 97 THEN
+  IF (SELECT count(*) FROM supabase_migrations.schema_migrations) <> 98 THEN
     RAISE EXCEPTION 'UPGRADE_MIGRATION_COUNT_INVALID';
   END IF;
 
