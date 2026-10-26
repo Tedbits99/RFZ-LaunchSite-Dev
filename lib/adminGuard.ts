@@ -2,7 +2,6 @@ import type { NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminServerClient } from '@/lib/authSessionClients'
 import { sessionCookieName } from '@/lib/authSessionConfig'
-import { adminSupabase } from '@/lib/supabaseAdmin'
 
 export type AdminSession = {
   userId: string
@@ -11,41 +10,68 @@ export type AdminSession = {
   role: string
 }
 
-export async function getAdminSession(): Promise<AdminSession | null> {
-  const supabase = await createAdminServerClient()
+export type AdminSessionResult =
+  | { ok: true; session: AdminSession }
+  | { ok: false; reason: 'unauthenticated' | 'forbidden' | 'unavailable' }
 
+const ADMIN_ROLES = new Set(['ADMIN', 'SUPER_ADMIN'])
+
+function authFailureReason(message?: string): 'unauthenticated' | 'unavailable' {
+  const normalized = (message || '').toLowerCase()
+  return /auth session missing|invalid jwt|invalid token|jwt expired|session not found|not authenticated/.test(normalized)
+    ? 'unauthenticated'
+    : 'unavailable'
+}
+
+async function resolveAdminSessionWithClient(
+  supabase: Awaited<ReturnType<typeof createAdminServerClient>>,
+): Promise<AdminSessionResult> {
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser()
-  if (error || !user) {
-    return null
-  }
+  if (error) return { ok: false, reason: authFailureReason(error.message) }
+  if (!user) return { ok: false, reason: 'unauthenticated' }
 
-  let name = ''
-  let role = 'ADMIN'
-
-  // Try to enrich with admins table data. Use service-role client if available,
-  // otherwise fall back to the cookie-authenticated server client.
-  const client = adminSupabase || supabase
-  const { data: admin } = await client
+  const { data: admin, error: adminError } = await supabase
     .from('admins')
     .select('email, name, role, is_active')
     .eq('id', user.id)
     .maybeSingle()
-  if (admin?.is_active) {
-    name = admin.name || ''
-    role = admin.role || 'ADMIN'
-  } else {
-    return null
+  if (adminError) return { ok: false, reason: 'unavailable' }
+  if (!admin?.is_active || !ADMIN_ROLES.has(admin.role)) {
+    return { ok: false, reason: 'forbidden' }
   }
 
   return {
-    userId: user.id,
-    email: user.email || '',
-    name,
-    role,
+    ok: true,
+    session: {
+      userId: user.id,
+      email: user.email || '',
+      name: admin.name || '',
+      role: admin.role,
+    },
   }
+}
+
+export async function resolveAdminSession(): Promise<AdminSessionResult> {
+  let supabase: Awaited<ReturnType<typeof createAdminServerClient>>
+  try {
+    supabase = await createAdminServerClient()
+  } catch {
+    return { ok: false, reason: 'unavailable' }
+  }
+
+  try {
+    return await resolveAdminSessionWithClient(supabase)
+  } catch {
+    return { ok: false, reason: 'unavailable' }
+  }
+}
+
+export async function getAdminSession(): Promise<AdminSession | null> {
+  const result = await resolveAdminSession()
+  return result.ok ? result.session : null
 }
 
 function createRequestClient(req: NextRequest) {
@@ -91,25 +117,23 @@ export async function requireAdmin(
       data: { user },
       error,
     } = await supabase.auth.getUser()
-    if (error || !user) {
-      return { ok: false, response: jsonError(401, 'Unauthorized.') }
+    if (error) {
+      const reason = authFailureReason(error.message)
+      return { ok: false, response: jsonError(reason === 'unauthenticated' ? 401 : 503, reason === 'unauthenticated' ? 'Unauthorized.' : 'Authentication service temporarily unavailable.') }
     }
+    if (!user) return { ok: false, response: jsonError(401, 'Unauthorized.') }
 
-    let name = ''
-    let role = 'ADMIN'
-
-    const client = adminSupabase || supabase
-    const { data: admin } = await client
+    const { data: admin, error: adminError } = await supabase
       .from('admins')
       .select('email, name, role, is_active')
       .eq('id', user.id)
       .maybeSingle()
-    if (!admin || !admin.is_active) {
+    if (adminError) {
+      return { ok: false, response: jsonError(503, 'Authentication service temporarily unavailable.') }
+    }
+    if (!admin || !admin.is_active || !ADMIN_ROLES.has(admin.role)) {
       return { ok: false, response: jsonError(403, 'Forbidden.') }
     }
-
-    name = admin.name || ''
-    role = admin.role || 'ADMIN'
 
     return {
       ok: true,
@@ -117,8 +141,8 @@ export async function requireAdmin(
       session: {
         userId: user.id,
         email: user.email || '',
-        name,
-        role,
+        name: admin.name || '',
+        role: admin.role,
       },
     }
   } catch {

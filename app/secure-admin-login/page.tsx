@@ -5,6 +5,14 @@ import { useRouter } from 'next/navigation'
 import { Lock, Mail, ShieldCheck } from 'lucide-react'
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 
+async function verifyAdminSession() {
+  const response = await fetch('/api/auth/admin-session', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  return response.ok
+}
+
 export default function SecureAdminLoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
@@ -22,10 +30,15 @@ export default function SecureAdminLoginPage() {
       // loading state when Auth is unavailable or slow.
       setReady(true)
       void supabase.auth.getSession()
-        .then(({ data, error }) => {
+        .then(async ({ data, error }) => {
           if (!active) return
           if (data?.session) {
-            router.replace('/admin')
+            try {
+              if (await verifyAdminSession()) router.replace('/admin')
+              else if (active) setError('This account is not authorized for the admin console.')
+            } catch {
+              if (active) setError('Admin authentication is temporarily unavailable. You can retry signing in.')
+            }
           } else if (error) {
             setError('We could not verify an existing admin session. Sign in to continue.')
           }
@@ -68,9 +81,21 @@ export default function SecureAdminLoginPage() {
       return
     }
 
-    try { await supabase.rpc('claim_first_admin') } catch { /* Bootstrap is one-time; subsequent logins proceed normally. */ }
+    try {
+      if (!(await verifyAdminSession())) {
+        await supabase.auth.signOut({ scope: 'local' })
+        setError('This account is not authorized for the admin console.')
+        setSubmitting(false)
+        return
+      }
+    } catch {
+      await supabase.auth.signOut({ scope: 'local' })
+      setError('Admin authentication is temporarily unavailable. Please try again.')
+      setSubmitting(false)
+      return
+    }
 
-    router.push('/admin')
+    router.replace('/admin')
   }
 
   if (!ready) {

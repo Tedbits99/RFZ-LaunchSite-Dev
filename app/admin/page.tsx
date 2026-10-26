@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createAdminServerClient } from '@/lib/authSessionClients';
 import GamesVisibilityPanel from './GamesVisibilityPanel';
 import Link from 'next/link';
 import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, Package, ShoppingCart, Users, XCircle } from 'lucide-react';
@@ -18,9 +18,9 @@ async function getMetrics(): Promise<{
   error: string | null;
 }> {
   const empty = { orders: [], games: [], packages: [], customerEmails: [], error: null as string | null };
-  let db: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  let db: Awaited<ReturnType<typeof createAdminServerClient>>;
   try {
-    db = await createSupabaseServerClient();
+    db = await createAdminServerClient();
     const { data: { user } } = await db.auth.getUser();
     if (!user) return { ...empty, error: 'Not authenticated' };
   } catch {
@@ -51,6 +51,22 @@ const fmtP = (cents: number) => `₱${(cents / 100).toLocaleString('en-PH', { mi
 export default async function AdminDashboard() {
   const data = await getMetrics();
   const { orders, games, packages, error } = data;
+
+  if (error) {
+    return (
+      <main className="rfz-admin-dashboard mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <PageHeader
+          title="Overview"
+          subtitle="A live snapshot of orders, revenue, fulfillment, and catalog health."
+          action={<Link href="/admin" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">Retry</Link>}
+        />
+        <div role="alert" className="rounded-2xl border border-amber-400/25 bg-amber-400/10 px-5 py-6 text-sm text-amber-100">
+          <h2 className="font-display text-lg font-semibold">Live dashboard data is temporarily unavailable.</h2>
+          <p className="mt-2 text-amber-100/80">No admin data was changed or replaced with fabricated totals. Retry when the service is available.</p>
+        </div>
+      </main>
+    );
+  }
   const uniqueCustomers = new Set(data.customerEmails);
   const revenue = orders.filter((o) => o.status === 'PAID' || o.status === 'COMPLETED' || o.status === 'PROCESSING').reduce((s, o) => s + o.total_cents, 0);
   const pending = orders.filter((o) => o.status === 'PENDING' || o.status === 'PAYMENT_PENDING').length;
@@ -79,12 +95,6 @@ export default async function AdminDashboard() {
         subtitle="A live snapshot of orders, revenue, fulfillment, and catalog health."
         action={<Link href="/admin/orders" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-cyan-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">View orders</Link>}
       />
-
-      {error && (
-        <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          Could not load live data: {error}. Showing empty state.
-        </div>
-      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{cards.map((c) => <MetricCard key={c.label} {...c} />)}</div>
 
