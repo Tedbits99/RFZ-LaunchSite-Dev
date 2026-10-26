@@ -10,6 +10,16 @@ DECLARE
   sensitive_table text;
   admin_function text;
 BEGIN
+  IF has_table_privilege('anon', 'public.admins', 'SELECT') THEN
+    RAISE EXCEPTION 'HOSTED_ANON_ADMINS_TABLE_SELECT';
+  END IF;
+  IF NOT has_table_privilege('authenticated', 'public.admins', 'SELECT') THEN
+    RAISE EXCEPTION 'HOSTED_AUTHENTICATED_ADMINS_TABLE_SELECT_MISSING';
+  END IF;
+  IF NOT has_table_privilege('service_role', 'public.admins', 'SELECT') THEN
+    RAISE EXCEPTION 'HOSTED_SERVICE_ROLE_ADMINS_TABLE_SELECT_MISSING';
+  END IF;
+
   FOREACH sensitive_table IN ARRAY ARRAY[
     'customer_profiles', 'orders', 'payment_submissions',
     'payment_transactions', 'refunds', 'supplier_credentials',

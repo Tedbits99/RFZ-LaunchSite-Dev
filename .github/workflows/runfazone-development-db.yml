@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: 'Exact reviewed PR #14 commit containing the migration set'
+        description: 'Exact current main commit containing the reviewed migration set'
         required: true
         type: string
       cleanup_run_id:
@@ -35,9 +35,9 @@ on:
         required: false
         type: string
 
-# This workflow is intentionally manual and is expected to run from trusted
-# main-branch workflow code. It imports only migration SQL from the reviewed
-# same-repository source SHA; it never executes scripts from a PR checkout.
+# This workflow is intentionally manual and runs only from trusted main-branch
+# workflow code. It imports migration SQL only from the exact current main SHA;
+# it never executes scripts from an unmerged PR checkout.
 permissions:
   contents: read
   pull-requests: read
@@ -149,12 +149,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pr_json="$(gh api "repos/$REPOSITORY/pulls/14")"
-          [[ "$(jq -r '.state' <<<"$pr_json")" = open ]] || { echo 'BLOCKED: PR #14 is not open.' >&2; exit 1; }
-          [[ "$(jq -r '.draft' <<<"$pr_json")" = true ]] || { echo 'BLOCKED: PR #14 must remain draft.' >&2; exit 1; }
-          [[ "$(jq -r '.base.ref' <<<"$pr_json")" = main ]] || { echo 'BLOCKED: PR #14 must target main.' >&2; exit 1; }
-          [[ "$(jq -r '.head.repo.full_name' <<<"$pr_json")" = "$REPOSITORY" ]] || { echo 'BLOCKED: source must be same-repository.' >&2; exit 1; }
-          [[ "$(jq -r '.head.sha' <<<"$pr_json")" = "$SOURCE_SHA" ]] || { echo 'BLOCKED: source_sha is not the current exact PR #14 head.' >&2; exit 1; }
+          main_sha="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          [[ "$SOURCE_SHA" = "$main_sha" && "$SOURCE_SHA" = "$GITHUB_SHA" ]] || {
+            echo 'BLOCKED: source_sha must match the exact current main commit used by this workflow.' >&2
+            exit 1
+          }
           if ! git cat-file -e "$SOURCE_SHA^{commit}" 2>/dev/null; then
             git fetch --no-tags origin "$SOURCE_SHA"
           fi
@@ -182,21 +181,23 @@ jobs:
             echo 'BLOCKED: migration source contains non-SQL files.' >&2
             exit 1
           } || true
-          count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          if [[ "$count" == 97 && -f "$migration_dir/20261025150000_promotions_cinematic_presets.sql" ]]; then
-            echo 'SOURCE_MIGRATIONS_VERIFIED count=97 known_additive_promotions_cinematic_presets=true'
-          elif [[ "$count" != 96 ]]; then
-            echo "BLOCKED: reviewed source contains $count SQL migrations; expected the 96-file baseline or the explicitly reviewed additive promotions migration." >&2
-            exit 1
-          fi
           command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
+          manifest="$GITHUB_WORKSPACE/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md"
+          test -s "$manifest" || { echo 'BLOCKED: reviewed migration manifest is unavailable.' >&2; exit 1; }
+          awk -F'|' '/\| INCLUDE \|/ { gsub(/`/, "", $4); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $4); print $4 }' "$manifest" | sort > "$RUNNER_TEMP/expected-migrations.txt"
+          find "$migration_dir" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort > "$RUNNER_TEMP/source-migrations.txt"
+          diff -u "$RUNNER_TEMP/expected-migrations.txt" "$RUNNER_TEMP/source-migrations.txt" || {
+            echo 'BLOCKED: source migration files do not match the reviewed main-branch manifest.' >&2
+            exit 1
+          }
+          count="$(wc -l < "$RUNNER_TEMP/source-migrations.txt" | tr -d ' ')"
           if rg -n -i --glob '*.sql' \
             '(drop[[:space:]]+(table|schema|database)|truncate([[:space:];]|$)|alter[[:space:]]+table[^;]*(drop[[:space:]]+column)|cron\.schedule|net\.http|http_(post|get)|https?://)' \
             "$migration_dir"; then
             echo 'BLOCKED: migration source contains destructive DDL or outbound/scheduled side effects requiring separate review.' >&2
             exit 1
           fi
-          echo "SOURCE_MIGRATIONS_VERIFIED count=$count"
+          echo "SOURCE_MIGRATIONS_VERIFIED count=$count manifest_match=true"
 
       - name: Link to the verified development project
         env:

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       head_sha:
-        description: 'Exact approved PR #14 head SHA'
+        description: 'Exact current main commit SHA approved for deployment'
         required: true
         type: string
       operation:
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   verify-approved-head:
-    name: Verify PR #14 Gate A
+    name: Verify exact current main commit
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -62,32 +62,25 @@ jobs:
             exit 1
           }
 
-          pr_json="$(gh api "repos/$REPOSITORY/pulls/14")"
-          pr_state="$(jq -r '.state' <<<"$pr_json")"
-          pr_draft="$(jq -r '.draft' <<<"$pr_json")"
-          pr_base="$(jq -r '.base.ref' <<<"$pr_json")"
-          pr_sha="$(jq -r '.head.sha' <<<"$pr_json")"
-          pr_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
-          [[ "$pr_state" == open && "$pr_draft" == true && "$pr_base" == main ]] || {
-            echo 'BLOCKED: PR #14 must be open, draft, and target main.' >&2
+          main_sha="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          [[ "$APPROVED_SHA" == "$main_sha" && "$APPROVED_SHA" == "$GITHUB_SHA" ]] || {
+            echo 'BLOCKED: deployment SHA is not the exact current main commit.' >&2
             exit 1
           }
-          [[ "$pr_repo" == "$REPOSITORY" && "$pr_sha" == "$APPROVED_SHA" ]] || {
-            echo 'BLOCKED: PR #14 is not a trusted same-repository exact-head match.' >&2
-            exit 1
-          }
-
-          checks_json="$(gh api "repos/$REPOSITORY/commits/$APPROVED_SHA/check-runs?per_page=100")"
-          required=("Next.js checks" "Isolated Supabase RPC security tests" "Production release safety")
-          for check_name in "${required[@]}"; do
-            count="$(jq --arg name "$check_name" '[.check_runs[] | select(.name == $name and .conclusion == "success")] | length' <<<"$checks_json")"
-            [[ "$count" == 1 ]] || {
-              echo "BLOCKED: required Gate A check is not exactly successful on the approved head: $check_name" >&2
-              exit 1
-            }
+          workflow_runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$APPROVED_SHA&per_page=100")"
+          frontend_run="$(jq -c --arg sha "$APPROVED_SHA" '[.workflow_runs[] | select(.name == "Frontend validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          development_run="$(jq -c --arg sha "$APPROVED_SHA" '[.workflow_runs[] | select(.name == "Development validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$workflow_runs")"
+          test -n "$frontend_run" || { echo 'BLOCKED: missing exact-head Frontend validation.' >&2; exit 1; }
+          test -n "$development_run" || { echo 'BLOCKED: missing exact-head Development validation.' >&2; exit 1; }
+          [[ "$(jq -r '.status' <<<"$frontend_run")" == completed && "$(jq -r '.conclusion' <<<"$frontend_run")" == success ]] || { echo 'BLOCKED: exact-head Frontend validation did not pass.' >&2; exit 1; }
+          [[ "$(jq -r '.status' <<<"$development_run")" == completed && "$(jq -r '.conclusion' <<<"$development_run")" == success ]] || { echo 'BLOCKED: exact-head Development validation did not pass.' >&2; exit 1; }
+          development_jobs="$(gh api "repos/$REPOSITORY/actions/runs/$(jq -r '.id' <<<"$development_run")/jobs?per_page=100")"
+          for check_name in "Isolated Supabase RPC security tests" "Production release safety"; do
+            job="$(jq -c --arg name "$check_name" '[.jobs[] | select(.name == $name)] | last // empty' <<<"$development_jobs")"
+            test -n "$job" || { echo "BLOCKED: missing exact-head job: $check_name" >&2; exit 1; }
+            [[ "$(jq -r '.status' <<<"$job")" == completed && "$(jq -r '.conclusion' <<<"$job")" == success ]] || { echo "BLOCKED: exact-head job did not pass: $check_name" >&2; exit 1; }
           done
-
-          echo "Verified PR #14 exact head $APPROVED_SHA with all required Gate A checks successful."
+          echo "Verified current main exact head $APPROVED_SHA with all required validation successful."
           echo "head_sha=$APPROVED_SHA" >> "$GITHUB_OUTPUT"
 
   verify-gate-b-audit:
@@ -142,7 +135,7 @@ jobs:
     environment:
       name: runfazone-preview
     steps:
-      - name: Check out approved PR #14 head
+      - name: Check out approved main commit
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.verify-approved-head.outputs.head_sha }}
@@ -400,7 +393,7 @@ jobs:
           for attempt in 1 2; do
             set +e
             npx --yes wrangler@4.151.3 deploy --config wrangler.jsonc \
-              --name runfazone-preview --message "Runfazone PR14 $APPROVED_SHA" >"$deploy_log" 2>&1
+              --name runfazone-preview --message "Runfazone main $APPROVED_SHA" >"$deploy_log" 2>&1
             deploy_status=$?
             set -e
             (( deploy_status == 0 )) && break

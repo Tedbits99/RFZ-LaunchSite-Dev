@@ -18,8 +18,8 @@ silently accepted.
 Before `apply`, the workflow verifies the latest terminal success of the three
 required exact-head PR checks and rejects destructive DDL or outbound/scheduled
 side effects in the migration source. `apply` also requires the exact phrase
-`APPLY_DEVELOPMENT_MIGRATIONS` and applies only the 96 SQL migrations from the
-verified same-repository PR #14 head. It does not reset the project, mark
+`APPLY_DEVELOPMENT_MIGRATIONS` and applies only the 98 SQL migrations from the
+verified current `main` commit. It does not reset the project, mark
 migrations as applied, execute PR scripts, or run production integrations.
 
 The workflow must be present on trusted `main` before GitHub will offer manual

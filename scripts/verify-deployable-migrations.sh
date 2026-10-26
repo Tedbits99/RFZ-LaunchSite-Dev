@@ -20,8 +20,8 @@ if ! diff -u "$tmp_root/expected" "$tmp_root/actual"; then
 fi
 
 count="$(wc -l < "$tmp_root/actual" | tr -d ' ')"
-[ "$count" = 97 ] || {
-  echo "ERROR: expected 97 executable migrations, found $count." >&2
+[ "$count" -gt 0 ] || {
+  echo 'ERROR: executable migration directory is empty.' >&2
   exit 1
 }
 
