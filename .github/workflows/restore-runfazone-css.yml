@@ -1,6 +1,6 @@
-name: Restore RunFazone CSS after verified main merge
+name: Protected P0 Worker recovery after verified main merge
 
-# One-time P0 recovery: PR #63 only. No new Worker or DB.
+# Explicitly scoped P0 remediation PRs only (#63 CSS, #64 CPU). No new Worker or DB.
 on:
   pull_request:
     types: [closed]
@@ -11,13 +11,13 @@ permissions:
   actions: write
 
 concurrency:
-  group: runfazone-css-recovery-deploy
+  group: runfazone-p0-recovery-deploy
   cancel-in-progress: false
 
 jobs:
   restore:
     name: Validate merged main and dispatch existing protected Worker deploy
-    if: github.event.pull_request.merged == true && github.event.pull_request.number == 63 && github.event.pull_request.base.ref == 'main'
+    if: github.event.pull_request.merged == true && (github.event.pull_request.number == 63 || github.event.pull_request.number == 64) && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
