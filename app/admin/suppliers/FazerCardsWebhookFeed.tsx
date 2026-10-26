@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Activity, RefreshCcw, Radio, ShieldCheck } from 'lucide-react';
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients';
@@ -25,6 +25,7 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'created' | 'status'>('all');
   const [error, setError] = useState('');
   const [live, setLive] = useState(false);
+  const liveRef = useRef(false);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -45,7 +46,11 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => { void refresh(); }, 10000);
+    // Realtime events refresh immediately. Poll only when disconnected so
+    // a healthy admin session does not wake the costly Worker every 10s.
+    const timer = setInterval(() => {
+      if (!liveRef.current) void refresh();
+    }, 60000);
     let closed = false;
     let client: SupabaseClient | null = null;
     let channel: RealtimeChannel | null = null;
@@ -64,7 +69,11 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
           .on('postgres_changes', {
             event: '*', schema: 'public', table: 'fazercards_webhook_events',
           }, () => { void refresh(); })
-          .subscribe(status => { if (!closed) setLive(status === 'SUBSCRIBED'); });
+          .subscribe(status => {
+            if (closed) return;
+            liveRef.current = status === 'SUBSCRIBED';
+            setLive(liveRef.current);
+          });
       } catch {
         if (!closed) setLive(false);
       }
@@ -73,6 +82,7 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
 
     return () => {
       closed = true;
+      liveRef.current = false;
       clearInterval(timer);
       if (client && channel) void client.removeChannel(channel);
     };
@@ -104,7 +114,7 @@ export default function FazerCardsWebhookFeed({ compact = false }: { compact?: b
       </header>
       <p className="mb-3 flex items-center gap-2 text-[11px] text-slate-400">
         {live ? <Radio size={13} className="text-emerald-400" /> : <RefreshCcw size={13} />}
-        {live ? 'Realtime connected' : 'Checking every 10 seconds'}
+        {live ? 'Realtime connected' : 'Checking every 60 seconds'}
         {syncedAt && <span>· Last sync {new Date(syncedAt).toLocaleTimeString()}</span>}
       </p>
       <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Filter FazerCards supplier event type">
