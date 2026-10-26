@@ -53,14 +53,18 @@ password_provider="$(jq -r '([.[0].identities[]?.provider?] + [.[0].app_metadata
 }
 
 db_connection="host=$SUPABASE_POOLER_HOST port=$SUPABASE_POOLER_PORT user=$SUPABASE_DB_USER dbname=postgres sslmode=require connect_timeout=10"
+# psql's colon-variable quoting is not reliable in every runner/client
+# combination. The Auth UUID is already strictly validated above; escape the
+# email for a single-quoted SQL literal before issuing this read-only query.
+sql_email="${normalized_email//\'/\'\'}"
 admin_state="$(PGPASSWORD="$SUPABASE_DB_PASSWORD" psql "$db_connection" \
-  -v ON_ERROR_STOP=1 -v auth_uid="$user_id" -v auth_email="$normalized_email" -Atqc \
+  -v ON_ERROR_STOP=1 -Atqc \
   "SELECT json_build_object(
-    'uuid_match', EXISTS (SELECT 1 FROM public.admins WHERE id = :'auth_uid'::uuid),
-    'email_match', EXISTS (SELECT 1 FROM public.admins WHERE id = :'auth_uid'::uuid AND lower(trim(email)) = lower(:'auth_email')),
-    'active', COALESCE((SELECT is_active FROM public.admins WHERE id = :'auth_uid'::uuid LIMIT 1), false),
-    'role', COALESCE((SELECT role FROM public.admins WHERE id = :'auth_uid'::uuid LIMIT 1), ''),
-    'auth_email_match', EXISTS (SELECT 1 FROM auth.users WHERE id = :'auth_uid'::uuid AND lower(email) = lower(:'auth_email'))
+    'uuid_match', EXISTS (SELECT 1 FROM public.admins WHERE id = '$user_id'::uuid),
+    'email_match', EXISTS (SELECT 1 FROM public.admins WHERE id = '$user_id'::uuid AND lower(trim(email)) = lower('$sql_email')),
+    'active', COALESCE((SELECT is_active FROM public.admins WHERE id = '$user_id'::uuid LIMIT 1), false),
+    'role', COALESCE((SELECT role FROM public.admins WHERE id = '$user_id'::uuid LIMIT 1), ''),
+    'auth_email_match', EXISTS (SELECT 1 FROM auth.users WHERE id = '$user_id'::uuid AND lower(email) = lower('$sql_email'))
   )")"
 
 jq -e '.uuid_match and .email_match and .active and (.role == "ADMIN" or .role == "SUPER_ADMIN") and .auth_email_match' <<<"$admin_state" >/dev/null || {
