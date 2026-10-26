@@ -107,6 +107,10 @@ function recoveryNetwork() {
     if (u.includes('/auth/v1/user') && method === 'GET') return jsonResponse(sessionBody(ACCESS_TOKEN, USER_ID).user);
     if (u.includes('/auth/v1/user') && method === 'PUT') return jsonResponse(sessionBody(ACCESS_TOKEN, USER_ID).user);
     if (u.includes('/auth/v1/logout')) return new Response(null, { status: 204 });
+    // The production password-reset completion now checks the authenticated
+    // user's admin identity before selecting a sign-in destination. An empty
+    // PostgREST result represents a legitimate non-admin recovery user.
+    if (u.includes('/rest/v1/admins') && method === 'GET') return jsonResponse([]);
     throw new Error(`unexpected fetch ${method} ${u}`);
   };
 }
