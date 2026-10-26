@@ -51,25 +51,6 @@ else
   jq -r 'split("\\n")[]' <<<"$allowlist_json" > "$allowlist"
 fi
 
-# Supabase redirect rules use * as the documented wildcard. Match the exact
-# callback against each rule without echoing the rules themselves.
-callback_allowed="$(python3 - "$callback_url" "$allowlist" <<'PY'
-import re
-import sys
-
-callback, path = sys.argv[1:]
-for raw in open(path, encoding='utf-8'):
-    rule = raw.strip()
-    if not rule:
-        continue
-    pattern = '^' + re.escape(rule).replace(r'\*', '.*') + '$'
-    if re.fullmatch(pattern[1:-1], callback):
-        print('true')
-        raise SystemExit(0)
-print('false')
-PY
-)"
-
 template_lower="${template,,}"
 template_token_hash=false
 template_email_type=false
@@ -93,10 +74,41 @@ import sys
 print(urlsplit(sys.argv[1]).netloc)
 PY
 )"
+candidate_wildcard="$(python3 - "$candidate_host" <<'PY'
+import re
+import sys
+host = sys.argv[1]
+match = re.fullmatch(r'pr69-[0-9a-f]{12}-runfazone-preview\.(.+)', host)
+if not match:
+    raise SystemExit('invalid protected PR69 candidate host')
+print(f'https://pr69-*-runfazone-preview.{match.group(1)}/auth/callback')
+PY
+)"
+
+# Supabase redirect rules use * as a documented wildcard. Check the exact
+# persisted rule and the expected PR69-only wildcard explicitly, then use the
+# same wildcard rule to prove that this SHA-specific callback is covered.
+read -r exact_rule wildcard_rule glob_match <<<"$(python3 - "$callback_url" "$candidate_wildcard" "$allowlist" <<'PY'
+import fnmatch
+import sys
+
+callback, wildcard, path = sys.argv[1:]
+rules = [line.strip() for line in open(path, encoding='utf-8') if line.strip()]
+print(
+    'true' if callback in rules else 'false',
+    'true' if wildcard in rules else 'false',
+    'true' if any(fnmatch.fnmatchcase(callback, rule) for rule in rules) else 'false',
+)
+PY
+)"
+callback_allowed="$glob_match"
 
 echo "AUTH_CONFIG_PROJECT=$PROJECT_ID"
 echo "AUTH_SITE_ORIGIN=$site_origin"
 echo "AUTH_CANDIDATE_HOST=$candidate_host"
+echo "AUTH_CALLBACK_EXACT_RULE_PRESENT=$exact_rule"
+echo "AUTH_PR69_WILDCARD_RULE_PRESENT=$wildcard_rule"
+echo "AUTH_CALLBACK_GLOB_MATCHED=$glob_match"
 echo "AUTH_CALLBACK_ALLOWLISTED=$callback_allowed"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_TOKEN_HASH=$template_token_hash"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_EMAIL_TYPE=$template_email_type"
