@@ -1,0 +1,107 @@
+name: Restore RunFazone CSS after verified main merge
+
+# One-time P0 recovery: PR #63 only. No new Worker or DB.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  checks: read
+  actions: write
+
+concurrency:
+  group: runfazone-css-recovery-deploy
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Validate merged main and dispatch existing protected Worker deploy
+    if: github.event.pull_request.merged == true && github.event.pull_request.number == 63 && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Confirm exact current merged main commit
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EXPECTED: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          test "$REPO" = "Tedbits99/RFZ-LaunchSite-Dev"
+          [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+          actual="$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+          test "$EXPECTED" = "$actual" || {
+            echo 'BLOCKED: main moved; do not deploy an outdated Worker artifact.' >&2
+            exit 1
+          }
+          printf 'sha=%s\n' "$actual" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger fresh frontend and security checks for exact merged main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run frontend-validation.yml --repo "$REPO" --ref main
+          gh workflow run database-security-tests.yml --repo "$REPO" --ref main
+          echo 'Fresh exact-main validation workflows requested.'
+
+      - name: Enforce three required successful checks on immutable merged SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          APPROVED_SHA: ${{ steps.main.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in $(seq 1 120); do
+            main_sha="$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+            test "$main_sha" = "$APPROVED_SHA" || {
+              echo 'BLOCKED: main changed during exact-head verification.' >&2
+              exit 1
+            }
+            response="$(gh api "repos/$REPO/commits/$APPROVED_SHA/check-runs?per_page=100")"
+            all_ok=1
+            any_failed=0
+            for check in "Next.js checks" "Isolated Supabase RPC security tests" "Production release safety"; do
+              outcome="$(jq -r --arg name "$check" \
+                '[.check_runs[] | select(.name == $name)] | sort_by(.started_at) | last | .conclusion // "pending"' <<< "$response")"
+              if [[ "$outcome" == failure || "$outcome" == cancelled || "$outcome" == timed_out ]]; then
+                any_failed=1
+              fi
+              [[ "$outcome" == success ]] || all_ok=0
+            done
+            if (( any_failed )); then
+              echo 'BLOCKED: required exact-head CI failed. Worker not deployed.' >&2
+              exit 1
+            fi
+            if (( all_ok )); then
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          (( ok )) || {
+            echo 'BLOCKED: exact-main CI did not complete successfully.' >&2
+            exit 1
+          }
+          echo 'EXACT_MAIN_REQUIRED_CHECKS_PASS 3/3.'
+
+      - name: Dispatch existing Cloudflare Access-protected main deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          APPROVED_SHA: ${{ steps.main.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')" == "$APPROVED_SHA" ]] || {
+            echo 'BLOCKED: main moved after required checks.' >&2
+            exit 1
+          }
+          # The existing workflow enforces exact-main SHA, successful hosted
+          # Gate B audit, Cloudflare Access, runtime smoke, and one named Worker.
+          gh workflow run runfazone-preview.yml --repo "$REPO" --ref main \
+            -f head_sha="$APPROVED_SHA" -f operation=deploy-private-preview
+          echo "PROTECTED_CLOUDFLARE_REDEPLOY_REQUESTED main_sha=$APPROVED_SHA"
