@@ -87,8 +87,9 @@ describe('reset password page source invariants (automated static checks)', () =
   });
 
   it('only follows the server-verified internal sign-in destination after reset', () => {
-    expect(source).toContain("body?.signInPath !== '/login'");
-    expect(source).toContain("body?.signInPath !== '/secure-admin-login'");
+    expect(source).toContain('const destination = body?.signInPath;');
+    expect(source).toContain("destination !== '/login'");
+    expect(source).toContain("destination !== '/secure-admin-login'");
     expect(source).toContain('window.location.replace(destination)');
     expect(source).not.toMatch(/new URL\(|redirectTo|returnTo|nextUrl/);
   });
