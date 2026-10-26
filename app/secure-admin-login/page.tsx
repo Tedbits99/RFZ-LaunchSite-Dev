@@ -10,7 +10,15 @@ async function verifyAdminSession() {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
   })
-  return response.ok
+  return { ok: response.ok, status: response.status }
+}
+
+async function clearAdminSession(supabase: ReturnType<typeof createAdminBrowserClient>) {
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } catch {
+    // A failed cleanup must not replace the safe generic login error.
+  }
 }
 
 export default function SecureAdminLoginPage() {
@@ -34,8 +42,11 @@ export default function SecureAdminLoginPage() {
           if (!active) return
           if (data?.session) {
             try {
-              if (await verifyAdminSession()) router.replace('/admin')
-              else if (active) setError('This account is not authorized for the admin console.')
+              const result = await verifyAdminSession()
+              if (result.ok) router.replace('/admin')
+              else if (active) setError(result.status === 403
+                ? 'This account is not authorized for the admin console.'
+                : 'Admin authentication is temporarily unavailable. You can retry signing in.')
             } catch {
               if (active) setError('Admin authentication is temporarily unavailable. You can retry signing in.')
             }
@@ -60,21 +71,47 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
+    let supabase: ReturnType<typeof createAdminBrowserClient>
     try {
-      const response = await fetch('/api/auth/admin-login', {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ email, password }),
-      })
-      const body = await response.json().catch(() => ({})) as { error?: string }
-      if (!response.ok) {
-        setError(body.error || 'Admin authentication is temporarily unavailable. Please try again.')
+      supabase = createAdminBrowserClient()
+    } catch {
+      setError('Admin authentication is temporarily unavailable. Please try again.')
+      setSubmitting(false)
+      return
+    }
+
+    let signInError: { message?: string } | null = null
+    try {
+      ({ error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      }))
+    } catch {
+      setError('Admin authentication is temporarily unavailable. Please try again.')
+      setSubmitting(false)
+      return
+    }
+
+    if (signInError) {
+      await clearAdminSession(supabase)
+      setError('Invalid email or password.')
+      setSubmitting(false)
+      return
+    }
+
+    try {
+      const result = await verifyAdminSession()
+      if (!result.ok) {
+        await clearAdminSession(supabase)
+        setError(result.status === 403
+          ? 'This account is not authorized for the admin console.'
+          : 'Admin authentication is temporarily unavailable. Please try again.')
         setSubmitting(false)
         return
       }
       router.replace('/admin')
     } catch {
+      await clearAdminSession(supabase)
       setError('Admin authentication is temporarily unavailable. Please try again.')
       setSubmitting(false)
     }

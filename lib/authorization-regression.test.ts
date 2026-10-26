@@ -36,12 +36,13 @@ describe('privileged route authorization contracts', () => {
 describe('admin authentication contracts', () => {
   it('uses the server-side admin login endpoint and safe native form target', () => {
     const code = source('app/secure-admin-login/page.tsx');
-    expect(code).toContain("fetch('/api/auth/admin-login'");
-    expect(code).toContain("credentials: 'same-origin'");
+    expect(code).toContain('createAdminBrowserClient');
+    expect(code).toContain('auth.signInWithPassword');
+    expect(code).toContain("fetch('/api/auth/admin-session'");
     expect(code).toContain('action="/api/auth/admin-login"');
     expect(code).toContain('name="email"');
     expect(code).toContain('name="password"');
-    expect(code).not.toContain('auth.signInWithPassword');
+    expect(code).toContain("supabase.auth.signOut({ scope: 'local' })");
   });
 
   it('keeps the admin login endpoint inside the server-side admin context', () => {
