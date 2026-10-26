@@ -49,7 +49,18 @@ a { color: inherit; text-decoration: none; }
 .rfz-admin-route > header { background: rgba(5,8,20,.88); border-color: rgba(65,217,255,.12); }
 .rfz-admin-route .overflow-x-auto { border-color: var(--rfz-line); background: linear-gradient(145deg, rgba(16,28,51,.9), rgba(8,15,31,.94)); box-shadow: var(--rfz-shadow-sm); }
 .rfz-admin-dashboard .rounded-xl.border { border-color: var(--rfz-line); box-shadow: var(--rfz-shadow-sm); }
+/* Keep the single appearance button clear of navigation at all widths. */
 .theme-selector { position: fixed; top: .75rem; right: .75rem; z-index: 100; }
+@media (min-width: 1024px) {
+  header.sticky > div:first-child { padding-right: 7.5rem; }
+}
+@media (max-width: 1023px) {
+  .theme-selector {
+    top: auto;
+    right: calc(1rem + env(safe-area-inset-right, 0px));
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 html[data-theme="light"] {
   --rfz-ink: #10213a; --rfz-muted: #52647d; --rfz-subtle: #6b7b91; --rfz-text: #10213a;
   --rfz-bg: #f4f8fc; --rfz-bg-raised: #edf3f9; --rfz-surface: #ffffff; --rfz-surface-raised: #e8f0f8;
@@ -93,3 +104,20 @@ html[data-theme="light"] .rfz-admin-header, html[data-theme="light"] header.stic
 html[data-theme="night"] .rfz-admin-header, html[data-theme="night"] header.sticky { background: rgba(0,0,0,.92) !important; box-shadow: 0 8px 24px rgba(0,0,0,.55); }
 html[data-theme="light"] .rfz-track-page { background-image: radial-gradient(circle at 50% 0%, rgba(72,167,222,.13), transparent 30rem); }
 html[data-theme="night"] .rfz-track-page { background-image: none; }
+
+/* Light-mode readability: the game cards intentionally keep a dark gradient. */
+html[data-theme="light"] #games .card-hover { color: #f4f8ff; }
+html[data-theme="light"] #games .card-hover .text-slate-400,
+html[data-theme="light"] #games .card-hover .text-slate-500 { color: #cfddf0 !important; }
+html[data-theme="light"] #games .card-hover .text-cyan-200,
+html[data-theme="light"] #games .card-hover .text-cyan-300 { color: #80e9ff !important; }
+/* Benefits/footer instead become light surfaces so dark text remains legible. */
+html[data-theme="light"] #benefits,
+html[data-theme="light"] footer { background-color: var(--rfz-surface) !important; border-color: var(--rfz-line) !important; }
+html[data-theme="light"] #benefits .text-violet-300 { color: #6941b5 !important; }
+/* The sign-in inputs should match the selected light appearance. */
+html[data-theme="light"] .rfz-auth-page input:not([type="checkbox"]) {
+  background: var(--rfz-surface-raised) !important;
+  color: var(--rfz-ink) !important;
+  border-color: var(--rfz-line-strong) !important;
+}

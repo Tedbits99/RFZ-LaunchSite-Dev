@@ -1,6 +1,6 @@
 name: Protected P0 Worker recovery after verified main merge
 
-# Explicitly scoped P0 remediation PRs only (#63 CSS, #64 CPU). No new Worker or DB.
+# Explicitly scoped P0 remediation PRs (#63 CSS, #64 CPU, #66 UI + SSR). No new Worker or DB.
 on:
   pull_request:
     types: [closed]
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   restore:
     name: Validate merged main and dispatch existing protected Worker deploy
-    if: github.event.pull_request.merged == true && (github.event.pull_request.number == 63 || github.event.pull_request.number == 64) && github.event.pull_request.base.ref == 'main'
+    if: github.event.pull_request.merged == true && (github.event.pull_request.number == 63 || github.event.pull_request.number == 64 || github.event.pull_request.number == 66) && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

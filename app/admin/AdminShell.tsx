@@ -11,8 +11,8 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   return (
     <div className="rfz-admin-app min-h-screen bg-[var(--rfz-bg)] text-[var(--rfz-ink)]">
       <header className="rfz-admin-header sticky top-0 z-40 border-b backdrop-blur-xl">
-        <div className="flex min-h-[73px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-3">
+        <div className="flex min-h-[73px] min-w-0 items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:px-8">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <button
                 type="button"
                 aria-label="Open admin navigation"
@@ -27,7 +27,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 alt="RunFazone"
                 width={1701}
                 height={378}
-                className="h-10 w-auto object-contain"
+                className="h-auto max-h-9 w-auto max-w-[92px] object-contain sm:h-10 sm:max-h-none sm:max-w-none"
               />
               <div className="hidden sm:block">
                 <p className="text-[10px] uppercase tracking-widest text-slate-500">
@@ -35,7 +35,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-400 sm:gap-3">
+            <div className="flex shrink-0 items-center gap-1 text-xs text-slate-400 sm:gap-3">
               <a
                 href="/admin/orders"
                 aria-label="Search and manage orders"
@@ -62,6 +62,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 <Activity size={13} className="text-cyan-300" /> Admin
               </span>
               <button
+                aria-label="Log out of admin dashboard"
                 onClick={async () => {
                   const supabase = getSupabaseBrowserClient()
                   if (supabase) await supabase.auth.signOut()
@@ -69,7 +70,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 }}
                 className="flex items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-rose-400 hover:text-rose-200"
               >
-                <LogOut size={13} /> Log out
+                <LogOut size={13} /> <span className="hidden sm:inline">Log out</span>
               </button>
             </div>
         </div>
