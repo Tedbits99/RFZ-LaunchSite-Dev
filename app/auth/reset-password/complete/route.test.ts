@@ -123,6 +123,17 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(cleared).toContain('HttpOnly');
   });
 
+  it('accepts a proof issued immediately before an Auth token refresh in the same recovery session', async () => {
+    mocks.getSession
+      .mockResolvedValueOnce(recoverySessionResult({ accessToken: ACCESS_TOKEN }))
+      .mockResolvedValueOnce(recoverySessionResult({ accessToken: 'refreshed-recovery-access-token' }));
+
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-1' });
+  });
+
   it('rejects a request with NO recovery proof cookie', async () => {
     const response = await POST(postRequest({ password: 'new-password-1' }));
 

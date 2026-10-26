@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { CheckCircle2, Eye, EyeOff, Lock } from 'lucide-react';
 
 type PageState = 'form' | 'pending' | 'success' | 'error';
@@ -26,10 +26,36 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
+  const [preparing, setPreparing] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/auth/reset-password/prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: '{}',
+    })
+      .then((response) => {
+        if (!active) return;
+        if (response.ok) return;
+        setError(response.status === 503 ? GENERIC_503 : GENERIC_INVALID);
+        setState('error');
+      })
+      .catch(() => {
+        if (!active) return;
+        setError(GENERIC_503);
+        setState('error');
+      })
+      .finally(() => {
+        if (active) setPreparing(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (state === 'pending') return;
+    if (state === 'pending' || preparing) return;
     const formData = new FormData(event.currentTarget);
     const nextPassword = String(formData.get('password') ?? '');
     const nextConfirmation = String(formData.get('confirmPassword') ?? '');
@@ -116,8 +142,8 @@ export default function ResetPasswordPage() {
               {state === 'error' && error ? (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert">{error}</div>
               ) : null}
-              <button type="submit" disabled={state === 'pending'} className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 py-3 text-sm font-semibold disabled:opacity-50">
-                {state === 'pending' ? 'Updating…' : 'Update password'}
+              <button type="submit" disabled={state === 'pending' || preparing} className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 py-3 text-sm font-semibold disabled:opacity-50">
+                {preparing ? 'Verifying reset link…' : state === 'pending' ? 'Updating…' : 'Update password'}
               </button>
             </form>
             <p className="mt-4 text-center text-xs text-slate-500"><a href="/login" className="text-cyan-300">Back to sign in</a></p>

@@ -44,6 +44,13 @@ describe('reset password page source invariants (automated static checks)', () =
     expect(source).toContain('JSON.stringify({ password: nextPassword })');
   });
 
+  it('refreshes the server-side recovery proof before enabling submission', () => {
+    expect(source).toContain("fetch('/auth/reset-password/prepare'");
+    expect(source).toContain("method: 'POST'");
+    expect(source).toContain("credentials: 'same-origin'");
+    expect(source).toContain('Verifying reset link…');
+  });
+
   it('never manipulates cookies or storage in the browser', () => {
     expect(source).not.toMatch(/document\.cookie/);
     expect(source).not.toMatch(/localStorage|sessionStorage/);
@@ -84,7 +91,7 @@ describe('reset password page SSR render (executed render check)', () => {
     expect(html).toContain('name="password"');
     expect(html).toContain('name="confirmPassword"');
     expect(html).toContain('type="password"');
-    expect(html).toContain('Update password');
+    expect(html).toMatch(/Verifying reset link…|Update password/);
   });
 
   it('does not pre-render the success or error panels in the idle state', () => {
