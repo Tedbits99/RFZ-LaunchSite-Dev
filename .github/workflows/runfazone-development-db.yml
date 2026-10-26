@@ -183,7 +183,12 @@ jobs:
             exit 1
           } || true
           count="$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          test "$count" = 96 || { echo "BLOCKED: reviewed source contains $count SQL migrations; expected 96." >&2; exit 1; }
+          if [[ "$count" == 97 && -f "$migration_dir/20261025150000_promotions_cinematic_presets.sql" ]]; then
+            echo 'SOURCE_MIGRATIONS_VERIFIED count=97 known_additive_promotions_cinematic_presets=true'
+          elif [[ "$count" != 96 ]]; then
+            echo "BLOCKED: reviewed source contains $count SQL migrations; expected the 96-file baseline or the explicitly reviewed additive promotions migration." >&2
+            exit 1
+          fi
           command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
           if rg -n -i --glob '*.sql' \
             '(drop[[:space:]]+(table|schema|database)|truncate([[:space:];]|$)|alter[[:space:]]+table[^;]*(drop[[:space:]]+column)|cron\.schedule|net\.http|http_(post|get)|https?://)' \
