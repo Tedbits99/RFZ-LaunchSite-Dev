@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
   --rfz-ink: #f4f8ff; --rfz-muted: #91a0bb; --rfz-subtle: #64748b;

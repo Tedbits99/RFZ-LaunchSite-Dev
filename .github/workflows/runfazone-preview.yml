@@ -178,6 +178,9 @@ jobs:
           NEXT_PUBLIC_APP_URL: https://runfazone-preview.mondigoted732.workers.dev
         run: npm run cloudflare:build
 
+      - name: Verify compiled Tailwind layout utilities
+        run: node scripts/verify-tailwind-output.mjs
+
       - name: Verify preview target and package contents
         shell: bash
         run: |

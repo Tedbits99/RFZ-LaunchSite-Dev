@@ -74,11 +74,41 @@ js_path="$(grep -Eo 'src="/[^"]+\.js"' "$homepage" | head -1 | cut -d'"' -f2)"
 }
 
 for asset_path in "$css_path" "$js_path"; do
-  asset_status="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$base_url$asset_path")"
+  asset_headers="$(mktemp)"
+  asset_body="$(mktemp)"
+  asset_status="$(curl --silent --show-error --max-time 15 --dump-header "$asset_headers" --output "$asset_body" --write-out '%{http_code}' "$base_url$asset_path")"
   [[ "$asset_status" == 200 ]] || {
     echo "RUNTIME_SMOKE_FAIL: static asset $asset_path returned HTTP $asset_status." >&2
+    rm -f "$asset_headers" "$asset_body"
     exit 1
   }
+  asset_type="$(sed -n -E 's/^[Cc]ontent-[Tt]ype:[[:space:]]*//p' "$asset_headers" | head -1 | tr -d '\r')"
+  if [[ "$asset_path" == *.css ]]; then
+    [[ "$asset_type" == text/css* ]] || {
+      echo "RUNTIME_SMOKE_FAIL: CSS asset $asset_path returned unexpected content type $asset_type." >&2
+      rm -f "$asset_headers" "$asset_body"
+      exit 1
+    }
+    for marker in 'tailwindcss v4.' '.h-10{' '.px-5{' '.rounded-2xl{' '.text-3xl{' '.grid-cols-2{' '.lg\:grid-cols-4{'; do
+      grep -Fq -- "$marker" "$asset_body" || {
+        echo "RUNTIME_SMOKE_FAIL: CSS asset $asset_path is missing required compiled utility $marker." >&2
+        rm -f "$asset_headers" "$asset_body"
+        exit 1
+      }
+    done
+    ! grep -Fq -- '@tailwind' "$asset_body" || {
+      echo "RUNTIME_SMOKE_FAIL: CSS asset $asset_path still contains legacy @tailwind directives." >&2
+      rm -f "$asset_headers" "$asset_body"
+      exit 1
+    }
+  else
+    [[ "$asset_type" == text/javascript* || "$asset_type" == application/javascript* ]] || {
+      echo "RUNTIME_SMOKE_FAIL: JavaScript asset $asset_path returned unexpected content type $asset_type." >&2
+      rm -f "$asset_headers" "$asset_body"
+      exit 1
+    }
+  fi
+  rm -f "$asset_headers" "$asset_body"
 done
 
 for route in /login /account /checkout /secure-admin-login; do

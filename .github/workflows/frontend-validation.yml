@@ -34,3 +34,6 @@ jobs:
       - name: Build OpenNext Cloudflare bundle when configured
         if: hashFiles('open-next.config.ts', 'wrangler.jsonc') != ''
         run: npm run cloudflare:build
+      - name: Verify compiled Tailwind layout utilities
+        if: hashFiles('open-next.config.ts', 'wrangler.jsonc') != ''
+        run: node scripts/verify-tailwind-output.mjs
