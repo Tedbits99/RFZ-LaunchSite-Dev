@@ -6,7 +6,7 @@ operation, email, or webhook.
 
 | Requirement | Evidence | Status | Next evidence/action |
 |---|---|---|---|
-| PR exact head and Gate A checks | PR #14 current head is `86fd873663a3894dbf962175c72dadb9daa020d0`; Frontend run `40265219897` and Development run `40265219736` both completed SUCCESS on this exact head; browser acceptance reported 101 passed and 3 skipped | PASS (Gate A) | Hosted owner-authenticated admin and recovery evidence remains separate |
+| PR exact head and Gate A checks | PR #14 is open/draft; the PR body records the current exact head and both linked validation runs. Those runs must match the head before this row is considered PASS; the latest recorded runs completed SUCCESS with 101 browser passes and 3 skips | PASS (Gate A) | Hosted owner-authenticated admin and recovery evidence remains separate |
 | Cloudflare account authorization | Preflight run `40146567430` | PASS | Preserve environment restriction |
 | OpenNext artifact and privileged-secret scan | Preflight build job passed | PASS | No deploy authorization implied |
 | Existing Supabase project identity | Project `ketdhcmwowzztcdlmris`, URL recorded in prior project-scoped audit | PASS (historical) | Owner-confirm current identity |
@@ -19,8 +19,8 @@ operation, email, or webhook.
 | Supplier isolation | Source/test guards only; hosted FazerCards configuration unverified | BLOCKED | Verify no live supplier secret or route is enabled |
 | Webhook isolation | Signature tests are isolated; hosted endpoint/configuration unverified | BLOCKED | Verify live webhook routing is disabled or sandbox-only |
 | Email isolation | Local tests and secret-name inventory only | BLOCKED | Verify sink/test recipient and disabled production SMTP delivery |
-| Cloudflare Access all traffic | Earlier protected deployment `40184035348` verified Access protection for `runfazone-preview.mondigoted732.workers.dev` and its versioned URL; current `86fd873` head has not been redeployed | PASS (historical deployment) | Redeploy the exact current head only through the protected preview workflow |
-| Anonymous denial | Earlier deployment returned HTTP 302 on normal and versioned URLs; current `86fd873` endpoint response is unverified because it is not deployed | UNVERIFIED (current head) | Run normal/versioned denial and owner-access tests after exact-head deployment |
+| Cloudflare Access all traffic | Earlier protected deployment `40184035348` verified Access protection for `runfazone-preview.mondigoted732.workers.dev` and its versioned URL; the current PR head has not been redeployed | PASS (historical deployment) | Redeploy the exact current head only through the protected preview workflow |
+| Anonymous denial | Earlier deployment returned HTTP 302 on normal and versioned URLs; the current PR head response is unverified because it is not deployed | UNVERIFIED (current head) | Run normal/versioned denial and owner-access tests after exact-head deployment |
 
 ## P0 authentication gate evidence
 
@@ -33,10 +33,10 @@ admin session and remain denied.
 
 Exact-head validation:
 
-- Frontend run `40265219897`: SUCCESS, including tests, TypeScript, lint,
-  Next.js build, and OpenNext build.
-- Development run `40265219736`: SUCCESS, including isolated RPC/RLS
-  security, browser acceptance, legacy upgrade, and production release safety.
+- The PR body records the latest exact-head Frontend and Development runs;
+  both completed SUCCESS, including tests, TypeScript, lint, Next.js/OpenNext
+  builds, isolated RPC/RLS security, browser acceptance, legacy upgrade, and
+  production release safety.
 - Local unit/integration validation: 55 files, 893 passed, 1 skipped.
 
 Live owner-admin login, password-reset email delivery, Auth callback
