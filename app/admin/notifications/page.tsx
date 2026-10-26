@@ -2,6 +2,7 @@ import { adminSupabase } from '@/lib/supabaseAdmin'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Bell } from 'lucide-react'
+import FazerCardsWebhookFeed from '../suppliers/FazerCardsWebhookFeed'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +18,7 @@ type Notification = {
 
 const typeColor: Record<string, string> = {
   new_order: 'text-cyan-300',
+  supplier_order: 'text-cyan-300',
   payment_failure: 'text-rose-300',
   refund_request: 'text-amber-300',
   risk_alert: 'text-orange-300',
@@ -38,6 +40,8 @@ export default async function AdminNotificationsPage() {
   return (
     <AdminPage title="Notifications">
       <PageHeader title="Notifications" subtitle={unread > 0 ? `${unread} unread` : 'All caught up'} />
+
+      <div className="mb-6"><FazerCardsWebhookFeed /></div>
 
       {!dbReady ? (
         <DbNotReady />

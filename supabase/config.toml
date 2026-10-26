@@ -30,3 +30,7 @@ verify_jwt = false
 
 [functions.fulfillment-handoff-v2]
 verify_jwt = false
+
+# Public HTTPS endpoint; HMAC-SHA256 verified inside the handler.
+[functions.fazercards-webhook]
+verify_jwt = false

@@ -1,0 +1,143 @@
+name: Deploy merged FazerCards admin preview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/admin/page.tsx'
+      - 'app/admin/notifications/page.tsx'
+      - 'app/admin/suppliers/FazerCardsWebhookFeed.tsx'
+      - 'app/api/admin/fazercards-webhooks/route.ts'
+      - '.github/workflows/deploy-fazercards-admin-preview.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: runfazone-private-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy-pr54:
+    name: Deploy PR54 merged main to protected runfazone-preview
+    # The first step verifies that this exact main SHA is PR #54's merge commit.
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment:
+      name: runfazone-preview
+    steps:
+      - name: Check merged PR #54 and exact current main identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = 'Tedbits99/RFZ-LaunchSite-Dev'
+          test "${GITHUB_REF}" = 'refs/heads/main'
+          pr_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/54" --jq '.merge_commit_sha // empty')"
+          merged="$(gh api "repos/$GITHUB_REPOSITORY/pulls/54" --jq '.merged_at // empty')"
+          remote_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test -n "$merged" || { echo 'BLOCKED: PR54 has not merged'; exit 1; }
+          test "$pr_sha" = "$GITHUB_SHA" || { echo 'BLOCKED: this is not the approved PR54 merge commit'; exit 1; }
+          test "$remote_main" = "$GITHUB_SHA" || { echo 'BLOCKED: main moved ahead; avoid deploying obsolete code'; exit 1; }
+          echo "APPROVED_MAIN_SHA=$GITHUB_SHA"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Validate deployment target and settings
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID || secrets.SUPABASE_PROJECT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'BLOCKED: scoped Cloudflare token unavailable'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'BLOCKED: Cloudflare account unavailable'; exit 1; }
+          test -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" || { echo 'BLOCKED: development Supabase anon key unavailable'; exit 1; }
+          test "$SUPABASE_PROJECT_ID" = ketdhcmwowzztcdlmris || { echo 'BLOCKED: wrong Supabase project'; exit 1; }
+          test "$NEXT_PUBLIC_SUPABASE_URL" = https://ketdhcmwowzztcdlmris.supabase.co || { echo 'BLOCKED: wrong Supabase URL'; exit 1; }
+          node - <<'NODE'
+          const config=require('./wrangler.jsonc');
+          if(config.name !== 'runfazone-preview' || config.main !== '.open-next/worker.js'
+             || (config.routes||[]).length || (config.domains||[]).length
+             || Object.keys(config.triggers||{}).length) process.exit(1);
+          NODE
+          echo 'Validated existing named Worker, development database, and no production routes'
+
+      - name: Verify existing Cloudflare Access protection before deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/verify-cloudflare-access-policy.sh
+
+      - name: Build exact merged main commit
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_APP_URL: https://runfazone-preview.mondigoted732.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run cloudflare:build
+          test -s .open-next/worker.js
+          test -d .open-next/assets
+          if grep -R -n -E --exclude-dir=node_modules --exclude-dir=.git \
+             '(SUPABASE_SERVICE_ROLE_KEY|PAYMONGO_SECRET_KEY|SUPPLIER_FAZERCARDS_API_KEY|SMTP_PASSWORD)=' \
+             .open-next; then
+            echo 'BLOCKED: privileged secret assignment found in Worker artifact'
+            exit 1
+          fi
+
+      - name: Smoke-test compiled Worker before deployment
+        env:
+          OPEN_NEXT_SMOKE_PORT: 8787
+        run: bash scripts/test-open-next-runtime.sh
+
+      - name: Deploy same protected Cloudflare Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_log="$RUNNER_TEMP/runfazone-cloudflare-deploy.log"
+          if ! npx wrangler deploy --config wrangler.jsonc --name runfazone-preview \
+            --message "RFZ PR54 $GITHUB_SHA" >"$deploy_log" 2>&1; then
+            echo 'BLOCKED: Cloudflare Worker deployment failed. Raw logs withheld to avoid secret disclosure.'
+            if grep -q 'code: 10013' "$deploy_log"; then echo 'Cloudflare upload-session error 10013'; fi
+            exit 1
+          fi
+          echo "DEPLOYED_WORKER=runfazone-preview"
+          echo "DEPLOYED_SOURCE_SHA=$GITHUB_SHA"
+
+      - name: Verify private preview remains protected
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://runfazone-preview.mondigoted732.workers.dev'
+          for path in / /admin /admin/notifications /api/admin/fazercards-webhooks; do
+            status="$(curl --silent --show-error --max-time 25 --output "$RUNNER_TEMP/response-body" \
+                 --write-out '%{http_code}' "$url$path")"
+            case "$status" in
+              301|302|303|307|308|401|403) ;;
+              *) echo "BLOCKED: unprotected or inaccessible path $path (HTTP $status)"; exit 1 ;;
+            esac
+            if grep -Eiq 'SUPABASE_SERVICE_ROLE_KEY|SMTP_PASSWORD|SUPPLIER_FAZERCARDS_API_KEY' "$RUNNER_TEMP/response-body"; then
+              echo 'BLOCKED: potential secret marker found in anonymous response'; exit 1
+            fi
+            echo "PRIVATE_PREVIEW_DENIAL=$path status=$status"
+          done
+          echo "PROTECTED_CLOUDFLARE_PREVIEW_PASS=$GITHUB_SHA"
