@@ -15,6 +15,10 @@ on:
         description: 'Only for admin-auth-audit: existing development admin email (never logged)'
         required: false
         type: string
+      auth_origin:
+        description: 'Only for auth-confirmation-audit: exact protected candidate origin'
+        required: false
+        type: string
       operation:
         description: 'Audit/plan, apply reviewed migrations, or lock the legacy admin bootstrap'
         required: true
@@ -25,6 +29,7 @@ on:
           - customer-security-audit
           - customer-security-cleanup
           - admin-auth-audit
+          - auth-confirmation-audit
           - gate-b-audit
           - payment-safety-lockdown
           - admin-bootstrap-lockdown
@@ -65,6 +70,7 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       CLEANUP_RUN_ID: ${{ inputs.cleanup_run_id }}
       ADMIN_EMAIL: ${{ inputs.admin_email }}
+      AUTH_ORIGIN: ${{ inputs.auth_origin }}
       OPERATION: ${{ inputs.operation }}
       APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
       REPOSITORY: ${{ github.repository }}
@@ -111,9 +117,15 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = gate-b-audit || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
           if [[ "$OPERATION" = admin-auth-audit ]]; then
             test -n "$ADMIN_EMAIL" || { echo 'BLOCKED: admin-auth-audit requires admin_email.' >&2; exit 1; }
+          fi
+          if [[ "$OPERATION" = auth-confirmation-audit ]]; then
+            [[ "$AUTH_ORIGIN" =~ ^https://pr69-[0-9a-f]{12}-runfazone-preview\.[a-z0-9-]+\.workers\.dev$ ]] || {
+              echo 'BLOCKED: auth-confirmation-audit requires the exact protected PR69 candidate origin.' >&2
+              exit 1
+            }
           fi
           if [[ "$OPERATION" = customer-security-cleanup && "$CLEANUP_RUN_ID" != 40167500569 ]]; then
             echo 'BLOCKED: cleanup is allow-listed only for failed run 40167500569.' >&2
@@ -249,6 +261,14 @@ jobs:
           set -euo pipefail
           supabase migration list --linked > "$RUNNER_TEMP/migrations-before.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-before.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
+
+      - name: Audit hosted Auth confirmation configuration
+        if: inputs.operation == 'auth-confirmation-audit'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          AUTH_ORIGIN: ${{ inputs.auth_origin }}
+        shell: bash
+        run: bash scripts/audit-hosted-auth-confirmation.sh
 
       - name: Audit the existing admin Auth identity
         if: inputs.operation == 'admin-auth-audit'
@@ -425,7 +445,7 @@ jobs:
           set -euo pipefail
           supabase migration list --linked > "$RUNNER_TEMP/migrations-after.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-after.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
-          if [[ "$OPERATION" != audit ]]; then
+          if [[ "$OPERATION" != audit && "$OPERATION" != auth-confirmation-audit ]]; then
             test -s "$RUNNER_TEMP/migrations-after.txt"
           fi
 
