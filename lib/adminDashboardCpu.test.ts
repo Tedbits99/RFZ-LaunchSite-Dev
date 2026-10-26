@@ -30,6 +30,14 @@ describe('Cloudflare admin dashboard CPU regression', () => {
     expect(account).toContain('font-display break-all text-base');
   });
 
+  it('uses Supabase Realtime and does not poll admin APIs every ten seconds', () => {
+    const feed = readFileSync('app/admin/suppliers/FazerCardsWebhookFeed.tsx', 'utf8');
+    expect(feed).toContain('if (!liveRef.current) void refresh()');
+    expect(feed).toContain('60000');
+    expect(feed).not.toContain('10000');
+    expect(feed).toContain("status === 'SUBSCRIBED'");
+  });
+
   it('retains backend admin authorization for the supplier event API', () => {
     const route = readFileSync('app/api/admin/fazercards-webhooks/route.ts', 'utf8');
     expect(route).toMatch(/requireAdmin|createAdminServerClient|getAdminSession/);
