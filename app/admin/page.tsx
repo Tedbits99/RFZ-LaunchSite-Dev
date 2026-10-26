@@ -21,9 +21,13 @@ async function getMetrics(): Promise<{
   const empty = { orders: [], games: [], packages: [], customerEmails: [], error: null as string | null };
   let db: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   try {
+    // This page is nested under app/admin/layout.tsx which already performs
+    // the authoritative getAdminSession() check and denies unauthorized
+    // requests before rendering children. Avoid a second Supabase getUser()
+    // network call and JWT verification in the same SSR request: it wastes
+    // scarce Cloudflare Worker CPU and adds no independent authorization.
+    // The following Supabase reads remain RLS-backed by the user's session.
     db = await createSupabaseServerClient();
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return { ...empty, error: 'Not authenticated' };
   } catch {
     return { ...empty, error: 'Database not configured' };
   }
