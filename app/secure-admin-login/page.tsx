@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Lock, Mail, ShieldCheck } from 'lucide-react'
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 
@@ -178,6 +179,12 @@ export default function SecureAdminLoginPage() {
           >
             {submitting ? 'Signing in\u2026' : 'Sign In'}
           </button>
+          <p className="text-center text-xs text-slate-400">
+            Forgot your admin password?{' '}
+            <Link href="/forgot-password" className="text-cyan-300 underline-offset-2 hover:underline">
+              Reset it securely
+            </Link>
+          </p>
         </form>
 
         {error && (

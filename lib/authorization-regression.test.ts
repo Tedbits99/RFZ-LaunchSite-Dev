@@ -43,6 +43,8 @@ describe('admin authentication contracts', () => {
     expect(code).toContain('name="email"');
     expect(code).toContain('name="password"');
     expect(code).toContain("supabase.auth.signOut({ scope: 'local' })");
+    expect(code).toContain('href="/forgot-password"');
+    expect(code).toContain('Reset it securely');
   });
 
   it('keeps the admin login endpoint inside the server-side admin context', () => {
