@@ -135,6 +135,7 @@
 
 | 97 | INCLUDE | `20261026053026_fazercards_signed_webhook_inbox.sql` | `56cbfb5d6622067c9280ce36f7232c553514304da7082dae8d0d78a4b3ffe8af` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | signed supplier event inbox, restricted RLS, admin notifications; publication metadata only |
 | 98 | INCLUDE | `20261026120000_admins_select_privilege.sql` | `dce788c276dc804f337ff0f8259bc56c0c477c707d31ab4dd6cee6dc4da667f9` | 97. 20261026053026_fazercards_signed_webhook_inbox.sql | minimum API-role SELECT grant for existing admin RLS; no anonymous access or outbound target |
+| 99 | INCLUDE | `20261026130000_lock_first_admin_bootstrap.sql` | `405e1e03115c394a1ef3c7d496952aa020d8edbc4443039dc67b970330820991` | 98. 20261026120000_admins_select_privilege.sql | revoke client-role execution from legacy first-admin bootstrap; no outbound target |
 
 ## Execution gates
 
