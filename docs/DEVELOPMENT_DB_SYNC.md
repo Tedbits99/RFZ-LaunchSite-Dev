@@ -47,8 +47,8 @@ not change the production site URL, customer records, database migrations, or
 any provider credentials.
 
 `auth-confirmation-allowlist` is the narrower operation used when the project
-email provider cannot accept template changes. It updates only the exact
-candidate callback and the PR69-only wildcard, requires
-`CONFIGURE_PR69_AUTH_REDIRECT`, and reads the persisted allowlist back. It does
-not claim fresh-browser confirmation support; that still requires the
-TokenHash template and a supported custom SMTP provider.
+email provider cannot accept template changes. It preserves the current
+`site_url` while updating only the exact candidate callback and the PR69-only
+wildcard, requires `CONFIGURE_PR69_AUTH_REDIRECT`, and reads the persisted
+allowlist back. It does not claim fresh-browser confirmation support; that
+still requires the TokenHash template and a supported custom SMTP provider.

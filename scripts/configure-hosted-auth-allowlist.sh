@@ -25,7 +25,9 @@ status="$(curl --silent --show-error --max-time 30 \
 [[ "$status" =~ ^2 ]] || { echo "BLOCKED: Auth configuration read failed (HTTP $status)." >&2; exit 1; }
 
 config="$(jq -c 'if (.result | type) == "object" then .result else . end' "$before")"
+site_url="$(jq -r '.site_url // empty' <<<"$config")"
 allowlist_json="$(jq -c '.uri_allow_list // empty' <<<"$config")"
+test -n "$site_url" || { echo 'BLOCKED: existing Auth site_url is unavailable.' >&2; exit 1; }
 [[ "$allowlist_json" != null && -n "$allowlist_json" ]] || { echo 'BLOCKED: existing Auth redirect allowlist is unavailable.' >&2; exit 1; }
 
 allowlist="$RUNNER_TEMP/hosted-auth-allowlist.txt"
@@ -40,7 +42,7 @@ candidate_wildcard='https://pr69-*-runfazone-preview.mondigoted732.workers.dev/a
 grep -Fxq "$candidate_wildcard" "$allowlist" || printf '%s\n' "$candidate_wildcard" >> "$allowlist"
 grep -Fxq "$candidate_callback" "$allowlist" || printf '%s\n' "$candidate_callback" >> "$allowlist"
 new_allowlist="$(awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="\n" }' "$allowlist")"
-payload="$(jq -n --arg uri_allow_list "$new_allowlist" '{uri_allow_list: $uri_allow_list}')"
+payload="$(jq -n --arg site_url "$site_url" --arg uri_allow_list "$new_allowlist" '{site_url: $site_url, uri_allow_list: $uri_allow_list}')"
 
 patch_status="$(curl --silent --show-error --max-time 30 -X PATCH \
   --output "$after" --write-out '%{http_code}' \
