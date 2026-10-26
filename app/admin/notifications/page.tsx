@@ -18,6 +18,7 @@ type Notification = {
 
 const typeColor: Record<string, string> = {
   new_order: 'text-cyan-300',
+  supplier_order: 'text-cyan-300',
   payment_failure: 'text-rose-300',
   refund_request: 'text-amber-300',
   risk_alert: 'text-orange-300',
