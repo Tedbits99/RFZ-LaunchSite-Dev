@@ -46,7 +46,7 @@ export default function Login() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
+    <main className="rfz-auth-page grid min-h-screen place-items-center bg-[#030718] px-5 py-8 text-slate-100">
       <div className="surface w-full max-w-sm p-6 sm:p-8">
         <div className="mb-5 flex justify-end"><ThemeSelector compact={false} /></div>
         <h1 className="font-display text-2xl font-bold">Sign in</h1>

@@ -1,6 +1,6 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { isTheme, resolveTheme, themeBootScript } from './theme';
+import { isTheme, nextTheme, resolveTheme, themeBootScript } from './theme';
 
 describe('appearance themes', () => {
   it('accepts only the supported modes', () => {
@@ -25,6 +25,17 @@ describe('appearance themes', () => {
       expect(resolveTheme(stored)).toBe(stored);
     },
   );
+
+  it('cycles exactly one button through Light, Dark, Night and back to Light', () => {
+    expect(nextTheme('light')).toBe('dark');
+    expect(nextTheme('dark')).toBe('night');
+    expect(nextTheme('night')).toBe('light');
+    let current = resolveTheme('light');
+    for (const expected of ['dark', 'night', 'light', 'dark'] as const) {
+      current = nextTheme(current);
+      expect(current).toBe(expected);
+    }
+  });
 
   it('defaults safely to dark', () => {
     expect(resolveTheme(null)).toBe('dark');

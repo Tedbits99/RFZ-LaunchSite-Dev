@@ -10,6 +10,12 @@ export function resolveTheme(value: string | null | undefined): Theme {
   return isTheme(value) ? value : 'dark';
 }
 
+/** One-button appearance selector order; no auto/system mode. */
+export function nextTheme(current: Theme): Theme {
+  const position = THEMES.indexOf(current);
+  return THEMES[(position + 1) % THEMES.length];
+}
+
 export function themeBootScript(): string {
   return `(function(){try{var k=${JSON.stringify(THEME_STORAGE_KEY)};var v=localStorage.getItem(k);var t=v==='light'||v==='night'||v==='dark'?v:'dark';document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t==='light'?'light':'dark'}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.style.colorScheme='dark'}})()`;
 }

@@ -1,19 +1,42 @@
 'use client';
 
+import { useState } from 'react';
 import { Moon, Sun, Star } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
-import type { Theme } from '@/lib/theme';
+import { nextTheme, type Theme } from '@/lib/theme';
 
-const options: { value: Theme; label: string; Icon: typeof Sun }[] = [
-  { value: 'light', label: 'Light', Icon: Sun },
-  { value: 'dark', label: 'Dark', Icon: Moon },
-  { value: 'night', label: 'Night', Icon: Star },
-];
+const icons = { light: Sun, dark: Moon, night: Star } satisfies Record<Theme, typeof Sun>;
+const names = { light: 'Light', dark: 'Dark', night: 'Night' } satisfies Record<Theme, string>;
 
+/** One keyboard-accessible control that cycles Light → Dark → Night → Light. */
 export default function ThemeSelector({ compact = false }: { compact?: boolean }) {
   const { theme, setTheme } = useTheme();
-  return <fieldset data-theme-selector className={`theme-selector inline-flex items-center gap-1 rounded-xl border border-[var(--rfz-line)] bg-[var(--rfz-surface)] p-1 shadow-sm ${compact ? '' : 'px-1.5'}`} aria-label="Appearance">
-    <legend className="sr-only">Appearance</legend>
-    {options.map(({ value, label, Icon }) => <button key={value} type="button" aria-pressed={theme === value} aria-label={`${label} mode`} title={`${label} mode`} onClick={() => setTheme(value)} className={`inline-flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold transition ${theme === value ? 'bg-[var(--rfz-accent-soft)] text-[var(--rfz-accent)] shadow-sm' : 'text-[var(--rfz-muted)] hover:bg-[var(--rfz-surface-raised)] hover:text-[var(--rfz-text)]'}`}><Icon size={14} aria-hidden="true" />{!compact && <span>{label}</span>}</button>)}
-  </fieldset>;
+  const [turns, setTurns] = useState(0);
+  const Icon = icons[theme];
+  const following = nextTheme(theme);
+
+  const cycle = () => {
+    setTheme(following);
+    setTurns((previous) => previous + 1);
+  };
+
+  return (
+    <button
+      data-theme-selector
+      type="button"
+      className="theme-selector inline-flex min-h-10 min-w-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[var(--rfz-line)] bg-[var(--rfz-surface)] px-3 py-2 text-xs font-semibold text-[var(--rfz-text)] shadow-md transition-colors hover:border-[var(--rfz-accent)] hover:bg-[var(--rfz-surface-raised)] focus-visible:outline focus-visible:outline-2"
+      aria-label={`Appearance: ${names[theme]}. Switch to ${names[following]} mode`}
+      title={`Current: ${names[theme]}. Click for ${names[following]} mode`}
+      onClick={cycle}
+    >
+      <span
+        className="inline-flex shrink-0 items-center justify-center transition-transform duration-500 ease-in-out motion-reduce:transition-none"
+        style={{ transform: `rotate(${turns * 360}deg)` }}
+        aria-hidden="true"
+      >
+        <Icon size={17} strokeWidth={2} />
+      </span>
+      {!compact && <span>{names[theme]}</span>}
+    </button>
+  );
 }
