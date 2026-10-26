@@ -21,4 +21,4 @@ assert.ok(yaml.includes('include-hidden-files: true'));
 assert.ok(yaml.includes('.open-next/**'));
 assert.ok(yaml.slice(assets, upload).includes('css_count'));
 assert.ok(yaml.slice(assets, upload).includes('js_count'));
-console.log('PREVIEW_STATIC_ASSETS_ORDER_PASS signer -> CSS/JS verification -> Worker deploy -> version verification');
+process.stdout.write('PREVIEW_STATIC_ASSETS_ORDER_PASS signer -> CSS/JS verification -> Worker deploy -> version verification\n');
