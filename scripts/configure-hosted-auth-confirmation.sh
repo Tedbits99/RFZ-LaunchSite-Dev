@@ -31,18 +31,9 @@ existing_template="$(jq -r '.mailer_templates_confirmation_content // empty' <<<
 test -n "$existing_template" || { echo 'BLOCKED: existing Confirm signup template is unavailable.' >&2; exit 1; }
 [[ "$allowlist_json" != null && -n "$allowlist_json" ]] || { echo 'BLOCKED: existing Auth redirect allowlist is unavailable.' >&2; exit 1; }
 
-allowlist="$RUNNER_TEMP/hosted-auth-allowlist-before.txt"
-if [[ "$(jq -r 'type' <<<"$allowlist_json")" == array ]]; then
-  jq -r '.[]' <<<"$allowlist_json" > "$allowlist"
-else
-  jq -r 'split("\\n")[]' <<<"$allowlist_json" > "$allowlist"
-fi
-
 candidate_callback="${AUTH_ORIGIN%/}/auth/callback"
 candidate_wildcard="$AUTH_PREVIEW_CALLBACK_WILDCARD"
-grep -Fxq "$candidate_wildcard" "$allowlist" || printf '%s\n' "$candidate_wildcard" >> "$allowlist"
-grep -Fxq "$candidate_callback" "$allowlist" || printf '%s\n' "$candidate_callback" >> "$allowlist"
-new_allowlist="$(awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="\n" }' "$allowlist")"
+new_allowlist="$(node scripts/lib/auth-redirect-allowlist.mjs merge "$candidate_callback" "$candidate_wildcard" <<<"$allowlist_json")"
 
 # This is the documented Supabase server-side confirmation pattern. The
 # supplied RedirectTo is the already trusted /auth/callback URL from signup;
@@ -71,15 +62,17 @@ verify="$(curl --silent --show-error --max-time 30 \
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
   -H 'Accept: application/json' "$api_url")"
 verify_config="$(jq -c 'if (.result | type) == "object" then .result else . end' <<<"$verify")"
-verify_allowlist="$(jq -r '.uri_allow_list // empty' <<<"$verify_config")"
+verify_allowlist_json="$(jq -c '.uri_allow_list // empty' <<<"$verify_config")"
 verify_template="$(jq -r '.mailer_templates_confirmation_content // empty' <<<"$verify_config")"
 verify_recovery_template="$(jq -r '.mailer_templates_recovery_content // empty' <<<"$verify_config")"
-verify_allowlist_hash="$(printf '%s' "$verify_allowlist" | sha256sum | cut -d' ' -f1)"
 verify_template_hash="$(printf '%s' "$verify_template" | sha256sum | cut -d' ' -f1)"
-[[ "$verify_allowlist" == *"$candidate_wildcard"* && "$verify_allowlist" == *"$candidate_callback"* ]] || {
+verify_summary="$(node scripts/lib/auth-redirect-allowlist.mjs inspect "$candidate_callback" "$candidate_wildcard" <<<"$verify_allowlist_json")"
+jq -e '.exactCallback and .wildcardRule and .callbackAllowed' <<<"$verify_summary" >/dev/null || {
   echo "BLOCKED: Auth redirect allowlist read-back did not contain the PR${AUTH_PREVIEW_PR} callback rules." >&2
   exit 1
 }
+normalized_allowlist="$(node scripts/lib/auth-redirect-allowlist.mjs normalize <<<"$verify_allowlist_json")"
+verify_allowlist_hash="$(printf '%s' "$normalized_allowlist" | sha256sum | cut -d' ' -f1)"
 verify_template_lower="${verify_template,,}"
 [[ "$verify_template_lower" == *token_hash* || "$verify_template_lower" == *tokenhash* ]] || {
   echo 'BLOCKED: Confirm signup template read-back is not TokenHash based.' >&2

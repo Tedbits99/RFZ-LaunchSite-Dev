@@ -55,13 +55,6 @@ test -n "$recovery_template" || {
   exit 1
 }
 
-allowlist="$RUNNER_TEMP/hosted-auth-allowlist.txt"
-if [[ "$(jq -r 'type' <<<"$allowlist_json")" == array ]]; then
-  jq -r '.[]' <<<"$allowlist_json" > "$allowlist"
-else
-  jq -r 'split("\\n")[]' <<<"$allowlist_json" > "$allowlist"
-fi
-
 template_lower="${template,,}"
 template_token_hash=false
 template_email_type=false
@@ -88,31 +81,21 @@ PY
 )"
 candidate_host="${AUTH_ORIGIN#https://}"
 candidate_wildcard="$AUTH_PREVIEW_CALLBACK_WILDCARD"
-
-# Supabase redirect rules use * as a documented wildcard. Check the exact
-# persisted rule and the expected PR-scoped wildcard explicitly, then use the
-# same wildcard rule to prove that this SHA-specific callback is covered.
-read -r exact_rule wildcard_rule glob_match <<<"$(python3 - "$callback_url" "$candidate_wildcard" "$allowlist" <<'PY'
-import fnmatch
-import sys
-
-callback, wildcard, path = sys.argv[1:]
-rules = [line.strip() for line in open(path, encoding='utf-8') if line.strip()]
-print(
-    'true' if callback in rules else 'false',
-    'true' if wildcard in rules else 'false',
-    'true' if any(fnmatch.fnmatchcase(callback, rule) for rule in rules) else 'false',
-)
-PY
-)"
-callback_allowed="$glob_match"
+allowlist_summary="$(node scripts/lib/auth-redirect-allowlist.mjs inspect "$callback_url" "$candidate_wildcard" <<<"$allowlist_json")"
+allowlist_format="$(jq -r '.format' <<<"$allowlist_summary")"
+allowlist_rule_count="$(jq -r '.ruleCount' <<<"$allowlist_summary")"
+exact_rule="$(jq -r '.exactCallback' <<<"$allowlist_summary")"
+wildcard_rule="$(jq -r '.wildcardRule' <<<"$allowlist_summary")"
+callback_allowed="$(jq -r '.callbackAllowed' <<<"$allowlist_summary")"
 
 echo "AUTH_CONFIG_PROJECT=$PROJECT_ID"
 echo "AUTH_SITE_ORIGIN=$site_origin"
 echo "AUTH_CANDIDATE_HOST=$candidate_host"
+echo "AUTH_REDIRECT_LIST_FORMAT=$allowlist_format"
+echo "AUTH_REDIRECT_RULE_COUNT=$allowlist_rule_count"
 echo "AUTH_CALLBACK_EXACT_RULE_PRESENT=$exact_rule"
 echo "AUTH_PR${AUTH_PREVIEW_PR}_WILDCARD_RULE_PRESENT=$wildcard_rule"
-echo "AUTH_CALLBACK_GLOB_MATCHED=$glob_match"
+echo "AUTH_CALLBACK_GLOB_MATCHED=$callback_allowed"
 echo "AUTH_CALLBACK_ALLOWLISTED=$callback_allowed"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_TOKEN_HASH=$template_token_hash"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_EMAIL_TYPE=$template_email_type"
