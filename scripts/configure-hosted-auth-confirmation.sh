@@ -6,12 +6,13 @@ set -euo pipefail
 : "${AUTH_ORIGIN:?AUTH_ORIGIN is required}"
 : "${APPLY_CONFIRMATION:?APPLY_CONFIRMATION is required}"
 
-[[ "$APPLY_CONFIRMATION" == CONFIGURE_PR69_EMAIL_CONFIRMATION ]] || {
-  echo 'BLOCKED: exact Auth confirmation configuration phrase is required.' >&2
+source "$(dirname "$0")/lib/auth-preview-origin.sh"
+auth_preview_origin_parse "$AUTH_ORIGIN" || {
+  echo 'BLOCKED: only the exact protected PR69 or PR82 candidate origin may be configured.' >&2
   exit 1
 }
-[[ "$AUTH_ORIGIN" =~ ^https://pr69-[0-9a-f]{12}-runfazone-preview\.[a-z0-9-]+\.workers\.dev$ ]] || {
-  echo 'BLOCKED: only a protected PR69 candidate origin may be configured.' >&2
+[[ "$APPLY_CONFIRMATION" == "CONFIGURE_PR${AUTH_PREVIEW_PR}_EMAIL_CONFIRMATION" ]] || {
+  echo 'BLOCKED: exact Auth confirmation configuration phrase is required.' >&2
   exit 1
 }
 
@@ -38,7 +39,7 @@ else
 fi
 
 candidate_callback="${AUTH_ORIGIN%/}/auth/callback"
-candidate_wildcard='https://pr69-*-runfazone-preview.mondigoted732.workers.dev/auth/callback'
+candidate_wildcard="$AUTH_PREVIEW_CALLBACK_WILDCARD"
 grep -Fxq "$candidate_wildcard" "$allowlist" || printf '%s\n' "$candidate_wildcard" >> "$allowlist"
 grep -Fxq "$candidate_callback" "$allowlist" || printf '%s\n' "$candidate_callback" >> "$allowlist"
 new_allowlist="$(awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="\n" }' "$allowlist")"
@@ -47,8 +48,9 @@ new_allowlist="$(awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="\n" }' "$
 # supplied RedirectTo is the already trusted /auth/callback URL from signup;
 # no request-controlled destination is introduced here.
 confirmation_template='<h2>Confirm your signup</h2><p>Follow this link to confirm your user:</p><p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">Confirm your email address</a></p>'
-payload="$(jq -n --arg uri_allow_list "$new_allowlist" --arg template "$confirmation_template" \
-  '{uri_allow_list: $uri_allow_list, mailer_templates_confirmation_content: $template}')"
+recovery_template='<h2>Reset your password</h2><p>Follow this link to choose a new password:</p><p><a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}">Reset your password</a></p>'
+payload="$(jq -n --arg uri_allow_list "$new_allowlist" --arg confirmation_template "$confirmation_template" --arg recovery_template "$recovery_template" \
+  '{uri_allow_list: $uri_allow_list, mailer_templates_confirmation_content: $confirmation_template, mailer_templates_recovery_content: $recovery_template}')"
 
 patch_status="$(curl --silent --show-error --max-time 30 -X PATCH \
   --output "$after" --write-out '%{http_code}' \
@@ -71,10 +73,11 @@ verify="$(curl --silent --show-error --max-time 30 \
 verify_config="$(jq -c 'if (.result | type) == "object" then .result else . end' <<<"$verify")"
 verify_allowlist="$(jq -r '.uri_allow_list // empty' <<<"$verify_config")"
 verify_template="$(jq -r '.mailer_templates_confirmation_content // empty' <<<"$verify_config")"
+verify_recovery_template="$(jq -r '.mailer_templates_recovery_content // empty' <<<"$verify_config")"
 verify_allowlist_hash="$(printf '%s' "$verify_allowlist" | sha256sum | cut -d' ' -f1)"
 verify_template_hash="$(printf '%s' "$verify_template" | sha256sum | cut -d' ' -f1)"
 [[ "$verify_allowlist" == *"$candidate_wildcard"* && "$verify_allowlist" == *"$candidate_callback"* ]] || {
-  echo 'BLOCKED: Auth redirect allowlist read-back did not contain the PR69 callback rules.' >&2
+  echo "BLOCKED: Auth redirect allowlist read-back did not contain the PR${AUTH_PREVIEW_PR} callback rules." >&2
   exit 1
 }
 verify_template_lower="${verify_template,,}"
@@ -86,5 +89,19 @@ verify_template_lower="${verify_template,,}"
   echo 'BLOCKED: Confirm signup template read-back is missing type=email.' >&2
   exit 1
 }
+verify_recovery_lower="${verify_recovery_template,,}"
+[[ "$verify_recovery_lower" == *token_hash* || "$verify_recovery_lower" == *tokenhash* ]] || {
+  echo 'BLOCKED: Password recovery template read-back is not TokenHash based.' >&2
+  exit 1
+}
+[[ "$verify_recovery_lower" == *redirectto* ]] || {
+  echo 'BLOCKED: Password recovery template read-back is not bound to the trusted RedirectTo.' >&2
+  exit 1
+}
+[[ "$verify_recovery_lower" != *confirmationurl* ]] || {
+  echo 'BLOCKED: Password recovery template still routes through the provider ConfirmationURL.' >&2
+  exit 1
+}
 
-echo "HOSTED_AUTH_CONFIRMATION_CONFIGURED project=$PROJECT_ID allowlist_sha256=$verify_allowlist_hash template_sha256=$verify_template_hash token_hash=true type=email=true"
+verify_recovery_hash="$(printf '%s' "$verify_recovery_template" | sha256sum | cut -d' ' -f1)"
+echo "HOSTED_AUTH_CONFIRMATION_CONFIGURED project=$PROJECT_ID allowlist_sha256=$verify_allowlist_hash confirmation_template_sha256=$verify_template_hash recovery_template_sha256=$verify_recovery_hash signup_token_hash=true recovery_token_hash=true"

@@ -1,10 +1,17 @@
-name: Runfazone PR69 candidate validation
+name: Runfazone protected PR candidate validation
 
 on:
   workflow_dispatch:
     inputs:
+      candidate_pr_number:
+        description: 'Allow-listed draft PR number (69 or 82)'
+        required: true
+        type: choice
+        options:
+          - '69'
+          - '82'
       candidate_sha:
-        description: 'Exact open/draft PR #69 head SHA'
+        description: 'Exact current open/draft candidate PR head SHA'
         required: true
         type: string
       operation:
@@ -16,7 +23,7 @@ on:
           - deploy-candidate
         default: candidate-preflight
       deployment_confirmation:
-        description: 'Required only for deploy-candidate: DEPLOY_PR69_CANDIDATE'
+        description: 'Required only for deploy-candidate: DEPLOY_PR{candidate_pr_number}_CANDIDATE'
         required: false
         type: string
 
@@ -27,12 +34,11 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: runfazone-pr69-candidate
+  group: runfazone-protected-pr-candidate
   cancel-in-progress: false
 
 env:
   REPOSITORY: Tedbits99/RFZ-LaunchSite-Dev
-  PR_NUMBER: '69'
 
 jobs:
   verify-candidate:
@@ -43,6 +49,7 @@ jobs:
       name: runfazone-preview
     outputs:
       candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+      candidate_pr_number: ${{ steps.identity.outputs.candidate_pr_number }}
       preview_alias: ${{ steps.identity.outputs.preview_alias }}
       account_subdomain: ${{ steps.cloudflare.outputs.account_subdomain }}
     steps:
@@ -52,17 +59,19 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Verify exact PR #69 head and mandatory checks
+      - name: Verify exact allow-listed candidate PR head and mandatory checks
         id: identity
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_PR_NUMBER: ${{ inputs.candidate_pr_number }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == refs/heads/main ]] || { echo 'BLOCKED: dispatch must run from main.' >&2; exit 1; }
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: candidate_sha must be a full commit SHA.' >&2; exit 1; }
-          pr_json="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          [[ "$CANDIDATE_PR_NUMBER" == 69 || "$CANDIDATE_PR_NUMBER" == 82 ]] || { echo 'BLOCKED: candidate PR is not allow-listed.' >&2; exit 1; }
+          pr_json="$(gh api "repos/$REPOSITORY/pulls/$CANDIDATE_PR_NUMBER")"
           jq -e --arg sha "$CANDIDATE_SHA" '
             .state == "open"
             and .draft == true
@@ -70,7 +79,7 @@ jobs:
             and .head.sha == $sha
             and .head.repo.full_name == "Tedbits99/RFZ-LaunchSite-Dev"
           ' <<<"$pr_json" >/dev/null || {
-            echo 'BLOCKED: supplied SHA is not the exact open/draft same-repository head of PR #69.' >&2
+            echo "BLOCKED: supplied SHA is not the exact open/draft same-repository head of PR #$CANDIDATE_PR_NUMBER." >&2
             exit 1
           }
           workflow_runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$CANDIDATE_SHA&per_page=100")"
@@ -85,10 +94,11 @@ jobs:
             test -n "$job" || { echo "BLOCKED: required job is missing: $job_name" >&2; exit 1; }
             [[ "$(jq -r '.status' <<<"$job")" == completed && "$(jq -r '.conclusion' <<<"$job")" == success ]] || { echo "BLOCKED: required job did not pass: $job_name" >&2; exit 1; }
           done
-          preview_alias="pr69-${CANDIDATE_SHA:0:12}"
+          preview_alias="pr${CANDIDATE_PR_NUMBER}-${CANDIDATE_SHA:0:12}"
           echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate_pr_number=$CANDIDATE_PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "preview_alias=$preview_alias" >> "$GITHUB_OUTPUT"
-          echo "CANDIDATE_EXACT_HEAD_VERIFIED sha=$CANDIDATE_SHA frontend=success development=success"
+          echo "CANDIDATE_EXACT_HEAD_VERIFIED pr=$CANDIDATE_PR_NUMBER sha=$CANDIDATE_SHA frontend=success development=success"
 
       - name: Verify saved account-wide Access policy
         env:
@@ -116,13 +126,22 @@ jobs:
           echo 'CLOUDFLARE_ACCESS_AND_ACCOUNT_VERIFIED=true'
 
   build-candidate:
-    name: Build and scan PR69 without deployment credentials
+    name: Build and scan protected PR candidate without deployment credentials
     needs: verify-candidate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
       name: runfazone-preview
     steps:
+      - name: Check out trusted main configuration validator
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Preserve trusted configuration validator outside candidate workspace
+        run: cp scripts/verify-candidate-wrangler-config.mjs "$RUNNER_TEMP/verify-candidate-wrangler-config.mjs"
+
       - name: Check out exact candidate commit
         uses: actions/checkout@v4
         with:
@@ -136,6 +155,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install required artifact scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v rg >/dev/null || {
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y ripgrep
+          }
+          command -v rg >/dev/null || { echo 'BLOCKED: required artifact scanner is unavailable.' >&2; exit 1; }
 
       - name: Build candidate with public development configuration only
         env:
@@ -158,16 +187,13 @@ jobs:
             echo 'BLOCKED: privileged secret assignment found in candidate artifact.' >&2
             exit 1
           fi
-          jq -e '.name == "runfazone-preview" and .main == ".open-next/worker.js" and ((.routes // []) | length == 0) and ((.domains // []) | length == 0) and ((.triggers // {}) | length == 0)' wrangler.jsonc >/dev/null || {
-            echo 'BLOCKED: candidate Wrangler config targets routes, domains, triggers, or another Worker.' >&2
-            exit 1
-          }
+          node "$RUNNER_TEMP/verify-candidate-wrangler-config.mjs" wrangler.jsonc
           echo 'CANDIDATE_ARTIFACT_PASS privileged_credentials=absent target=runfazone-preview'
 
       - name: Upload immutable candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: runfazone-pr69-candidate-${{ needs.verify-candidate.outputs.candidate_sha }}
+          name: runfazone-pr${{ needs.verify-candidate.outputs.candidate_pr_number }}-candidate-${{ needs.verify-candidate.outputs.candidate_sha }}
           include-hidden-files: true
           path: |
             .open-next/**
@@ -175,7 +201,7 @@ jobs:
           if-no-files-found: error
 
   upload-candidate-version:
-    name: Upload protected PR69 Worker version without activation
+    name: Upload protected PR candidate Worker version without activation
     needs: [verify-candidate, build-candidate]
     if: inputs.operation == 'deploy-candidate'
     runs-on: ubuntu-latest
@@ -188,12 +214,21 @@ jobs:
           CONFIRMATION: ${{ inputs.deployment_confirmation }}
         run: |
           set -euo pipefail
-          [[ "$CONFIRMATION" == DEPLOY_PR69_CANDIDATE ]] || { echo 'BLOCKED: deploy-candidate requires DEPLOY_PR69_CANDIDATE.' >&2; exit 1; }
+          [[ "$CONFIRMATION" == "DEPLOY_PR${{ needs.verify-candidate.outputs.candidate_pr_number }}_CANDIDATE" ]] || {
+            echo 'BLOCKED: deploy-candidate requires the exact PR-specific confirmation phrase.' >&2
+            exit 1
+          }
+
+      - name: Check out trusted main configuration validator
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
 
       - name: Download immutable candidate artifact
         uses: actions/download-artifact@v4
         with:
-          name: runfazone-pr69-candidate-${{ needs.verify-candidate.outputs.candidate_sha }}
+          name: runfazone-pr${{ needs.verify-candidate.outputs.candidate_pr_number }}-candidate-${{ needs.verify-candidate.outputs.candidate_sha }}
 
       - name: Upload a version preview only
         env:
@@ -204,14 +239,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jq -e '.name == "runfazone-preview" and .main == ".open-next/worker.js" and ((.routes // []) | length == 0) and ((.domains // []) | length == 0) and ((.triggers // {}) | length == 0)' wrangler.jsonc >/dev/null
+          node scripts/verify-candidate-wrangler-config.mjs wrangler.jsonc
           log="$RUNNER_TEMP/wrangler-version-upload.log"
           set +e
           npx --yes wrangler@4.151.3 versions upload .open-next/worker.js \
             --config wrangler.jsonc --name runfazone-preview \
             --assets .open-next/assets --tag "$PREVIEW_ALIAS" \
             --preview-alias "$PREVIEW_ALIAS" \
-            --message "PR69 candidate $CANDIDATE_SHA" --strict >"$log" 2>&1
+            --message "PR candidate $CANDIDATE_SHA" --strict >"$log" 2>&1
           status=$?
           set -e
           if (( status != 0 )); then
