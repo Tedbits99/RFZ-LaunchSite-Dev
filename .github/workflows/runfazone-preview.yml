@@ -377,7 +377,40 @@ jobs:
             exit 1
           fi
 
-      - name: Provision preview recovery proof signer before assets deployment
+      - name: Bootstrap Worker version for runtime secret provisioning
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APPROVED_SHA: ${{ needs.verify-approved-head.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(jq -r '.name' wrangler.jsonc)" = runfazone-preview
+          test "$(jq -r '.main' wrangler.jsonc)" = .open-next/worker.js
+          jq -e '((.routes // []) | length == 0) and ((.domains // []) | length == 0) and ((.triggers // {}) | length == 0)' wrangler.jsonc >/dev/null || {
+            echo 'BLOCKED: preview configuration contains routes, custom domains, or scheduled triggers.' >&2
+            exit 1
+          }
+          bootstrap_log="$RUNNER_TEMP/wrangler-bootstrap-deploy.log"
+          set +e
+          npx --yes wrangler@4.151.3 deploy --config wrangler.jsonc \
+            --name runfazone-preview --message "Runfazone bootstrap $APPROVED_SHA" >"$bootstrap_log" 2>&1
+          bootstrap_status=$?
+          set -e
+          if (( bootstrap_status != 0 )); then
+            safe_diagnostic="$(grep -Ei 'error|fail|forbidden|unauthori[sz]ed|permission|account|worker|script|api|code' "$bootstrap_log" \
+              | head -20 \
+              | sed -E \
+                -e 's/(Bearer[[:space:]]+|api[_ -]?token[=:][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' \
+                -e 's#https?://[^[:space:]]+#URL_REDACTED#Ig' \
+                -e 's/[0-9a-f]{32}/[REDACTED_ID]/Ig' || true)"
+            echo "CLOUDFLARE_BOOTSTRAP_DEPLOY_FAILED: exit_code=$bootstrap_status" >&2
+            [[ -n "$safe_diagnostic" ]] && printf '%s\n' "$safe_diagnostic" >&2
+            exit "$bootstrap_status"
+          fi
+          echo 'Cloudflare bootstrap Worker version deployed; it is Access-protected and contains the approved artifact.'
+
+      - name: Provision preview recovery proof signer before final assets deployment
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -433,7 +466,7 @@ jobs:
           }
           echo "IMMUTABLE_STATIC_ASSETS_PASS css_files=$css_count js_files=$js_count"
 
-      - name: Deploy only the named Worker on workers.dev
+      - name: Deploy only the named Worker on workers.dev as final asset-bearing version
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
