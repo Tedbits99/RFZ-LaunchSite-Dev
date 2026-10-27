@@ -16,7 +16,11 @@ on:
         required: false
         type: string
       auth_origin:
-        description: 'Only for PR69 Auth operations: exact protected candidate origin'
+        description: 'Only for Auth operations: exact protected candidate origin for allow-listed PR #69 or #82'
+        required: false
+        type: string
+      auth_candidate_sha:
+        description: 'Only for Auth operations: exact current 40-character PR candidate SHA'
         required: false
         type: string
       operation:
@@ -49,6 +53,7 @@ on:
 # it never executes scripts from an unmerged PR checkout.
 permissions:
   contents: read
+  actions: read
   pull-requests: read
 
 concurrency:
@@ -70,10 +75,12 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SUPABASE_PROJECT_ID_SECRET: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_PROJECT_ID_VAR: ${{ vars.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
       SOURCE_SHA: ${{ inputs.source_sha }}
       CLEANUP_RUN_ID: ${{ inputs.cleanup_run_id }}
       ADMIN_EMAIL: ${{ inputs.admin_email }}
       AUTH_ORIGIN: ${{ inputs.auth_origin }}
+      AUTH_CANDIDATE_SHA: ${{ inputs.auth_candidate_sha }}
       OPERATION: ${{ inputs.operation }}
       APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
       REPOSITORY: ${{ github.repository }}
@@ -97,6 +104,9 @@ jobs:
           sudo apt-get install --no-install-recommends -y postgresql-client ripgrep
           command -v rg >/dev/null || { echo 'BLOCKED: required ripgrep scanner is unavailable.' >&2; exit 1; }
           command -v psql >/dev/null || { echo 'BLOCKED: required PostgreSQL diagnostic client is unavailable.' >&2; exit 1; }
+
+      - name: Test protected candidate Auth-origin policy
+        run: bash scripts/test-auth-preview-origin.sh
 
       - name: Validate protected inputs and project identity
         id: identity
@@ -125,10 +135,52 @@ jobs:
             test -n "$ADMIN_EMAIL" || { echo 'BLOCKED: admin-auth-audit requires admin_email.' >&2; exit 1; }
           fi
           if [[ "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure ]]; then
-            [[ "$AUTH_ORIGIN" =~ ^https://pr69-[0-9a-f]{12}-runfazone-preview\.[a-z0-9-]+\.workers\.dev$ ]] || {
-              echo 'BLOCKED: auth-confirmation-audit requires the exact protected PR69 candidate origin.' >&2
+            source "$GITHUB_WORKSPACE/scripts/lib/auth-preview-origin.sh"
+            auth_preview_origin_parse "$AUTH_ORIGIN" || {
+              echo 'BLOCKED: Auth operations require the exact protected PR69 or PR82 candidate origin.' >&2
               exit 1
             }
+            [[ "$AUTH_CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo 'BLOCKED: Auth operations require the exact 40-character candidate SHA.' >&2
+              exit 1
+            }
+            candidate_pr_json="$(gh api "repos/$REPOSITORY/pulls/$AUTH_PREVIEW_PR")"
+            jq -e --arg sha "$AUTH_CANDIDATE_SHA" --arg prefix "$AUTH_PREVIEW_SHA_PREFIX" '
+              .state == "open"
+              and .draft == true
+              and .base.ref == "main"
+              and .head.repo.full_name == "Tedbits99/RFZ-LaunchSite-Dev"
+              and .head.sha == $sha
+              and (.head.sha | startswith($prefix))
+            ' <<<"$candidate_pr_json" >/dev/null || {
+              echo 'BLOCKED: Auth origin does not identify the current exact immutable candidate of an open same-repository draft PR.' >&2
+              exit 1
+            }
+            candidate_runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$AUTH_CANDIDATE_SHA&per_page=100")"
+            candidate_frontend="$(jq -c --arg sha "$AUTH_CANDIDATE_SHA" '[.workflow_runs[] | select(.name == "Frontend validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$candidate_runs")"
+            candidate_development="$(jq -c --arg sha "$AUTH_CANDIDATE_SHA" '[.workflow_runs[] | select(.name == "Development validation" and .head_sha == $sha)] | sort_by(.run_started_at) | last // empty' <<<"$candidate_runs")"
+            test -n "$candidate_frontend" && test -n "$candidate_development" || {
+              echo 'BLOCKED: Auth operations require both exact-candidate validation workflows.' >&2
+              exit 1
+            }
+            [[ "$(jq -r '.status' <<<"$candidate_frontend")" == completed && "$(jq -r '.conclusion' <<<"$candidate_frontend")" == success ]] || {
+              echo 'BLOCKED: exact candidate Frontend validation did not pass.' >&2
+              exit 1
+            }
+            [[ "$(jq -r '.status' <<<"$candidate_development")" == completed && "$(jq -r '.conclusion' <<<"$candidate_development")" == success ]] || {
+              echo 'BLOCKED: exact candidate Development validation did not pass.' >&2
+              exit 1
+            }
+            candidate_jobs="$(gh api "repos/$REPOSITORY/actions/runs/$(jq -r '.id' <<<"$candidate_development")/jobs?per_page=100")"
+            for candidate_job_name in "Isolated Supabase RPC security tests" "Production release safety"; do
+              candidate_job="$(jq -c --arg name "$candidate_job_name" '[.jobs[] | select(.name == $name)] | last // empty' <<<"$candidate_jobs")"
+              test -n "$candidate_job" || { echo "BLOCKED: exact candidate is missing required job: $candidate_job_name" >&2; exit 1; }
+              [[ "$(jq -r '.status' <<<"$candidate_job")" == completed && "$(jq -r '.conclusion' <<<"$candidate_job")" == success ]] || {
+                echo "BLOCKED: exact candidate required job did not pass: $candidate_job_name" >&2
+                exit 1
+              }
+            done
+            echo "AUTH_CANDIDATE_VERIFIED pr=$AUTH_PREVIEW_PR sha=$AUTH_CANDIDATE_SHA frontend=success development=success"
           fi
           if [[ "$OPERATION" = customer-security-cleanup && "$CLEANUP_RUN_ID" != 40167500569 ]]; then
             echo 'BLOCKED: cleanup is allow-listed only for failed run 40167500569.' >&2
@@ -146,12 +198,12 @@ jobs:
             echo 'BLOCKED: integration-safety-lockdown requires the exact confirmation phrase.' >&2
             exit 1
           fi
-          if [[ "$OPERATION" = auth-confirmation-configure && "$APPLY_CONFIRMATION" != CONFIGURE_PR69_EMAIL_CONFIRMATION ]]; then
-            echo 'BLOCKED: auth-confirmation-configure requires the exact confirmation phrase.' >&2
+          if [[ "$OPERATION" = auth-confirmation-configure && "$APPLY_CONFIRMATION" != "CONFIGURE_PR${AUTH_PREVIEW_PR}_EMAIL_CONFIRMATION" ]]; then
+            echo 'BLOCKED: auth-confirmation-configure requires the exact PR-specific confirmation phrase.' >&2
             exit 1
           fi
-          if [[ "$OPERATION" = auth-confirmation-allowlist && "$APPLY_CONFIRMATION" != CONFIGURE_PR69_AUTH_REDIRECT ]]; then
-            echo 'BLOCKED: auth-confirmation-allowlist requires the exact confirmation phrase.' >&2
+          if [[ "$OPERATION" = auth-confirmation-allowlist && "$APPLY_CONFIRMATION" != "CONFIGURE_PR${AUTH_PREVIEW_PR}_AUTH_REDIRECT" ]]; then
+            echo 'BLOCKED: auth-confirmation-allowlist requires the exact PR-specific confirmation phrase.' >&2
             exit 1
           fi
           if [[ "$OPERATION" = admin-bootstrap-lockdown && "$APPLY_CONFIRMATION" != LOCK_FIRST_ADMIN_BOOTSTRAP ]]; then
@@ -285,7 +337,7 @@ jobs:
         shell: bash
         run: bash scripts/audit-hosted-auth-confirmation.sh
 
-      - name: Configure hosted Auth confirmation for PR69
+      - name: Configure hosted Auth templates and redirects for the protected candidate PR
         if: inputs.operation == 'auth-confirmation-configure'
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
@@ -294,7 +346,7 @@ jobs:
         shell: bash
         run: bash scripts/configure-hosted-auth-confirmation.sh
 
-      - name: Configure hosted Auth redirect allowlist for PR69
+      - name: Configure hosted Auth redirect allowlist for the protected candidate PR
         if: inputs.operation == 'auth-confirmation-allowlist'
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}

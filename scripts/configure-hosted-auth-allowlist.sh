@@ -6,12 +6,13 @@ set -euo pipefail
 : "${AUTH_ORIGIN:?AUTH_ORIGIN is required}"
 : "${APPLY_CONFIRMATION:?APPLY_CONFIRMATION is required}"
 
-[[ "$APPLY_CONFIRMATION" == CONFIGURE_PR69_AUTH_REDIRECT ]] || {
-  echo 'BLOCKED: exact Auth redirect configuration phrase is required.' >&2
+source "$(dirname "$0")/lib/auth-preview-origin.sh"
+auth_preview_origin_parse "$AUTH_ORIGIN" || {
+  echo 'BLOCKED: only the exact protected PR69 or PR82 candidate origin may be configured.' >&2
   exit 1
 }
-[[ "$AUTH_ORIGIN" =~ ^https://pr69-[0-9a-f]{12}-runfazone-preview\.[a-z0-9-]+\.workers\.dev$ ]] || {
-  echo 'BLOCKED: only a protected PR69 candidate origin may be configured.' >&2
+[[ "$APPLY_CONFIRMATION" == "CONFIGURE_PR${AUTH_PREVIEW_PR}_AUTH_REDIRECT" ]] || {
+  echo 'BLOCKED: exact Auth redirect configuration phrase is required.' >&2
   exit 1
 }
 
@@ -38,7 +39,7 @@ else
 fi
 
 candidate_callback="${AUTH_ORIGIN%/}/auth/callback"
-candidate_wildcard='https://pr69-*-runfazone-preview.mondigoted732.workers.dev/auth/callback'
+candidate_wildcard="$AUTH_PREVIEW_CALLBACK_WILDCARD"
 grep -Fxq "$candidate_wildcard" "$allowlist" || printf '%s\n' "$candidate_wildcard" >> "$allowlist"
 grep -Fxq "$candidate_callback" "$allowlist" || printf '%s\n' "$candidate_callback" >> "$allowlist"
 new_allowlist="$(awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep="\n" }' "$allowlist")"
@@ -62,7 +63,7 @@ verify="$(curl --silent --show-error --max-time 30 \
 verify_config="$(jq -c 'if (.result | type) == "object" then .result else . end' <<<"$verify")"
 verify_allowlist="$(jq -r '.uri_allow_list // empty' <<<"$verify_config")"
 [[ "$verify_allowlist" == *"$candidate_wildcard"* && "$verify_allowlist" == *"$candidate_callback"* ]] || {
-  echo 'BLOCKED: Auth redirect allowlist read-back did not contain the PR69 callback rules.' >&2
+  echo "BLOCKED: Auth redirect allowlist read-back did not contain the PR${AUTH_PREVIEW_PR} callback rules." >&2
   exit 1
 }
 allowlist_hash="$(printf '%s' "$verify_allowlist" | sha256sum | cut -d' ' -f1)"
