@@ -524,6 +524,7 @@ if [ "$upgrade_mode" = true ]; then
   supabase_local migration up
   echo "LEGACY_UPGRADE_PHASE=canonical-apply-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql
   # A second migration-up must be a no-op. This is separate from db reset so
   # forward-only and duplicate-history behavior are exercised.
