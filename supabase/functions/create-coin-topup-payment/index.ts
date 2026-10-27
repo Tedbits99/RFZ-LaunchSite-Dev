@@ -142,7 +142,7 @@ Deno.serve(async (req: Request) => {
       .eq("is_enabled", true)
       .eq("provider_type", "automated")
       .maybeSingle();
-    if (configError || !isSafeRfCoinPaymongoSandbox({
+    if (configError || !config || !isSafeRfCoinPaymongoSandbox({
       providerName: config?.provider_name,
       providerType: config?.provider_type,
       enabled: config?.is_enabled,
