@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import AccountOrderDetailClient from './AccountOrderDetailClient';
+import { getCustomerLoginUrl } from '@/lib/authRedirect';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,6 @@ type Order = {
 type TimelineEntry = {
   id: string;
   status: string;
-  note: string;
   created_at: string;
 };
 
@@ -33,7 +33,7 @@ export default async function AccountOrderDetail({ params }: { params: Promise<{
 
   // Guest access is handled by /track-order after one-time email verification;
   // account detail pages authorize only by the verified Auth UUID.
-  if (!session) redirect('/login');
+  if (!session) redirect(getCustomerLoginUrl(`/account/orders/${encodeURIComponent(id)}`));
 
   const client = session.client;
 
@@ -48,7 +48,7 @@ export default async function AccountOrderDetail({ params }: { params: Promise<{
 
   const { data: timelineData } = await client
     .from('order_timeline')
-    .select('id, status, note, created_at')
+    .select('id, status, created_at')
     .eq('order_id', id)
     .order('created_at', { ascending: true });
   const timeline = (timelineData || []) as unknown as TimelineEntry[];

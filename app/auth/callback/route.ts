@@ -33,6 +33,10 @@ function activationResult(data: unknown): { status?: string; error?: string | nu
   };
 }
 
+async function clearCustomerSession(client: Awaited<ReturnType<typeof createCustomerServerClient>>) {
+  try { await client.auth.signOut({ scope: 'local' }); } catch { /* Denial remains enforced by the profile status check. */ }
+}
+
 export async function GET(request: NextRequest) {
   const origin = getConfiguredAppOrigin();
   if (!origin) return new NextResponse('Authentication is temporarily unavailable.', { status: 503 });
@@ -53,7 +57,7 @@ export async function GET(request: NextRequest) {
   // by Supabase Auth email links. type=recovery is an internal marker set by
   // the forgot-password redirect target, not a caller-controlled destination;
   // all redirects from this route stay on the configured application origin.
-  if ((!code && !tokenHash) || params.has('error') || (tokenHash && (!tokenType || !isRecovery && !isSupportedConfirmationTokenType))) {
+  if ((!code && !tokenHash) || params.has('error') || (tokenType && !isRecovery && !isSupportedConfirmationTokenType) || (tokenHash && !tokenType)) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
@@ -76,6 +80,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  let customerSessionEstablished = false;
   try {
     // Recovery exchanges its code against the dedicated recovery namespace's
     // PKCE verifier. A signup-confirmation code has no verifier there and a
@@ -119,25 +124,42 @@ export async function GET(request: NextRequest) {
       ? await supabase!.auth.verifyOtp({ token_hash: tokenHash, type: tokenType as 'signup' | 'email' | 'invite' })
       : await supabase!.auth.exchangeCodeForSession(code!, exchangeOptions);
     if (confirmationResult.error) return redirectToConfirmation('invalid');
+    customerSessionEstablished = true;
 
     const { data: userData, error: userError } = await supabase!.auth.getUser();
-    if (userError || !userData.user) return redirectToConfirmation('error');
-    if (!userData.user.email_confirmed_at) return redirectToConfirmation('pending');
+    if (userError || !userData.user) {
+      await clearCustomerSession(supabase!);
+      return redirectToConfirmation('error');
+    }
+    if (!userData.user.email_confirmed_at) {
+      await clearCustomerSession(supabase!);
+      return redirectToConfirmation('pending');
+    }
 
     const { data, error } = await supabase!.rpc('activate_customer_profile');
-    if (error) return redirectToConfirmation('error');
+    if (error) {
+      await clearCustomerSession(supabase!);
+      return redirectToConfirmation('error');
+    }
 
     const result = activationResult(data);
-    if (!result) return redirectToConfirmation('error');
+    if (!result) {
+      await clearCustomerSession(supabase!);
+      return redirectToConfirmation('error');
+    }
     if (result.error === 'ACCOUNT_RESTRICTED' || result.status === 'suspended' || result.status === 'deactivated') {
+      await clearCustomerSession(supabase!);
       return redirectToConfirmation('restricted');
     }
     if (result.error === 'EMAIL_NOT_VERIFIED' || result.status === 'pending_verification') {
+      await clearCustomerSession(supabase!);
       return redirectToConfirmation('pending');
     }
     if (result.status === 'active' && result.error === null) return redirectToAccount(origin);
+    await clearCustomerSession(supabase!);
     return redirectToConfirmation('error');
   } catch {
+    if (customerSessionEstablished && supabase) await clearCustomerSession(supabase);
     return redirectToConfirmation('error');
   }
 }

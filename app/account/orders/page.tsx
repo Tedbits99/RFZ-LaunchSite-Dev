@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
 import ThemeSelector from '@/components/ThemeSelector';
+import { getCustomerLoginUrl } from '@/lib/authRedirect';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,19 +19,23 @@ type Order = {
   packages?: { name: string } | null;
 };
 
-export default async function AccountOrders() {
+export default async function AccountOrders({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   // Account history is based only on immutable Auth UUID ownership. Existing
   // guest orders remain unlinked and use the separate verified recovery flow.
   const session = await getActiveCustomerSession();
-  if (!session) redirect('/login');
+  if (!session) redirect(getCustomerLoginUrl('/account/orders'));
 
-  const { data } = await session.client
+  const requestedPage = Number((await searchParams).page || '1');
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const pageSize = 20;
+  const { data, count, error } = await session.client
     .from('orders')
-    .select('id, reference, status, total_cents, created_at, games(name), packages(name)')
+    .select('id, reference, status, total_cents, created_at, games(name), packages(name)', { count: 'exact' })
     .eq('customer_user_id', session.user.id)
     .order('created_at', { ascending: false })
-    .limit(20);
+    .range((page - 1) * pageSize, page * pageSize - 1);
   const orders = (data || []) as unknown as Order[];
+  const pageCount = Math.max(1, Math.ceil((count || 0) / pageSize));
 
   const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
 
@@ -50,7 +55,9 @@ export default async function AccountOrders() {
         <h1 className="font-display mt-4 text-2xl font-bold">My Orders</h1>
         <p className="mt-2 text-sm text-slate-400">View your order history and track status.</p>
 
-        {orders.length === 0 ? (
+        {error ? (
+          <div className="mt-6 rounded-xl border border-rose-400/30 bg-rose-400/5 p-6 text-sm text-rose-200" role="alert">Your order history could not be loaded. Refresh the page to try again.</div>
+        ) : orders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-center text-sm text-slate-500">
             <Package className="mx-auto mb-2 text-slate-700" size={24} />
             No orders found for this email. <Link href="/" className="text-cyan-300">Browse games</Link> to place your first order.
@@ -86,6 +93,7 @@ export default async function AccountOrders() {
           </div>
           </div>
         )}
+        {!error && pageCount > 1 ? <nav aria-label="Order history pages" className="mt-4 flex items-center justify-between"><span className="text-xs text-slate-500">Page {page} of {pageCount}</span><div className="flex gap-2"><Link aria-disabled={page <= 1} className={`rounded-lg border px-3 py-2 text-sm ${page <= 1 ? 'pointer-events-none border-[#1b2a45] text-slate-600' : 'border-[#233653] text-cyan-200'}`} href={`/account/orders?page=${page - 1}`}>Previous</Link><Link aria-disabled={page >= pageCount} className={`rounded-lg border px-3 py-2 text-sm ${page >= pageCount ? 'pointer-events-none border-[#1b2a45] text-slate-600' : 'border-[#233653] text-cyan-200'}`} href={`/account/orders?page=${page + 1}`}>Next</Link></div></nav> : null}
       </div>
       <SiteFooter />
     </main>

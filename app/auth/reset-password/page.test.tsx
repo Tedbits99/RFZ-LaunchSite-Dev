@@ -67,6 +67,7 @@ describe('reset password page source invariants (automated static checks)', () =
   });
 
   it('links to the existing login page', () => {
+    expect(source).toContain('href="/login?reset=success"');
     expect(source).toContain('href="/login"');
   });
 });

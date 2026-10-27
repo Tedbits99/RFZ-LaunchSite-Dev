@@ -1,7 +1,7 @@
 'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CircleUserRound, LogOut, Package, ShieldCheck, WalletCards } from 'lucide-react';
 
@@ -19,9 +19,19 @@ function isCurrent(pathname: string | null, href: string, exact = false) {
 
 export default function AccountNavigation() {
   const pathname = usePathname();
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      let signedOut = false;
+      try { signedOut = window.sessionStorage.getItem('rfz-customer-signed-out') === '1'; } catch { /* Storage can be disabled. */ }
+      if (signedOut) window.location.replace('/login');
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
 
   async function signOut() {
     if (busy) return;
@@ -34,8 +44,8 @@ export default function AccountNavigation() {
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) throw new Error('logout failed');
-      router.replace('/login');
-      router.refresh();
+      try { window.sessionStorage.setItem('rfz-customer-signed-out', '1'); } catch { /* Server logout remains authoritative. */ }
+      window.location.replace('/login');
     } catch {
       setError('Sign out was not completed. Please try again.');
       setBusy(false);
@@ -50,7 +60,7 @@ export default function AccountNavigation() {
         key={link.href}
         href={link.href}
         aria-current={current ? 'page' : undefined}
-        className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${current
+        className={`inline-flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${current
           ? 'bg-cyan-400/10 text-cyan-200 ring-1 ring-cyan-400/25'
           : 'text-slate-400 hover:bg-[#101b34] hover:text-slate-100'}`}
       >
@@ -83,17 +93,17 @@ export default function AccountNavigation() {
       </aside>
 
       <div className="border-b border-[#14203a] bg-[#050a1b] px-4 py-3 lg:hidden">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1" aria-label="Account navigation">
+        <nav className="grid grid-cols-2 gap-2" aria-label="Account navigation">
           {links.map(item)}
-          <Link href="/track-order" className="inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-[#101b34] hover:text-slate-100">
+          <Link href="/track-order" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-[#101b34] hover:text-slate-100">
             <Package size={16} aria-hidden="true" />
             <span>Track guest order</span>
           </Link>
-          <button type="button" onClick={() => void signOut()} disabled={busy} className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-rose-400/25 px-3 py-2 text-sm text-rose-200 disabled:cursor-wait disabled:opacity-60">
+        </nav>
+        <button type="button" onClick={() => void signOut()} disabled={busy} className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-rose-400/25 px-3 py-2 text-sm text-rose-200 disabled:cursor-wait disabled:opacity-60">
             <LogOut size={16} aria-hidden="true" />
             <span>{busy ? 'Signing out…' : 'Sign out'}</span>
-          </button>
-        </div>
+        </button>
         {error ? <p className="mt-2 text-xs text-rose-300" role="alert">{error}</p> : null}
       </div>
     </>

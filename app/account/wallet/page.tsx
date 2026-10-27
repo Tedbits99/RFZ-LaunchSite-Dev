@@ -3,12 +3,13 @@ import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import WalletClient from './WalletClient';
 import ThemeSelector from '@/components/ThemeSelector';
+import { getCustomerLoginUrl } from '@/lib/authRedirect';
 
 export const dynamic = 'force-dynamic';
 
 export default async function WalletPage() {
   const session = await getActiveCustomerSession();
-  if (!session) redirect('/login');
+  if (!session) redirect(getCustomerLoginUrl('/account/wallet'));
 
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">

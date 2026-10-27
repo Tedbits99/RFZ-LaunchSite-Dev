@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   customerGetUser: vi.fn(),
   customerRpc: vi.fn(),
   customerVerifyOtp: vi.fn(),
+  customerSignOut: vi.fn(),
   recoveryExchangeCodeForSession: vi.fn(),
   recoveryVerifyOtp: vi.fn(),
   recoveryGetUser: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('@/lib/authSessionClients', () => ({
       exchangeCodeForSession: mocks.customerExchangeCodeForSession,
       verifyOtp: mocks.customerVerifyOtp,
       getUser: mocks.customerGetUser,
+      signOut: mocks.customerSignOut,
     },
     rpc: mocks.customerRpc,
   })),
@@ -90,6 +92,7 @@ describe('email confirmation callback (customer namespace)', () => {
       error: null,
     });
     mocks.customerRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
+    mocks.customerSignOut.mockResolvedValue({ error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'no recovery verifier' } });
     mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
     mocks.customerVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
@@ -182,6 +185,7 @@ describe('email confirmation callback (customer namespace)', () => {
     const response = await GET(request('?code=valid-code'));
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=restricted');
     expect(mocks.customerRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(mocks.customerSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
   it('treats activation and RPC failures as generic errors', async () => {
@@ -368,11 +372,12 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
   });
 
-  it('keeps an unknown type on the confirmation path', async () => {
+  it('rejects unknown confirmation types without activating a profile', async () => {
     const response = await GET(request('?code=valid-code&type=unknown'));
 
-    expect(location(response)).toBe('https://example.test/account');
-    expect(mocks.customerRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
   });
 
   it('never exposes recovery codes or tokens in the redirect or body', async () => {

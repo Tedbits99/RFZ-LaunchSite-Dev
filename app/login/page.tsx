@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button, TextInput } from '@/components/ui';
 import ThemeSelector from '@/components/ThemeSelector';
 import PasswordInput from '@/components/PasswordInput';
+import { getSafeInternalPath } from '@/lib/authRedirect';
 
 export default function Login() {
   const router = useRouter();
@@ -18,7 +19,15 @@ export default function Login() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'restricted') setError('This account is not available for customer access.');
-  }, []);
+    if (params.get('reset') === 'success') setError('Your password was updated. Sign in with your new password.');
+    const controller = new AbortController();
+    fetch('/api/account/profile', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+      .then((response) => {
+        if (response.ok && params.get('auth') !== 'restricted') router.replace(getSafeInternalPath(params.get('next')));
+      })
+      .catch(() => { /* Keep the login form available when session lookup is unavailable. */ });
+    return () => controller.abort();
+  }, [router]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +52,10 @@ export default function Login() {
         setError(body.error || 'Unable to sign in.');
         return;
       }
-      router.replace('/account');
+      const params = new URLSearchParams(window.location.search);
+      const destination = getSafeInternalPath(params.get('next'));
+      try { window.sessionStorage.removeItem('rfz-customer-signed-out'); } catch { /* Storage can be disabled. */ }
+      router.replace(destination);
     } catch {
       setError('Unable to sign in right now. Please try again.');
     } finally {

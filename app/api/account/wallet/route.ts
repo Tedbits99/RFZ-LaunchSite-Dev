@@ -34,10 +34,17 @@ export async function GET() {
     }
 
     const settings = settingsRes.data as { enabled: boolean; topups_enabled: boolean; spending_enabled: boolean; centavos_per_coin: number } | null;
+    if (settingsRes.error) {
+      return NextResponse.json({ error: 'Could not load wallet settings.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+    }
     const enabled = Boolean(settings?.enabled);
+    if (enabled && settings?.topups_enabled && packagesRes.error) {
+      return NextResponse.json({ error: 'Could not load available coin packages.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+    }
 
     return NextResponse.json({
       wallet: walletRes.data || null,
+      enabled,
       packages: enabled ? (packagesRes.data || []) : [],
       topupsEnabled: enabled && Boolean(settings?.topups_enabled),
       spendingEnabled: enabled && Boolean(settings?.spending_enabled),

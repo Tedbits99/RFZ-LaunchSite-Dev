@@ -7,6 +7,7 @@ import { formatCoins, formatCoinPrice, type RfCoinPackage, type RfCoinLedgerEntr
 type WalletResponse = {
   wallet: RfCoinWallet | null;
   packages: RfCoinPackage[];
+  enabled?: boolean;
   spendingEnabled?: boolean;
   topupsEnabled?: boolean;
   centavosPerCoin?: number;
@@ -28,7 +29,7 @@ export default function WalletClient() {
   const [wallet, setWallet] = useState<RfCoinWallet | null>(null);
   const [packages, setPackages] = useState<RfCoinPackage[]>([]);
   const [ledger, setLedger] = useState<RfCoinLedgerEntry[]>([]);
-  const [settings, setSettings] = useState({ spendingEnabled: false, topupsEnabled: false, centavosPerCoin: 100 });
+  const [settings, setSettings] = useState({ enabled: false, spendingEnabled: false, topupsEnabled: false, centavosPerCoin: 100 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedPackage, setSelectedPackage] = useState<RfCoinPackage | null>(null);
@@ -50,6 +51,7 @@ export default function WalletClient() {
       setWallet(data.wallet);
       setPackages(data.packages || []);
       setSettings({
+        enabled: Boolean(data.enabled),
         spendingEnabled: Boolean(data.spendingEnabled),
         topupsEnabled: Boolean(data.topupsEnabled),
         centavosPerCoin: Number(data.centavosPerCoin || 100),
@@ -116,6 +118,10 @@ export default function WalletClient() {
     );
   }
 
+  if (!settings.enabled) {
+    return <div className="rounded-xl border border-amber-400/25 bg-amber-400/5 p-6 text-sm text-amber-100">RF Coins wallet functions are currently unavailable. Your account remains protected, and you can return here later.</div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-[#1b2a45] bg-gradient-to-br from-[#0b1225] to-[#0a1830] p-6">
@@ -180,9 +186,10 @@ export default function WalletClient() {
             ))}
           </div>
           {buyError && <p className="mt-3 text-sm text-rose-400">{buyError}</p>}
-          {!settings.topupsEnabled && <p className="mt-3 text-xs text-slate-500">Buying RF Coins is currently disabled.</p>}
         </div>
       )}
+      {!settings.topupsEnabled ? <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4 text-sm text-slate-400">RF Coins purchases are currently disabled. Your balance and transaction history remain available.</div> : null}
+      {settings.topupsEnabled && packages.length === 0 ? <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4 text-sm text-slate-400">No RF Coins packages are available right now.</div> : null}
 
       {qr && (
         <div className="rounded-2xl border border-cyan-400/30 bg-[#0a1225] p-6">
