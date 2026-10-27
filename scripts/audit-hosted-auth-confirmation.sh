@@ -5,6 +5,12 @@ set -euo pipefail
 : "${PROJECT_ID:?PROJECT_ID is required}"
 : "${AUTH_ORIGIN:?AUTH_ORIGIN is required}"
 
+source "$(dirname "$0")/lib/auth-preview-origin.sh"
+auth_preview_origin_parse "$AUTH_ORIGIN" || {
+  echo 'BLOCKED: only the exact protected PR69 or PR82 candidate origin may be audited.' >&2
+  exit 1
+}
+
 callback_url="${AUTH_ORIGIN%/}/auth/callback"
 response="$RUNNER_TEMP/hosted-auth-config.json"
 status="$(curl --silent --show-error --max-time 30 \
@@ -30,6 +36,7 @@ config="$(jq -c 'if (.result | type) == "object" then .result else . end' "$resp
 site_url="$(jq -r '.site_url // empty' <<<"$config")"
 allowlist_json="$(jq -c '.uri_allow_list // empty' <<<"$config")"
 template="$(jq -r '.mailer_templates_confirmation_content // empty' <<<"$config")"
+recovery_template="$(jq -r '.mailer_templates_recovery_content // empty' <<<"$config")"
 
 test -n "$site_url" || {
   echo 'BLOCKED: Auth configuration response did not contain site_url.' >&2
@@ -43,13 +50,10 @@ test -n "$template" || {
   echo 'BLOCKED: Auth configuration response did not contain the confirmation template.' >&2
   exit 1
 }
-
-allowlist="$RUNNER_TEMP/hosted-auth-allowlist.txt"
-if [[ "$(jq -r 'type' <<<"$allowlist_json")" == array ]]; then
-  jq -r '.[]' <<<"$allowlist_json" > "$allowlist"
-else
-  jq -r 'split("\\n")[]' <<<"$allowlist_json" > "$allowlist"
-fi
+test -n "$recovery_template" || {
+  echo 'BLOCKED: Auth configuration response did not contain the password recovery template.' >&2
+  exit 1
+}
 
 template_lower="${template,,}"
 template_token_hash=false
@@ -60,6 +64,13 @@ template_redirect_to=false
 [[ "$template_lower" == *'type=email'* ]] && template_email_type=true
 [[ "$template_lower" == *confirmationurl* ]] && template_confirmation_url=true
 [[ "$template_lower" == *redirectto* ]] && template_redirect_to=true
+recovery_lower="${recovery_template,,}"
+recovery_token_hash=false
+recovery_redirect_to=false
+recovery_confirmation_url=false
+[[ "$recovery_lower" == *tokenhash* || "$recovery_lower" == *token_hash* ]] && recovery_token_hash=true
+[[ "$recovery_lower" == *redirectto* ]] && recovery_redirect_to=true
+[[ "$recovery_lower" == *confirmationurl* ]] && recovery_confirmation_url=true
 
 site_origin="$(python3 - "$site_url" <<'PY'
 from urllib.parse import urlsplit
@@ -68,60 +79,43 @@ parsed = urlsplit(sys.argv[1])
 print(f'{parsed.scheme}://{parsed.netloc}')
 PY
 )"
-candidate_host="$(python3 - "$callback_url" <<'PY'
-from urllib.parse import urlsplit
-import sys
-print(urlsplit(sys.argv[1]).netloc)
-PY
-)"
-candidate_wildcard="$(python3 - "$candidate_host" <<'PY'
-import re
-import sys
-host = sys.argv[1]
-match = re.fullmatch(r'pr69-[0-9a-f]{12}-runfazone-preview\.(.+)', host)
-if not match:
-    raise SystemExit('invalid protected PR69 candidate host')
-print(f'https://pr69-*-runfazone-preview.{match.group(1)}/auth/callback')
-PY
-)"
-
-# Supabase redirect rules use * as a documented wildcard. Check the exact
-# persisted rule and the expected PR69-only wildcard explicitly, then use the
-# same wildcard rule to prove that this SHA-specific callback is covered.
-read -r exact_rule wildcard_rule glob_match <<<"$(python3 - "$callback_url" "$candidate_wildcard" "$allowlist" <<'PY'
-import fnmatch
-import sys
-
-callback, wildcard, path = sys.argv[1:]
-rules = [line.strip() for line in open(path, encoding='utf-8') if line.strip()]
-print(
-    'true' if callback in rules else 'false',
-    'true' if wildcard in rules else 'false',
-    'true' if any(fnmatch.fnmatchcase(callback, rule) for rule in rules) else 'false',
-)
-PY
-)"
-callback_allowed="$glob_match"
+candidate_host="${AUTH_ORIGIN#https://}"
+candidate_wildcard="$AUTH_PREVIEW_CALLBACK_WILDCARD"
+allowlist_summary="$(node scripts/lib/auth-redirect-allowlist.mjs inspect "$callback_url" "$candidate_wildcard" <<<"$allowlist_json")"
+allowlist_format="$(jq -r '.format' <<<"$allowlist_summary")"
+allowlist_rule_count="$(jq -r '.ruleCount' <<<"$allowlist_summary")"
+exact_rule="$(jq -r '.exactCallback' <<<"$allowlist_summary")"
+wildcard_rule="$(jq -r '.wildcardRule' <<<"$allowlist_summary")"
+callback_allowed="$(jq -r '.callbackAllowed' <<<"$allowlist_summary")"
 
 echo "AUTH_CONFIG_PROJECT=$PROJECT_ID"
 echo "AUTH_SITE_ORIGIN=$site_origin"
 echo "AUTH_CANDIDATE_HOST=$candidate_host"
+echo "AUTH_REDIRECT_LIST_FORMAT=$allowlist_format"
+echo "AUTH_REDIRECT_RULE_COUNT=$allowlist_rule_count"
 echo "AUTH_CALLBACK_EXACT_RULE_PRESENT=$exact_rule"
-echo "AUTH_PR69_WILDCARD_RULE_PRESENT=$wildcard_rule"
-echo "AUTH_CALLBACK_GLOB_MATCHED=$glob_match"
+echo "AUTH_PR${AUTH_PREVIEW_PR}_WILDCARD_RULE_PRESENT=$wildcard_rule"
+echo "AUTH_CALLBACK_GLOB_MATCHED=$callback_allowed"
 echo "AUTH_CALLBACK_ALLOWLISTED=$callback_allowed"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_TOKEN_HASH=$template_token_hash"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_EMAIL_TYPE=$template_email_type"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_CONFIRMATION_URL=$template_confirmation_url"
 echo "AUTH_CONFIRMATION_TEMPLATE_HAS_REDIRECT_TO=$template_redirect_to"
+echo "AUTH_RECOVERY_TEMPLATE_HAS_TOKEN_HASH=$recovery_token_hash"
+echo "AUTH_RECOVERY_TEMPLATE_HAS_REDIRECT_TO=$recovery_redirect_to"
+echo "AUTH_RECOVERY_TEMPLATE_USES_CONFIRMATION_URL=$recovery_confirmation_url"
 
 if [[ "$callback_allowed" != true ]]; then
-  echo 'OWNER_ACTION_REQUIRED: add the exact protected candidate callback or a narrowly scoped PR69 wildcard to Supabase Auth redirect URLs.' >&2
+  echo "OWNER_ACTION_REQUIRED: add the exact protected PR${AUTH_PREVIEW_PR} candidate callback or its narrowly scoped wildcard to Supabase Auth redirect URLs." >&2
   exit 1
 fi
 if [[ "$template_token_hash" != true || "$template_email_type" != true ]]; then
   echo 'OWNER_ACTION_REQUIRED: configure Confirm signup to link the supplied TokenHash to the trusted callback with type=email.' >&2
   exit 1
 fi
+if [[ "$recovery_token_hash" != true || "$recovery_redirect_to" != true || "$recovery_confirmation_url" == true ]]; then
+  echo 'OWNER_ACTION_REQUIRED: configure Password recovery to link TokenHash to the trusted RedirectTo callback, not the provider ConfirmationURL.' >&2
+  exit 1
+fi
 
-echo 'HOSTED_AUTH_CONFIRMATION_AUDIT_PASS callback_allowlisted=true token_hash_template=true type=email=true'
+echo 'HOSTED_AUTH_CONFIRMATION_AUDIT_PASS callback_allowlisted=true signup_token_hash=true recovery_token_hash=true'
