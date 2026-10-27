@@ -93,6 +93,16 @@ describe('canonical RF Coins ACL contract', () => {
     expect(schemaSql).not.toMatch(/^\s*INSERT INTO public\._cron_secrets/m);
   });
 
+  it('serializes same-package top-up retries and prevents duplicate pending attempts', () => {
+    expect(schemaSql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS rf_coin_topups_one_pending_package_per_user\s+ON rf_coin_topups \(user_id, package_id\) WHERE status = 'PENDING' AND package_id IS NOT NULL;/);
+    const start = functionsSql.indexOf('CREATE OR REPLACE FUNCTION rf_coin_create_topup');
+    const end = functionsSql.indexOf('CREATE OR REPLACE FUNCTION rf_coin_credit_paid_topup', start);
+    const createTopup = functionsSql.slice(start, end);
+    expect(createTopup).toContain('FROM auth.users WHERE id = p_user_id FOR UPDATE');
+    expect(createTopup).toContain("WHERE user_id = p_user_id AND package_id = pkg.id AND status = 'PENDING'");
+    expect(createTopup).toContain('RETURN QUERY SELECT pending_topup.id');
+  });
+
   it('does not broaden project defaults or mutate the live database during tests', () => {
     expect(functionsSql).not.toMatch(/^\s*ALTER DEFAULT PRIVILEGES/m);
     expect(schemaSql).not.toMatch(/^\s*ALTER DEFAULT PRIVILEGES/m);

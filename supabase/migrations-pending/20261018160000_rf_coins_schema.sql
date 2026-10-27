@@ -225,6 +225,8 @@ CREATE TABLE IF NOT EXISTS rf_coin_topups (
 
 CREATE UNIQUE INDEX IF NOT EXISTS rf_coin_topups_provider_reference_unique
   ON rf_coin_topups (provider_reference) WHERE provider_reference IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS rf_coin_topups_one_pending_package_per_user
+  ON rf_coin_topups (user_id, package_id) WHERE status = 'PENDING' AND package_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS rf_coin_topups_user_created_idx
   ON rf_coin_topups (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS rf_coin_topups_status_idx ON rf_coin_topups (status);

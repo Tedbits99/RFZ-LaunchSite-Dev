@@ -131,6 +131,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   s rf_coin_settings;
   pkg rf_coin_packages;
+  pending_topup rf_coin_topups;
   v_id uuid;
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
@@ -150,6 +151,26 @@ BEGIN
   SELECT * INTO pkg FROM rf_coin_packages WHERE id = p_package_id AND is_active;
   IF NOT FOUND THEN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_PACKAGE_UNAVAILABLE'::text;
+    RETURN;
+  END IF;
+
+  -- Serialize retries for this customer. Reuse the current pending package
+  -- attempt instead of issuing a second payable top-up on a double click or
+  -- network retry. The partial unique index is a second line of defense.
+  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_FORBIDDEN'::text;
+    RETURN;
+  END IF;
+  SELECT * INTO pending_topup
+    FROM rf_coin_topups
+    WHERE user_id = p_user_id AND package_id = pkg.id AND status = 'PENDING'
+    ORDER BY created_at DESC
+    LIMIT 1
+    FOR UPDATE;
+  IF FOUND THEN
+    RETURN QUERY SELECT pending_topup.id, pending_topup.coins,
+                        pending_topup.bonus_coins, pending_topup.price_cents, NULL::text;
     RETURN;
   END IF;
 
@@ -260,9 +281,8 @@ BEGIN
   IF NOT FOUND THEN
     RETURN QUERY SELECT false, 'RF_COIN_TOPUP_NOT_FOUND'::text; RETURN;
   END IF;
-  IF p_provider_reference IS NULL
-     OR t.provider_reference IS NULL
-     OR p_provider_reference <> t.provider_reference THEN
+  IF (t.provider_reference IS NULL AND p_provider_reference IS NOT NULL)
+     OR (t.provider_reference IS NOT NULL AND p_provider_reference IS DISTINCT FROM t.provider_reference) THEN
     RETURN QUERY SELECT false, 'RF_COIN_PROVIDER_REFERENCE_MISMATCH'::text; RETURN;
   END IF;
   IF t.status = p_status THEN

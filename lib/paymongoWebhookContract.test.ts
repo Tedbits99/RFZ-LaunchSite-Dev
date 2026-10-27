@@ -31,7 +31,11 @@ describe('PayMongo settlement fail-closed contract', () => {
     const creditRpc = webhookSource.indexOf('supabase.rpc("rf_coin_credit_paid_topup"');
     expect(topupValidation).toBeGreaterThan(-1);
     expect(creditRpc).toBeGreaterThan(topupValidation);
-    expect(topupSource).toContain('currency,\n      status: "pending"');
+    expect(topupSource).toContain('currency,\n      status: "processing"');
+    expect(topupSource.indexOf('status: "processing"')).toBeLessThan(
+      topupSource.indexOf('const intentRes = await paymongoJson'),
+    );
+    expect(topupSource).toContain('status: "pending",\n        provider_reference: intentId');
     expect(pendingCoinFunctions).toContain('RF_COIN_PROVIDER_REFERENCE_MISMATCH');
   });
 });

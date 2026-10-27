@@ -400,6 +400,10 @@ describe('rf coins real SQL behavior', () => {
       `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, pkg[0].id]);
     expect(created[0].out_topup_id).toBeTruthy();
     const topupId = created[0].out_topup_id;
+    const retried = await sql<{ out_topup_id: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, pkg[0].id]);
+    expect(retried[0].out_error).toBeNull();
+    expect(retried[0].out_topup_id).toBe(topupId);
     await resetRole();
 
     await sql(`UPDATE rf_coin_topups SET provider_reference = 'pay-ref-1' WHERE id = $1`, [topupId]);
