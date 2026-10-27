@@ -114,7 +114,18 @@ export default function WalletClient() {
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-rose-400/25 bg-rose-400/5 p-6 text-sm text-rose-300">{error}</div>
+      <div className="rounded-2xl border border-rose-400/25 bg-rose-400/5 p-6 text-sm text-rose-200" role="alert">
+        <p>{error} Your wallet data has not been changed.</p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={refreshing}
+          className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-rose-300/30 px-3 text-xs font-medium text-rose-100 transition hover:border-rose-200 disabled:opacity-60"
+        >
+          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Retrying…' : 'Retry wallet load'}
+        </button>
+      </div>
     );
   }
 
@@ -130,7 +141,7 @@ export default function WalletClient() {
             <p className="text-xs uppercase tracking-wider text-slate-500">RF Coins Balance</p>
             <p className="font-display mt-1 flex items-center gap-2 text-4xl font-bold text-cyan-300">
               <Coins size={30} className="text-amber-300" />
-              {formatCoins(wallet?.balance_coins ?? 0)}
+              {wallet ? formatCoins(wallet.balance_coins) : '—'}
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {settings.centavosPerCoin === 100 ? '1 RF Coin = ₱1.00' : `1 RF Coin = ₱${(settings.centavosPerCoin / 100).toFixed(2)}`}
@@ -150,19 +161,19 @@ export default function WalletClient() {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
           <p className="text-xs text-slate-400">Coins Purchased</p>
-          <p className="font-display mt-2 text-xl font-bold text-emerald-300">{formatCoins(wallet?.total_purchased_coins ?? 0)}</p>
+          <p className="font-display mt-2 text-xl font-bold text-emerald-300">{wallet ? formatCoins(wallet.total_purchased_coins) : '—'}</p>
         </div>
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
           <p className="text-xs text-slate-400">Coins Spent</p>
-          <p className="font-display mt-2 text-xl font-bold text-violet-300">{formatCoins(wallet?.total_spent_coins ?? 0)}</p>
+          <p className="font-display mt-2 text-xl font-bold text-violet-300">{wallet ? formatCoins(wallet.total_spent_coins) : '—'}</p>
         </div>
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
           <p className="text-xs text-slate-400">Coins Reversed</p>
-          <p className="font-display mt-2 text-xl font-bold text-amber-300">{formatCoins(wallet?.total_reversed_coins ?? 0)}</p>
+          <p className="font-display mt-2 text-xl font-bold text-amber-300">{wallet ? formatCoins(wallet.total_reversed_coins) : '—'}</p>
         </div>
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
           <p className="text-xs text-slate-400">Manual Credits / Debits</p>
-          <p className="font-display mt-2 text-xl font-bold text-cyan-300">+{formatCoins(wallet?.total_manual_credited_coins ?? 0)} / −{formatCoins(wallet?.total_manual_debited_coins ?? 0)}</p>
+          <p className="font-display mt-2 text-xl font-bold text-cyan-300">{wallet ? `+${formatCoins(wallet.total_manual_credited_coins)} / −${formatCoins(wallet.total_manual_debited_coins)}` : '—'}</p>
         </div>
       </div>
 
@@ -214,9 +225,16 @@ export default function WalletClient() {
 
       <div>
         <h2 className="font-display mb-3 text-lg font-bold">Transaction History</h2>
-        {ledgerError && <p className="text-sm text-rose-400">{ledgerError}</p>}
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225]">
-          {ledger.length === 0 ? (
+          {ledgerError ? (
+            <div className="p-6 text-sm text-rose-200" role="alert">
+              <p>{ledgerError} No wallet transactions were changed.</p>
+              <button type="button" onClick={() => void load()} disabled={refreshing} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg border border-rose-300/30 px-3 text-xs font-medium text-rose-100 transition hover:border-rose-200 disabled:opacity-60">
+                <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                {refreshing ? 'Retrying…' : 'Retry history'}
+              </button>
+            </div>
+          ) : ledger.length === 0 ? (
             <p className="p-6 text-sm text-slate-500">No transactions yet.</p>
           ) : (
             <div className="divide-y divide-[#0f1b31]">
