@@ -74,6 +74,13 @@ export default function AccountProfile() {
       <div className="mx-auto max-w-2xl px-5 py-10">
         <nav className="flex items-center gap-2 text-xs text-slate-500"><Link href="/account">Account</Link><ChevronRight size={12} /><span className="text-slate-300">Profile</span></nav>
         <h1 className="font-display mt-4 text-2xl font-bold">Profile Settings</h1>
+        <section className="mt-6 rounded-xl border border-cyan-400/15 bg-[#0b1225] p-5" aria-labelledby="profile-security-heading">
+          <h2 id="profile-security-heading" className="font-display text-base font-semibold">Password &amp; security</h2>
+          <p className="mt-1 text-sm text-slate-400">Keep your account protected with a password you do not reuse elsewhere.</p>
+          <Link href="/forgot-password" className="mt-3 inline-flex rounded-lg border border-cyan-400/30 px-3 py-2 text-xs font-medium text-cyan-200 hover:border-cyan-300">
+            Reset password securely
+          </Link>
+        </section>
 
         {state === 'loading' ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-sm text-slate-400">Loading your profile…</div>

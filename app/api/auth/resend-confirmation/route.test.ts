@@ -5,16 +5,11 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   maybeSingle: vi.fn(),
   resend: vi.fn(),
-  createSupabaseServerClient: vi.fn(),
   createCustomerServerClient: vi.fn(),
 }));
 
 vi.mock('@/lib/authSessionClients', () => ({
   createCustomerServerClient: mocks.createCustomerServerClient,
-}));
-
-vi.mock('@/lib/supabaseServer', () => ({
-  createSupabaseServerClient: mocks.createSupabaseServerClient,
 }));
 
 vi.mock('@/lib/supabaseAdmin', () => ({
@@ -61,7 +56,7 @@ describe('POST /api/auth/resend-confirmation', () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key';
     installAllowedReservation();
     mocks.resend.mockResolvedValue({ data: {}, error: null });
-    mocks.createSupabaseServerClient.mockReturnValue({ auth: { resend: mocks.resend } });
+    mocks.createCustomerServerClient.mockReturnValue({ auth: { resend: mocks.resend } });
   });
 
   it('accepts a valid trusted-origin request and returns the generic 202', async () => {

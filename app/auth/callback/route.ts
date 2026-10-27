@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
-import { createRecoveryServerClient } from '@/lib/authSessionClients';
+import { createCustomerServerClient, createRecoveryServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin, getConfirmationUrl } from '@/lib/authRedirect';
 import { newRecoveryProofCookie, sessionFingerprint } from '@/lib/recoveryProof';
 
@@ -14,6 +13,10 @@ function redirectToConfirmation(status: ConfirmationStatus) {
 
 function redirectToResetPassword(origin: string) {
   return NextResponse.redirect(`${origin}/auth/reset-password`);
+}
+
+function redirectToAccount(origin: string) {
+  return NextResponse.redirect(`${origin}/account`);
 }
 
 function recoveryClientError(origin: string) {
@@ -54,7 +57,7 @@ export async function GET(request: NextRequest) {
     return isRecovery ? redirectToResetPassword(origin) : redirectToConfirmation('invalid');
   }
 
-  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
+  let supabase: Awaited<ReturnType<typeof createCustomerServerClient>> | null = null;
   let recovery: Awaited<ReturnType<typeof createRecoveryServerClient>> | null = null;
   if (isRecovery) {
     try {
@@ -64,7 +67,10 @@ export async function GET(request: NextRequest) {
     }
   } else {
     try {
-      supabase = await createSupabaseServerClient();
+      // Signup confirmation must use the customer namespace. This keeps the
+      // exchanged session in the same cookie jar used by /api/auth/login and
+      // protected account routes, instead of the retired legacy namespace.
+      supabase = await createCustomerServerClient();
     } catch {
       return redirectToConfirmation('error');
     }
@@ -129,7 +135,7 @@ export async function GET(request: NextRequest) {
     if (result.error === 'EMAIL_NOT_VERIFIED' || result.status === 'pending_verification') {
       return redirectToConfirmation('pending');
     }
-    if (result.status === 'active' && result.error === null) return redirectToConfirmation('success');
+    if (result.status === 'active' && result.error === null) return redirectToAccount(origin);
     return redirectToConfirmation('error');
   } catch {
     return redirectToConfirmation('error');

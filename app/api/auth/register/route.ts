@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { validateRegistrationInput } from '@/lib/authValidation';
 import { getAuthCallbackUrl } from '@/lib/authRedirect';
 
@@ -51,9 +51,9 @@ export async function POST(req: NextRequest) {
   const emailRedirectTo = getAuthCallbackUrl();
   if (!emailRedirectTo) return errorResponse('Registration is temporarily unavailable.', 503);
 
-  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  let supabase: Awaited<ReturnType<typeof createCustomerServerClient>>;
   try {
-    supabase = await createSupabaseServerClient();
+    supabase = await createCustomerServerClient();
   } catch {
     return errorResponse('Registration is temporarily unavailable.', 503);
   }

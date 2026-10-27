@@ -42,7 +42,9 @@ export default async function ConfirmationPage({ searchParams }: ConfirmationPag
         <h1 className="font-display text-2xl font-bold">{message.title}</h1>
         <p className="mt-3 text-sm text-slate-400">{message.detail}</p>
         {showResend ? <ResendConfirmationForm initialEmail={initialEmail} /> : null}
-        <a href="/" className="mt-6 inline-block rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-200">Return to store</a>
+        <a href={statusKey === 'success' ? '/account' : '/'} className="mt-6 inline-block rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-200">
+          {statusKey === 'success' ? 'Open my account' : 'Return to store'}
+        </a>
       </div>
     </main>
   );

@@ -20,10 +20,18 @@ export default async function Account() {
     .order('created_at', { ascending: false })
     .limit(20);
   const orders = (data as unknown as Order[]) || [];
+  // The recent-order list is intentionally bounded for rendering. Summary
+  // numbers come from a separate owner-scoped query so older orders cannot be
+  // silently omitted from the account totals.
+  const { data: summaryData, error: summaryError } = await session.client
+    .from('orders')
+    .select('id, total_cents, status')
+    .eq('customer_user_id', session.user.id);
+  const summaryOrders = summaryError ? null : ((summaryData as unknown as Pick<Order, 'id' | 'total_cents' | 'status'>[]) || []);
   const email = typeof session.user.email === 'string' ? session.user.email.trim().toLowerCase() : null;
 
   const fmtP = (c: number) => `₱${(c / 100).toFixed(2)}`;
-  const totalSpent = orders.filter((o) => o.status === 'PAID' || o.status === 'COMPLETED').reduce((s, o) => s + o.total_cents, 0);
+  const totalSpent = summaryOrders?.filter((o) => o.status === 'PAID' || o.status === 'COMPLETED').reduce((s, o) => s + o.total_cents, 0) ?? null;
 
   return (
     <main className="rfz-account-page min-h-screen bg-[#030718] text-slate-100">
@@ -32,8 +40,8 @@ export default async function Account() {
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs uppercase tracking-[.18em] text-cyan-300">Customer hub</p><h1 className="font-display mt-2 text-3xl font-bold">My Account</h1></div><nav aria-label="Account navigation" className="flex flex-wrap gap-2 text-xs"><a href="/account/orders" className="rounded-lg border border-[#233653] px-3 py-2 text-slate-300 hover:border-cyan-300 hover:text-cyan-200">All orders</a><a href="/track-order" className="rounded-lg border border-[#233653] px-3 py-2 text-slate-300 hover:border-cyan-300 hover:text-cyan-200">Guest tracking</a><a href="/account/profile" className="rounded-lg border border-[#233653] px-3 py-2 text-slate-300 hover:border-cyan-300 hover:text-cyan-200">Profile</a></nav></div>
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
           <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><UserRound className="text-cyan-300" size={20} /><p className="mt-3 text-xs text-slate-400">Profile</p><p className="font-display break-all text-base font-bold sm:text-lg">{email || 'Guest'}</p></div>
-          <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><Package className="text-violet-300" size={20} /><p className="mt-3 text-xs text-slate-400">Total Orders</p><p className="font-display text-lg font-bold">{orders.length}</p></div>
-          <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><Wallet className="text-emerald-300" size={20} /><p className="mt-3 text-xs text-slate-400">Total Spent</p><p className="font-display text-lg font-bold">{fmtP(totalSpent)}</p></div>
+          <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><Package className="text-violet-300" size={20} /><p className="mt-3 text-xs text-slate-400">Total Orders</p><p className="font-display text-lg font-bold">{summaryOrders ? summaryOrders.length : '—'}</p></div>
+          <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><Wallet className="text-emerald-300" size={20} /><p className="mt-3 text-xs text-slate-400">Total Spent</p><p className="font-display text-lg font-bold">{totalSpent === null ? '—' : fmtP(totalSpent)}</p></div>
         </div>
         <div className="mt-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
           <p className="text-xs text-slate-400">RF Coins Wallet</p>

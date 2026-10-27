@@ -52,6 +52,13 @@ describe('confirmation page status rendering (SSR)', () => {
   it('preserves the return-to-store navigation', async () => {
     expect(await renderWithStatus('pending')).toContain('Return to store');
   });
+
+  it('takes a confirmed customer directly to the protected account hub', async () => {
+    const html = await renderWithStatus('success');
+    expect(html).toContain('Open my account');
+    expect(html).toContain('href="/account"');
+    expect(html).not.toContain('href="/"');
+  });
 });
 
 describe('resend form source invariants (static checks)', () => {

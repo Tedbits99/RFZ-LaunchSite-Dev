@@ -7,27 +7,24 @@ const USER_ID = 'customer-1';
 const ACCESS_TOKEN = 'recovery-access-token';
 
 const mocks = vi.hoisted(() => ({
-  defaultExchangeCodeForSession: vi.fn(),
-  defaultGetUser: vi.fn(),
-  defaultRpc: vi.fn(),
-  defaultVerifyOtp: vi.fn(),
+  customerExchangeCodeForSession: vi.fn(),
+  customerGetUser: vi.fn(),
+  customerRpc: vi.fn(),
+  customerVerifyOtp: vi.fn(),
   recoveryExchangeCodeForSession: vi.fn(),
   recoveryVerifyOtp: vi.fn(),
   recoveryGetUser: vi.fn(),
 }));
 
-vi.mock('@/lib/supabaseServer', () => ({
-  createSupabaseServerClient: vi.fn(() => ({
-    auth: {
-      exchangeCodeForSession: mocks.defaultExchangeCodeForSession,
-      verifyOtp: mocks.defaultVerifyOtp,
-      getUser: mocks.defaultGetUser,
-    },
-    rpc: mocks.defaultRpc,
-  })),
-}));
-
 vi.mock('@/lib/authSessionClients', () => ({
+  createCustomerServerClient: vi.fn(() => ({
+    auth: {
+      exchangeCodeForSession: mocks.customerExchangeCodeForSession,
+      verifyOtp: mocks.customerVerifyOtp,
+      getUser: mocks.customerGetUser,
+    },
+    rpc: mocks.customerRpc,
+  })),
   createRecoveryServerClient: vi.fn(() => ({
     auth: {
       exchangeCodeForSession: mocks.recoveryExchangeCodeForSession,
@@ -82,20 +79,20 @@ function decodeProof(cookie: string) {
   return { payload, sig, expectedSig, claims, valid: sig === expectedSig };
 }
 
-describe('email confirmation callback (default namespace)', () => {
+describe('email confirmation callback (customer namespace)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
     process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = TEST_SECRET;
-    mocks.defaultExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
-    mocks.defaultGetUser.mockResolvedValue({
+    mocks.customerExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
+    mocks.customerGetUser.mockResolvedValue({
       data: { user: { id: 'customer-1', email_confirmed_at: '2026-10-17T12:00:00Z' } },
       error: null,
     });
-    mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
+    mocks.customerRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { message: 'no recovery verifier' } });
     mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
-    mocks.defaultVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
+    mocks.customerVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: null });
   });
 
@@ -103,16 +100,16 @@ describe('email confirmation callback (default namespace)', () => {
     const response = await GET(request('?code=one-time-code&customer_user_id=other-user&next=https%3A%2F%2Fevil.example'));
 
     expect(response.status).toBe(307);
-    expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
-    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalledWith('one-time-code', undefined);
-    expect(mocks.defaultGetUser).toHaveBeenCalledOnce();
-    expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(location(response)).toBe('https://example.test/account');
+    expect(mocks.customerExchangeCodeForSession).toHaveBeenCalledWith('one-time-code', undefined);
+    expect(mocks.customerGetUser).toHaveBeenCalledOnce();
+    expect(mocks.customerRpc).toHaveBeenCalledWith('activate_customer_profile');
     expect(location(response)).not.toContain('one-time-code');
     expect(location(response)).not.toContain('evil.example');
   });
 
   it('verifies a documented token_hash email confirmation without a browser PKCE verifier', async () => {
-    mocks.defaultVerifyOtp.mockResolvedValue({
+    mocks.customerVerifyOtp.mockResolvedValue({
       data: { session: { user: { id: 'customer-1' } } },
       error: null,
     });
@@ -120,18 +117,18 @@ describe('email confirmation callback (default namespace)', () => {
     const response = await GET(request('?token_hash=opaque-confirmation-token&type=email'));
 
     expect(response.status).toBe(307);
-    expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
-    expect(mocks.defaultVerifyOtp).toHaveBeenCalledWith({ token_hash: 'opaque-confirmation-token', type: 'email' });
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(location(response)).toBe('https://example.test/account');
+    expect(mocks.customerVerifyOtp).toHaveBeenCalledWith({ token_hash: 'opaque-confirmation-token', type: 'email' });
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).toHaveBeenCalledWith('activate_customer_profile');
     expect(location(response)).not.toContain('opaque-confirmation-token');
     expect(await response.text()).not.toContain('opaque-confirmation-token');
   });
 
-  it('uses only the default client on the confirmation path (never the recovery client)', async () => {
+  it('uses only the customer client on the confirmation path (never the recovery client)', async () => {
     await GET(request('?code=one-time-code'));
 
-    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).toHaveBeenCalled();
     expect(mocks.recoveryExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.recoveryGetUser).not.toHaveBeenCalled();
   });
@@ -143,8 +140,8 @@ describe('email confirmation callback (default namespace)', () => {
     const response = await GET(request(query));
     expect(response.status).toBe(307);
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect((await response.text())).not.toContain('expired');
   });
 
@@ -153,13 +150,13 @@ describe('email confirmation callback (default namespace)', () => {
 
     expect(response.status).toBe(307);
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
-    expect(mocks.defaultVerifyOtp).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerVerifyOtp).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(location(response)).not.toContain('opaque-confirmation-token');
   });
 
   it.each(['expired', 'reused'])('rejects an %s confirmation code', async (kind) => {
-    mocks.defaultExchangeCodeForSession.mockResolvedValue({ error: { message: `${kind} provider detail` } });
+    mocks.customerExchangeCodeForSession.mockResolvedValue({ error: { message: `${kind} provider detail` } });
     const response = await GET(request('?code=secret-code'));
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
     expect(location(response)).not.toContain('secret-code');
@@ -167,28 +164,28 @@ describe('email confirmation callback (default namespace)', () => {
   });
 
   it('does not activate when auth.getUser cannot resolve the session', async () => {
-    mocks.defaultGetUser.mockResolvedValue({ data: { user: null }, error: { message: 'provider detail' } });
+    mocks.customerGetUser.mockResolvedValue({ data: { user: null }, error: { message: 'provider detail' } });
     const response = await GET(request('?code=valid-code'));
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=error');
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
   });
 
   it('leaves an unverified user pending and does not call activation', async () => {
-    mocks.defaultGetUser.mockResolvedValue({ data: { user: { id: 'customer-1', email_confirmed_at: null } }, error: null });
+    mocks.customerGetUser.mockResolvedValue({ data: { user: { id: 'customer-1', email_confirmed_at: null } }, error: null });
     const response = await GET(request('?code=valid-code'));
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=pending');
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
   });
 
   it.each(['suspended', 'deactivated'])('does not reactivate a %s profile', async (status) => {
-    mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: status, out_error: 'ACCOUNT_RESTRICTED' }], error: null });
+    mocks.customerRpc.mockResolvedValue({ data: [{ out_status: status, out_error: 'ACCOUNT_RESTRICTED' }], error: null });
     const response = await GET(request('?code=valid-code'));
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=restricted');
-    expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(mocks.customerRpc).toHaveBeenCalledWith('activate_customer_profile');
   });
 
   it('treats activation and RPC failures as generic errors', async () => {
-    mocks.defaultRpc.mockResolvedValueOnce({ data: null, error: { message: 'provider detail' } });
+    mocks.customerRpc.mockResolvedValueOnce({ data: null, error: { message: 'provider detail' } });
     const response = await GET(request('?code=valid-code'));
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=error');
     expect((await response.text())).not.toContain('provider detail');
@@ -198,7 +195,7 @@ describe('email confirmation callback (default namespace)', () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
     const response = await GET(request('?code=valid-code'));
     expect(response.status).toBe(503);
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
   });
 });
 
@@ -207,12 +204,12 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     vi.clearAllMocks();
     process.env.NEXT_PUBLIC_APP_URL = 'https://example.test';
     process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = TEST_SECRET;
-    mocks.defaultExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
-    mocks.defaultGetUser.mockResolvedValue({
+    mocks.customerExchangeCodeForSession.mockResolvedValue({ data: { session: {} }, error: null });
+    mocks.customerGetUser.mockResolvedValue({
       data: { user: { id: 'customer-1', email_confirmed_at: '2026-10-17T12:00:00Z' } },
       error: null,
     });
-    mocks.defaultRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
+    mocks.customerRpc.mockResolvedValue({ data: [{ out_status: 'active', out_error: null }], error: null });
     mocks.recoveryExchangeCodeForSession.mockResolvedValue(recoveryExchangeResult());
     // getUser returns ONLY data.user — the SDK contract.
     mocks.recoveryGetUser.mockResolvedValue({
@@ -228,8 +225,8 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('recovery-code', undefined);
     expect(mocks.recoveryGetUser).toHaveBeenCalledOnce();
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(location(response)).not.toContain('recovery-code');
     expect(location(response)).not.toContain('evil.example');
 
@@ -274,9 +271,9 @@ describe('password recovery callback (recovery namespace isolation)', () => {
   it('never activates a profile or calls activation RPC from the recovery branch', async () => {
     await GET(request('?code=recovery-code&type=recovery'));
 
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
-    expect(mocks.defaultGetUser).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
+    expect(mocks.customerGetUser).not.toHaveBeenCalled();
   });
 
   it('fails closed when the recovery exchange errors (no proof cookie issued)', async () => {
@@ -287,8 +284,8 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(proofCookie(response)).toBeUndefined();
     expect(mocks.recoveryGetUser).not.toHaveBeenCalled();
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(location(response)).not.toContain('secret-code');
     expect(await response.text()).not.toContain('provider detail');
   });
@@ -339,43 +336,43 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(response.status).toBe(307);
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(mocks.recoveryExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(proofCookie(response)).toBeUndefined();
     expect(await response.text()).not.toContain('expired');
   });
 
   it('a signup confirmation code cannot authorize password reset by adding type=recovery', async () => {
-    // The signup code has a verifier only in the DEFAULT namespace; the
+    // The signup code has a verifier only in the customer namespace; the
     // recovery client has no verifier, so the recovery exchange fails closed.
     mocks.recoveryExchangeCodeForSession.mockResolvedValue({ data: { session: null }, error: { code: 'pkce_code_verifier_not_found' } });
 
     const response = await GET(request('?code=signup-code&type=recovery'));
 
     expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('signup-code', undefined);
-    expect(mocks.defaultExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(proofCookie(response)).toBeUndefined();
   });
 
   it('a genuine recovery URL edited to a non-recovery type cannot activate a profile', async () => {
-    // Recovery verifier exists only in the recovery namespace; the default
+    // Recovery verifier exists only in the recovery namespace; the customer
     // client's exchange fails, so no activation occurs.
-    mocks.defaultExchangeCodeForSession.mockResolvedValue({ data: null, error: { code: 'pkce_code_verifier_not_found' } });
+    mocks.customerExchangeCodeForSession.mockResolvedValue({ data: null, error: { code: 'pkce_code_verifier_not_found' } });
 
     const response = await GET(request('?code=recovery-code&type=signup'));
 
-    expect(mocks.defaultExchangeCodeForSession).toHaveBeenCalledWith('recovery-code', undefined);
+    expect(mocks.customerExchangeCodeForSession).toHaveBeenCalledWith('recovery-code', undefined);
     expect(mocks.recoveryExchangeCodeForSession).not.toHaveBeenCalled();
-    expect(mocks.defaultRpc).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(location(response)).toBe('https://example.test/auth/confirmation?status=invalid');
   });
 
   it('keeps an unknown type on the confirmation path', async () => {
     const response = await GET(request('?code=valid-code&type=unknown'));
 
-    expect(location(response)).toBe('https://example.test/auth/confirmation?status=success');
-    expect(mocks.defaultRpc).toHaveBeenCalledWith('activate_customer_profile');
+    expect(location(response)).toBe('https://example.test/account');
+    expect(mocks.customerRpc).toHaveBeenCalledWith('activate_customer_profile');
   });
 
   it('never exposes recovery codes or tokens in the redirect or body', async () => {

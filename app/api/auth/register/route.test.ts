@@ -6,8 +6,8 @@ const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
 }));
 
-vi.mock('@/lib/supabaseServer', () => ({
-  createSupabaseServerClient: vi.fn(() => ({
+vi.mock('@/lib/authSessionClients', () => ({
+  createCustomerServerClient: vi.fn(() => ({
     auth: { signUp: mocks.signUp, signOut: mocks.signOut },
   })),
 }));
@@ -108,8 +108,8 @@ describe('customer registration route', () => {
   });
 
   it('returns 503 when Supabase configuration is unavailable', async () => {
-    const { createSupabaseServerClient } = await import('@/lib/supabaseServer');
-    vi.mocked(createSupabaseServerClient).mockImplementationOnce(() => { throw new Error('missing configuration'); });
+    const { createCustomerServerClient } = await import('@/lib/authSessionClients');
+    vi.mocked(createCustomerServerClient).mockImplementationOnce(() => { throw new Error('missing configuration'); });
     const response = await POST(request(validInput));
     expect(response.status).toBe(503);
     expect(mocks.signUp).not.toHaveBeenCalled();

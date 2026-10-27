@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { getAuthCallbackUrl, getConfiguredAppOrigin } from '@/lib/authRedirect';
 import { validateEmailInput } from '@/lib/authValidation';
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       return json({ error: 'Too many requests. Please try again later.', retry_after_seconds: retryAfter }, 429);
     }
 
-    const supabase = await createSupabaseServerClient();
+    const supabase = await createCustomerServerClient();
     // The resend result is intentionally not echoed: the response never
     // reveals whether the address has an account.
     await supabase.auth.resend({
