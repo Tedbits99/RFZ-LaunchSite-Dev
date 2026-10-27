@@ -22,21 +22,59 @@ function trustedCallback(callbackUrl) {
   }
 }
 
-function recoveryAnchorRanges(template) {
+function recoveryAnchors(template) {
   const anchors = [];
   const anchorPattern = /<a\b[^>]*>[\s\S]*?<\/a\s*>/gi;
   let match;
+  let index = 0;
   while ((match = anchorPattern.exec(template)) !== null) {
+    const anchorIndex = index++;
     const hrefMatch = match[0].match(/\bhref\s*=\s*(["'])([\s\S]*?)\1/i);
     if (!hrefMatch) continue;
     const href = hrefMatch[2];
     if (/\{\{\s*\.(?:RedirectTo|ConfirmationURL|TokenHash)\s*\}\}/i.test(href)
       || /token[_-]?hash/i.test(href)) {
       const hrefStart = match.index + hrefMatch.index + hrefMatch[0].indexOf(href);
-      anchors.push({ start: hrefStart, end: hrefStart + href.length, href });
+      const label = match[0].slice(match[0].indexOf('>') + 1).replace(/<[^>]*>/g, ' ');
+      anchors.push({
+        index: anchorIndex,
+        start: hrefStart,
+        end: hrefStart + href.length,
+        href,
+        label,
+      });
     }
   }
   return anchors;
+}
+
+/** Return only structural booleans/counts. Never return template text or URLs. */
+export function inspectRecoveryTemplate(template) {
+  if (typeof template !== 'string') {
+    return { validInput: false, anchorCount: 0, authLinkCount: 0, links: [] };
+  }
+  const anchorCount = [...template.matchAll(/<a\b[^>]*>[\s\S]*?<\/a\s*>/gi)].length;
+  const authLinks = recoveryAnchors(template);
+  return {
+    validInput: true,
+    anchorCount,
+    authLinkCount: authLinks.length,
+    links: authLinks.map(({ index, href, label }) => ({
+      index,
+      redirectTo: /\{\{\s*\.RedirectTo\s*\}\}/i.test(href),
+      confirmationUrl: /\{\{\s*\.ConfirmationURL\s*\}\}/i.test(href),
+      tokenHashVariable: /\{\{\s*\.TokenHash\s*\}\}/i.test(href),
+      tokenHashLiteral: /token[_-]?hash/i.test(href),
+      resetLabel: /reset/i.test(label),
+      passwordLabel: /password/i.test(label),
+      recoveryLabel: /recover/i.test(label),
+      redirectSeparator: (() => {
+        const match = href.match(/\{\{\s*\.RedirectTo\s*\}\}([\s\S])?/i);
+        return match?.[1] === '?' || match?.[1] === '&' || match?.[1] === '/' ? match[1] : 'other_or_absent';
+      })(),
+      canonical: href === CANONICAL_RECOVERY_HREF,
+    })),
+  };
 }
 
 /** Replace only the recovery link's href, preserving the branded HTML around it. */
@@ -44,10 +82,13 @@ export function repairRecoveryTemplate(template, callbackUrl) {
   if (typeof template !== 'string' || !template.trim() || !trustedCallback(callbackUrl)) {
     throw new Error('invalid recovery template input');
   }
-  const anchors = recoveryAnchorRanges(template);
-  if (anchors.length !== 1) throw new Error('recovery link is ambiguous or missing');
-  const anchor = anchors[0];
-  return `${template.slice(0, anchor.start)}${CANONICAL_RECOVERY_HREF}${template.slice(anchor.end)}`;
+  const anchors = recoveryAnchors(template);
+  if (anchors.length === 0) throw new Error('recovery link is missing');
+  let repaired = template;
+  for (const anchor of [...anchors].sort((left, right) => right.start - left.start)) {
+    repaired = `${repaired.slice(0, anchor.start)}${CANONICAL_RECOVERY_HREF}${repaired.slice(anchor.end)}`;
+  }
+  return repaired;
 }
 
 /** Validate the actual rendered URL shape using a synthetic, redacted token. */
@@ -55,8 +96,8 @@ export function validateRecoveryTemplate(template, callbackUrl) {
   if (typeof template !== 'string' || !trustedCallback(callbackUrl)) {
     return { valid: false, reason: 'invalid_callback_or_template' };
   }
-  const anchors = recoveryAnchorRanges(template);
-  if (anchors.length !== 1 || anchors[0].href !== CANONICAL_RECOVERY_HREF) {
+  const anchors = recoveryAnchors(template);
+  if (anchors.length === 0 || anchors.some((anchor) => anchor.href !== CANONICAL_RECOVERY_HREF)) {
     return { valid: false, reason: 'recovery_href_contract_mismatch' };
   }
 
@@ -97,8 +138,10 @@ if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
       process.stdout.write(repairRecoveryTemplate(template, callbackUrl));
     } else if (mode === 'validate') {
       process.stdout.write(`${JSON.stringify(validateRecoveryTemplate(template, callbackUrl))}\n`);
+    } else if (mode === 'inspect') {
+      process.stdout.write(`${JSON.stringify(inspectRecoveryTemplate(template))}\n`);
     } else {
-      process.stderr.write('Usage: auth-recovery-template.mjs <repair|validate> <trusted-callback-url>\n');
+      process.stderr.write('Usage: auth-recovery-template.mjs <repair|validate|inspect> <trusted-callback-url>\n');
       process.exitCode = 2;
     }
   } catch {
