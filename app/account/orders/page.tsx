@@ -4,7 +4,6 @@ import AccountFooter from '@/components/account/AccountFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
-import ThemeSelector from '@/components/ThemeSelector';
 import { getCustomerLoginUrl } from '@/lib/authRedirect';
 import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 
@@ -42,11 +41,6 @@ export default async function AccountOrders({ searchParams }: { searchParams: Pr
 
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90">
-        <div className="mx-auto flex max-w-[1180px] items-center justify-between gap-4 px-5 py-4">
-          <a href="/account" className="text-xs text-cyan-300">← Account</a><ThemeSelector />
-        </div>
-      </header>
       <div className="mx-auto max-w-[1180px] px-5 py-10">
         <nav className="flex items-center gap-2 text-xs text-slate-500">
           <Link href="/account">Account</Link>

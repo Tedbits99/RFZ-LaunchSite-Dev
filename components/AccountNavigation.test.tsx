@@ -15,6 +15,8 @@ describe('customer account navigation (SSR contract)', () => {
     expect(html).toContain('RunFazone');
     expect(html).toContain('aria-label="Account navigation"');
     expect(html).toContain('aria-current="page"');
+    expect(html).toContain('aria-label="Open customer account"');
+    expect(html).toContain('data-theme-selector');
     expect(html).not.toContain('grid-cols-2');
   });
 });

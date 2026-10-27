@@ -11,7 +11,7 @@ type WalletResponse = {
   spendingEnabled?: boolean;
   topupsEnabled?: boolean;
   centavosPerCoin?: number;
-  walletStatus?: 'ready' | 'disabled' | 'not_deployed' | 'incomplete';
+  walletStatus?: 'ready' | 'disabled' | 'not_deployed' | 'not_configured' | 'incomplete';
 };
 
 type LedgerResponse = { entries?: RfCoinLedgerEntry[] };
@@ -135,6 +135,8 @@ export default function WalletClient() {
   if (!settings.enabled) {
     const message = walletStatus === 'not_deployed'
       ? 'RF Coins wallet setup has not been deployed to this environment yet. No balance or payment is being presented as active.'
+      : walletStatus === 'not_configured'
+        ? 'RF Coins wallet setup is not configured in this environment. No balance or payment is being presented as active.'
       : walletStatus === 'incomplete'
         ? 'RF Coins is temporarily unavailable while its database setup is incomplete. No funding or spending is enabled.'
         : 'RF Coins wallet functions are currently disabled. No funding or spending is enabled.';

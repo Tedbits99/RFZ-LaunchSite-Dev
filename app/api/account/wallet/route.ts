@@ -4,7 +4,7 @@ import { getActiveCustomerSession } from '@/lib/customerSession';
 import { rfCoinErrorMessage } from '@/lib/rfCoins';
 import { isMissingRfCoinTable } from '@/lib/rfCoinSchema';
 
-function unavailable(status: 'not_deployed' | 'disabled' | 'incomplete') {
+function unavailable(status: 'not_deployed' | 'not_configured' | 'disabled' | 'incomplete') {
   return NextResponse.json({
     wallet: null,
     packages: [],
@@ -38,7 +38,7 @@ export async function GET() {
 
     const settings = settingsRes.data as { enabled: boolean; topups_enabled: boolean; spending_enabled: boolean; centavos_per_coin: number } | null;
     const enabled = Boolean(settings?.enabled);
-    if (!enabled) return unavailable(settings ? 'disabled' : 'not_deployed');
+    if (!enabled) return unavailable(settings ? 'disabled' : 'not_configured');
 
     const [walletRes, packagesRes] = await Promise.all([
       session.client

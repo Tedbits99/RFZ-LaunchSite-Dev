@@ -8,7 +8,7 @@ import { ChevronDown, CircleUserRound, LogOut, Package, Search, Settings, Wallet
 type Account = { display_name: string; email: string };
 type AccountState = 'checking' | 'anonymous' | 'authenticated' | 'unavailable';
 
-export default function CustomerAccountMenu({ compact = false, iconOnly = false, dropup = false }: { compact?: boolean; iconOnly?: boolean; dropup?: boolean }) {
+export default function CustomerAccountMenu({ compact = false, compactOnMobile = false }: { compact?: boolean; compactOnMobile?: boolean }) {
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menuId = useId();
@@ -87,15 +87,29 @@ export default function CustomerAccountMenu({ compact = false, iconOnly = false,
   if (accountState === 'checking' || accountState === 'unavailable') {
     return (
       <div className={`flex items-center gap-2 ${compact ? 'flex-col items-stretch' : ''}`}>
-        <Link href="/account" className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-[#253451] px-3 text-xs text-slate-200 hover:border-cyan-400">
-          Account
+        <Link href="/account" aria-label="Open customer account" title="Open customer account" className={`inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-[#253451] text-xs text-slate-200 hover:border-cyan-400 ${compactOnMobile ? 'size-10 p-2 sm:size-auto sm:px-3' : 'px-3'}`}>
+          <CircleUserRound size={17} aria-hidden="true" />
+          <span className={compactOnMobile ? 'hidden sm:inline' : undefined}>Account</span>
         </Link>
-        {accountState === 'unavailable' ? <button type="button" onClick={() => setRetryKey((key) => key + 1)} className="min-h-10 rounded-lg px-3 text-xs text-slate-400 hover:text-cyan-200">Retry account status</button> : null}
+        {accountState === 'unavailable' && !compactOnMobile ? <button type="button" onClick={() => setRetryKey((key) => key + 1)} className="min-h-10 rounded-lg px-3 text-xs text-slate-400 hover:text-cyan-200">Retry account status</button> : null}
       </div>
     );
   }
 
   if (accountState === 'anonymous' || !account) {
+    if (compactOnMobile) {
+      return (
+        <div ref={root} className="relative">
+          <button ref={trigger} type="button" aria-controls={open ? menuId : undefined} aria-expanded={open} aria-label="Sign in or create an account" title="Sign in or create an account" onClick={() => setOpen((value) => !value)} className="grid size-10 place-items-center rounded-lg border border-[#253451] text-slate-200 hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
+            <CircleUserRound size={19} aria-hidden="true" />
+          </button>
+          {open ? <nav id={menuId} aria-label="Account access" className="absolute right-0 z-50 mt-2 w-52 rounded-xl border border-[#20304b] bg-[#080f20] p-2 shadow-2xl">
+            <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/login">Sign in</Link>
+            <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center rounded-lg bg-gradient-to-r from-blue-500/15 to-violet-600/15 px-3 text-sm text-cyan-100 hover:bg-[#13213a]" href="/register">Create account</Link>
+          </nav> : null}
+        </div>
+      );
+    }
     return (
       <div className={`flex items-center gap-2 ${compact ? 'flex-col items-stretch' : ''}`}>
         <Link href="/login" className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-[#253451] px-3 text-xs text-slate-200 hover:border-cyan-400">
@@ -117,12 +131,12 @@ export default function CustomerAccountMenu({ compact = false, iconOnly = false,
     .join('') || 'P';
   return (
     <div ref={root} className="relative">
-      <button ref={trigger} type="button" aria-controls={open ? menuId : undefined} aria-expanded={open} aria-label={`Account menu for ${account.display_name || account.email}`} title="Open account menu" onClick={() => setOpen((value) => !value)} className={`inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#253451] text-xs text-slate-200 hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${iconOnly ? 'size-10 justify-center p-1' : 'px-3'}`}>
+      <button ref={trigger} type="button" aria-controls={open ? menuId : undefined} aria-expanded={open} aria-label={`Account menu for ${account.display_name || account.email}`} title="Open account menu" onClick={() => setOpen((value) => !value)} className={`inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#253451] text-xs text-slate-200 hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${compactOnMobile ? 'size-10 justify-center p-1 sm:size-auto sm:px-3 sm:py-0' : 'px-3'}`}>
         <span className="grid size-6 place-items-center rounded-full bg-cyan-400/15 font-semibold text-cyan-200" aria-hidden="true">{initials}</span>
-        {!iconOnly ? <span className={compact ? 'max-w-32 truncate' : 'max-w-36 truncate'}>{account.display_name || 'My account'}</span> : null}
-        {!iconOnly ? <ChevronDown size={14} aria-hidden="true" /> : null}
+        <span className={`${compact ? 'max-w-32' : 'max-w-36'} truncate ${compactOnMobile ? 'hidden sm:inline' : ''}`}>{account.display_name || 'My account'}</span>
+        <ChevronDown size={14} aria-hidden="true" className={compactOnMobile ? 'hidden sm:inline' : undefined} />
       </button>
-      {open ? <nav id={menuId} aria-label="Customer account menu" className={`absolute z-50 w-60 rounded-xl border border-[#20304b] bg-[#080f20] p-2 shadow-2xl ${dropup ? 'bottom-full right-0 mb-2' : 'right-0 mt-2'} ${compact ? 'left-0 right-auto' : ''}`}>
+      {open ? <nav id={menuId} aria-label="Customer account menu" className={`absolute right-0 z-50 mt-2 w-60 rounded-xl border border-[#20304b] bg-[#080f20] p-2 shadow-2xl ${compact ? 'left-0 right-auto' : ''}`}>
         <p className="truncate px-3 py-2 text-xs text-slate-500">{account.email}</p>
         <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account"><CircleUserRound size={16} />My Account</Link>
         <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/orders"><Package size={16} />My Orders</Link>

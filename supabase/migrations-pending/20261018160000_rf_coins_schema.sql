@@ -178,9 +178,9 @@ CREATE TRIGGER rf_coin_ledger_no_mutation
   BEFORE UPDATE OR DELETE ON rf_coin_ledger
   FOR EACH ROW EXECUTE FUNCTION rf_coin_ledger_append_only();
 
--- Lock down the trigger helper: SECURITY DEFINER functions default to
--- EXECUTE for PUBLIC, which would let any client run it directly.
-REVOKE ALL ON FUNCTION rf_coin_ledger_append_only() FROM PUBLIC;
+-- Lock down direct RPC execution even when project-level default ACLs grant
+-- new functions to browser roles. Trigger invocation remains intact.
+REVOKE ALL ON FUNCTION rf_coin_ledger_append_only() FROM PUBLIC, anon, authenticated;
 
 -- ============ PACKAGES ============
 CREATE TABLE IF NOT EXISTS rf_coin_packages (
@@ -286,9 +286,9 @@ CREATE TRIGGER rf_coin_audit_no_mutation
   BEFORE UPDATE OR DELETE ON rf_coin_admin_audit
   FOR EACH ROW EXECUTE FUNCTION rf_coin_audit_append_only();
 
--- Lock down the trigger helper: SECURITY DEFINER functions default to
--- EXECUTE for PUBLIC, which would let any client run it directly.
-REVOKE ALL ON FUNCTION rf_coin_audit_append_only() FROM PUBLIC;
+-- Lock down direct RPC execution even when project-level default ACLs grant
+-- new functions to browser roles. Trigger invocation remains intact.
+REVOKE ALL ON FUNCTION rf_coin_audit_append_only() FROM PUBLIC, anon, authenticated;
 
 -- ============ payment_transactions compatibility for coin top-ups ============
 -- The live table has: id, order_id, idempotency_key, provider_name,

@@ -181,6 +181,15 @@ BEGIN
     RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_TOPUP_NOT_FOUND'::text; RETURN;
   END IF;
 
+  -- The service-side webhook must present the provider reference recorded for
+  -- this exact top-up. This prevents a valid event for another payment from
+  -- being attached to a customer-controlled top-up id.
+  IF p_provider_reference IS NULL
+     OR t.provider_reference IS NULL
+     OR p_provider_reference <> t.provider_reference THEN
+    RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_PROVIDER_REFERENCE_MISMATCH'::text; RETURN;
+  END IF;
+
   IF t.status = 'PAID' AND t.credited_at IS NOT NULL THEN
     SELECT balance_coins INTO v_balance FROM rf_coin_wallets WHERE user_id = t.user_id;
     RETURN QUERY SELECT true, v_balance, NULL::text; RETURN; -- already settled
@@ -250,6 +259,11 @@ BEGIN
   SELECT * INTO t FROM rf_coin_topups WHERE id = p_topup_id FOR UPDATE;
   IF NOT FOUND THEN
     RETURN QUERY SELECT false, 'RF_COIN_TOPUP_NOT_FOUND'::text; RETURN;
+  END IF;
+  IF p_provider_reference IS NULL
+     OR t.provider_reference IS NULL
+     OR p_provider_reference <> t.provider_reference THEN
+    RETURN QUERY SELECT false, 'RF_COIN_PROVIDER_REFERENCE_MISMATCH'::text; RETURN;
   END IF;
   IF t.status = p_status THEN
     RETURN QUERY SELECT true, NULL::text; RETURN; -- idempotent
@@ -1048,26 +1062,26 @@ $atomic$;
 -- SECURITY DEFINER functions default to EXECUTE for PUBLIC; revoke that and
 -- grant deliberately. Never a blanket revoke across the whole schema, which
 -- would break the existing public RPCs (create_order, verify_payment, ...).
-REVOKE ALL ON FUNCTION rf_coin_assert_super_admin() FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_get_settings() FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_get_or_create_wallet(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_create_topup(uuid, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_credit_paid_topup(uuid, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_mark_topup_status(uuid, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION rf_coin_assert_super_admin() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_get_settings() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_get_or_create_wallet(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_create_topup(uuid, uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_credit_paid_topup(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_mark_topup_status(uuid, text, text) FROM PUBLIC, anon, authenticated;
 -- Legacy direct settlement is locked down (Codex review): the atomic
 -- settle+enqueue wrapper is the ONLY customer entry point, so a settled
 -- order can never bypass its fulfillment handoff enqueue.
 REVOKE ALL ON FUNCTION rf_coin_settle_order_payment(uuid, uuid)
   FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_release_order_payment(uuid, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_request_adjustment(uuid, text, integer, text, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_decide_adjustment(uuid, boolean, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_set_settings(boolean, boolean, boolean, integer, integer, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_upsert_package(uuid, text, integer, integer, integer, boolean, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_enqueue_fulfillment(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_claim_fulfillment_handoffs(integer, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_release_order_payment(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_request_adjustment(uuid, text, integer, text, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_decide_adjustment(uuid, boolean, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_set_settings(boolean, boolean, boolean, integer, integer, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_upsert_package(uuid, text, integer, integer, integer, boolean, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_enqueue_fulfillment(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_claim_fulfillment_handoffs(integer, integer) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
 -- Customer-callable functions (identity checked against auth.uid() inside).
 GRANT EXECUTE ON FUNCTION rf_coin_create_topup(uuid, uuid) TO authenticated;

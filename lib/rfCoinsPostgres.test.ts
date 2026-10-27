@@ -402,7 +402,11 @@ describe('rf coins real SQL behavior', () => {
     const topupId = created[0].out_topup_id;
     await resetRole();
 
+    await sql(`UPDATE rf_coin_topups SET provider_reference = 'pay-ref-1' WHERE id = $1`, [topupId]);
     await asRole('service_role');
+    const mismatched = await sql<{ out_error: string | null }>(
+      `SELECT * FROM rf_coin_credit_paid_topup($1, 'different-payment')`, [topupId]);
+    expect(mismatched[0].out_error).toBe('RF_COIN_PROVIDER_REFERENCE_MISMATCH');
     const c1 = await sql<{ out_credited: boolean; out_error: string | null }>(
       `SELECT * FROM rf_coin_credit_paid_topup($1, 'pay-ref-1')`, [topupId]);
     const c2 = await sql<{ out_credited: boolean; out_error: string | null }>(
@@ -421,13 +425,16 @@ describe('rf coins real SQL behavior', () => {
     await createWallet(CUSTOMER2, 100);
     const topup = await sql<{ id: string; credited_total: string }>(
       `INSERT INTO rf_coin_topups (user_id, package_id, coins, bonus_coins, price_cents,
-         status, idempotency_key, credited_at, credited_total)
-       VALUES ($1, NULL, 900, 100, 90000, 'PAID', 'test-reversal-topup-1', now(), 1000)
+         status, idempotency_key, provider_reference, credited_at, credited_total)
+       VALUES ($1, NULL, 900, 100, 90000, 'PAID', 'test-reversal-topup-1', 'ref-1', now(), 1000)
        RETURNING id, credited_total`, [CUSTOMER2]);
     const topupId = topup[0].id;
     expect(Number(topup[0].credited_total)).toBe(1000);
 
     await asRole('service_role');
+    const wrongRef = await sql<{ out_error: string | null }>(
+      `SELECT * FROM rf_coin_mark_topup_status($1, 'REFUNDED', 'other-ref')`, [topupId]);
+    expect(wrongRef[0].out_error).toBe('RF_COIN_PROVIDER_REFERENCE_MISMATCH');
     // First refund attempt: only 100 reversible → partial, stays REFUND_PENDING.
     const r1 = await sql<{ out_ok: boolean; out_error: string | null }>(
       `SELECT * FROM rf_coin_mark_topup_status($1, 'REFUNDED', 'ref-1')`, [topupId]);

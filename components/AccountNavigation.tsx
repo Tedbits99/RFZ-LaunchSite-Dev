@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { CircleUserRound, Package, ShieldCheck, WalletCards } from 'lucide-react';
 import CustomerAccountMenu from '@/components/CustomerAccountMenu';
+import ThemeSelector from '@/components/ThemeSelector';
 
 const links = [
   { href: '/account', label: 'Overview', icon: CircleUserRound, exact: true },
@@ -53,11 +54,23 @@ export default function AccountNavigation() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[#14203a] bg-[#050a1b]/95 px-4 py-2.5 backdrop-blur lg:hidden">
-        <Link href="/" aria-label="RunFazone home" className="inline-flex min-h-10 items-center">
-          <Image src="/runfazone-logo.png" alt="RunFazone" width={160} height={44} priority className="h-7 w-auto max-w-32 object-contain" />
-        </Link>
-        <CustomerAccountMenu iconOnly />
+      <header className="sticky top-0 z-40 border-b border-[#14203a] bg-[#050a1b]/95 backdrop-blur">
+        <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-2 lg:px-8">
+          <div className="min-w-0">
+            <Link href="/" aria-label="RunFazone home" className="inline-flex min-h-10 items-center lg:hidden">
+              <Image src="/runfazone-logo.png" alt="RunFazone" width={160} height={44} priority className="h-7 w-auto max-w-32 object-contain" />
+            </Link>
+            <div className="hidden items-center gap-2 text-xs lg:flex">
+              <Link href="/" className="text-cyan-300 hover:text-cyan-200">← Store</Link>
+              <span aria-hidden="true" className="text-slate-600">/</span>
+              <span className="text-slate-400">Customer account</span>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <CustomerAccountMenu compactOnMobile />
+            <ThemeSelector />
+          </div>
+        </div>
       </header>
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[#14203a] bg-[#050a1b] px-4 py-6 lg:flex">
@@ -72,9 +85,6 @@ export default function AccountNavigation() {
             <span>Guest order tracking</span>
           </Link>
         </nav>
-        <div className="mt-auto">
-          <CustomerAccountMenu dropup />
-        </div>
       </aside>
     </>
   );

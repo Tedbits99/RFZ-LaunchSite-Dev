@@ -270,6 +270,7 @@ Deno.serve(async (req: Request) => {
       provider_name: "paymongo",
       action: "create",
       amount_cents: priceCents,
+      currency,
       status: "pending",
       provider_reference: intentId,
       expires_at: expiresAt,

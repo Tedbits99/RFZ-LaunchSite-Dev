@@ -1,5 +1,10 @@
 // v2: transactional email integration
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  extractPayMongoPaymentSnapshot,
+  extractPayMongoProviderReference,
+  payMongoPaymentMatchesSnapshot,
+} from "../_shared/paymongoWebhookValidation.ts";
 
 /*
   PayMongo webhook processor + fulfillment trigger + transactional email.
@@ -155,6 +160,7 @@ interface WebhookOutcome {
   providerReference: string | null;
   status: string;
   amountCents: number | null;
+  currency: string | null;
   rawPayload: Record<string, unknown> | null;
   error: string | null;
 }
@@ -176,7 +182,7 @@ async function validatePayMongoWebhook(
 ): Promise<WebhookOutcome> {
   // Fail closed: an unverifiable webhook must never be accepted.
   if (!secret || !sigHeader) {
-    return { orderId: null, providerReference: null, status: "", amountCents: null, rawPayload: null, error: "Webhook signature missing or webhook secret not configured" };
+    return { orderId: null, providerReference: null, status: "", amountCents: null, currency: null, rawPayload: null, error: "Webhook signature missing or webhook secret not configured" };
   }
   const parts = sigHeader.split(",").reduce((acc: Record<string, string>, p) => {
     const [k, v] = p.split("=");
@@ -186,18 +192,18 @@ async function validatePayMongoWebhook(
   const ts = parts["t"];
   const sigToVerify = isTestMode ? parts["te"] : parts["li"];
   if (!ts || !sigToVerify) {
-    return { orderId: null, providerReference: null, status: "", amountCents: null, rawPayload: null, error: "Malformed PayMongo signature header" };
+    return { orderId: null, providerReference: null, status: "", amountCents: null, currency: null, rawPayload: null, error: "Malformed PayMongo signature header" };
   }
   const computed = await hmacSha256Hex(secret, `${ts}.${body}`);
   if (computed !== sigToVerify) {
-    return { orderId: null, providerReference: null, status: "", amountCents: null, rawPayload: null, error: "Invalid PayMongo webhook signature" };
+    return { orderId: null, providerReference: null, status: "", amountCents: null, currency: null, rawPayload: null, error: "Invalid PayMongo webhook signature" };
   }
 
   let parsed: Record<string, any>;
   try {
     parsed = JSON.parse(body);
   } catch {
-    return { orderId: null, providerReference: null, status: "", amountCents: null, rawPayload: null, error: "Could not parse webhook body" };
+    return { orderId: null, providerReference: null, status: "", amountCents: null, currency: null, rawPayload: null, error: "Could not parse webhook body" };
   }
   const eventType = parsed?.data?.attributes?.type || "";
   const resource = parsed?.data?.attributes?.data || {};
@@ -208,16 +214,15 @@ async function validatePayMongoWebhook(
   else if (eventType.includes("payment.failed")) status = "FAILED";
   else if (eventType.includes("checkout_session.payment.paid")) status = "PAID";
 
-  let providerRef = resource.id ?? null;
-  if (Array.isArray(attrs.payments) && attrs.payments.length > 0 && attrs.payments[0]?.id) {
-    providerRef = attrs.payments[0].id;
-  }
+  const providerRef = extractPayMongoProviderReference(eventType, resource.id, attrs);
+  const paymentSnapshot = extractPayMongoPaymentSnapshot(attrs);
 
   return {
     orderId: pmMeta.order_id || null,
     providerReference: providerRef,
     status,
-    amountCents: attrs.amount ?? null,
+    amountCents: paymentSnapshot.amountCents,
+    currency: paymentSnapshot.currency,
     rawPayload: parsed,
     error: null,
   };
@@ -598,19 +603,44 @@ Deno.serve(async (req: Request) => {
     // ---- RF Coins top-up settlement branch (exact-once crediting) ----
     if (coinTopupId && !orderId) {
       if (result.status === "PAID") {
-        // Amount check: paid cents must match the top-up's snapshotted price.
         const { data: topup } = await supabase
           .from("rf_coin_topups")
-          .select("price_cents, status")
+          .select("price_cents, status, provider_reference")
           .eq("id", coinTopupId)
           .maybeSingle();
         if (!topup) return json({ received: true, message: "Top-up not found" }, 200);
-        if (result.amountCents != null && result.amountCents !== (topup as any).price_cents) {
-          return json({ received: true, message: "Top-up amount mismatch" }, 400);
+
+        const { data: paymentSession, error: paymentSessionError } = await supabase
+          .from("payment_transactions")
+          .select("amount_cents, currency, status, provider_reference")
+          .eq("rf_coin_topup_id", coinTopupId)
+          .eq("provider_name", "paymongo")
+          .eq("action", "create")
+          .maybeSingle();
+        if (paymentSessionError || !paymentSession) {
+          return json({ error: "Matching top-up payment session was not found." }, 409);
+        }
+        if (
+          (paymentSession as any).status !== "pending" && (paymentSession as any).status !== "processing"
+        ) {
+          return json({ received: true, message: "Top-up payment session is not pending" }, 409);
+        }
+        if (
+          !result.providerReference ||
+          result.providerReference !== (paymentSession as any).provider_reference ||
+          result.providerReference !== (topup as any).provider_reference ||
+          (paymentSession as any).amount_cents !== (topup as any).price_cents ||
+          !payMongoPaymentMatchesSnapshot(
+            result,
+            (paymentSession as any).amount_cents,
+            (paymentSession as any).currency,
+          )
+        ) {
+          return json({ received: true, message: "Top-up amount, currency, or payment reference mismatch" }, 400);
         }
         const { data: credit, error: creditError } = await supabase.rpc("rf_coin_credit_paid_topup", {
           p_topup_id: coinTopupId,
-          p_provider_reference: result.providerReference,
+          p_provider_reference: (paymentSession as any).provider_reference,
         });
         if (creditError) return json({ error: "Coin crediting failed" }, 500);
         const creditRow = Array.isArray(credit) ? credit[0] : credit;
@@ -639,40 +669,6 @@ Deno.serve(async (req: Request) => {
 
     if (!orderId) {
       return json({ received: true, message: "Order not found for webhook" }, 200);
-    }
-
-    // Idempotency: unique key on payment_transactions backs this up.
-    const idempotencyKey = `webhook_${orderId}_${result.providerReference || "none"}_${result.status}`;
-    const { data: existingTx } = await supabase
-      .from("payment_transactions")
-      .select("id")
-      .eq("idempotency_key", idempotencyKey)
-      .maybeSingle();
-    if (existingTx) {
-      return json({ received: true, message: "Already processed" }, 200);
-    }
-
-    // Log the webhook transaction.
-    const webhookEventId = (result.rawPayload as any)?.data?.id || null;
-    const { error: insertError } = await supabase.from("payment_transactions").insert({
-      order_id: orderId,
-      idempotency_key: idempotencyKey,
-      provider_name: matchedConfig.provider_name,
-      provider_reference: result.providerReference || null,
-      action: "webhook",
-      status: result.status === "PAID" ? "paid" : result.status === "FAILED" ? "failed" : result.status === "EXPIRED" ? "expired" : result.status === "REFUNDED" ? "refunded" : "processing",
-      amount_cents: result.amountCents || 0,
-      currency: matchedConfig.currency || "PHP",
-      webhook_payload: result.rawPayload,
-      webhook_event_id: webhookEventId,
-    });
-    if (insertError) {
-      // Unique violation on concurrent duplicate = already processed.
-      const msg = String((insertError as any).message || "");
-      if (msg.includes("duplicate key") || msg.includes("unique")) {
-        return json({ received: true, message: "Already processed" }, 200);
-      }
-      return json({ error: "Could not log webhook." }, 500);
     }
 
     const { data: order } = await supabase
@@ -709,10 +705,65 @@ Deno.serve(async (req: Request) => {
     }
 
     if (targetStatus === "PAID") {
-      // Amount check: the paid amount must match the order total exactly.
-      if (result.amountCents != null && result.amountCents !== (order as any).total_cents) {
-        return json({ received: true, message: `Amount mismatch: paid ${result.amountCents}, expected ${(order as any).total_cents}` }, 400);
+      // The create-payment row is the immutable currency/amount snapshot for
+      // this order. Never infer a missing provider value from current config.
+      const { data: paymentSession, error: paymentSessionError } = await supabase
+        .from("payment_transactions")
+        .select("amount_cents, currency, status")
+        .eq("order_id", orderId)
+        .eq("provider_name", matchedConfig.provider_name)
+        .eq("action", "create")
+        .in("status", ["pending", "processing"])
+        .maybeSingle();
+      if (paymentSessionError || !paymentSession) {
+        return json({ error: "Matching payment session was not found." }, 409);
       }
+      if (
+        (paymentSession as any).amount_cents !== (order as any).total_cents ||
+        !payMongoPaymentMatchesSnapshot(
+          result,
+          (paymentSession as any).amount_cents,
+          (paymentSession as any).currency,
+        )
+      ) {
+        return json({ received: true, message: "Payment amount or currency mismatch" }, 400);
+      }
+    }
+
+    // Idempotency is recorded only after the paid-event snapshot has passed
+    // validation, so a malformed event cannot poison a later valid delivery.
+    const idempotencyKey = `webhook_${orderId}_${result.providerReference || "none"}_${result.status}`;
+    const { data: existingTx } = await supabase
+      .from("payment_transactions")
+      .select("id")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    if (existingTx) {
+      return json({ received: true, message: "Already processed" }, 200);
+    }
+
+    const webhookEventId = (result.rawPayload as any)?.data?.id || null;
+    const { error: insertError } = await supabase.from("payment_transactions").insert({
+      order_id: orderId,
+      idempotency_key: idempotencyKey,
+      provider_name: matchedConfig.provider_name,
+      provider_reference: result.providerReference || null,
+      action: "webhook",
+      status: result.status === "PAID" ? "paid" : result.status === "FAILED" ? "failed" : result.status === "EXPIRED" ? "expired" : result.status === "REFUNDED" ? "refunded" : "processing",
+      amount_cents: result.amountCents ?? 0,
+      currency: result.currency || matchedConfig.currency || "PHP",
+      webhook_payload: result.rawPayload,
+      webhook_event_id: webhookEventId,
+    });
+    if (insertError) {
+      const msg = String((insertError as any).message || "");
+      if (msg.includes("duplicate key") || msg.includes("unique")) {
+        return json({ received: true, message: "Already processed" }, 200);
+      }
+      return json({ error: "Could not log webhook." }, 500);
+    }
+
+    if (targetStatus === "PAID") {
 
       // verify_payment is idempotent; service role passes the operator guard.
       const { error: verifyError } = await supabase.rpc("verify_payment", {

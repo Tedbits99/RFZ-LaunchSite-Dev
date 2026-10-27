@@ -74,6 +74,14 @@ describe('GET /api/account/wallet', () => {
     expect(mocks.walletMaybeSingle).not.toHaveBeenCalled();
   });
 
+  it('does not call an unseeded settings row a deployed or working wallet', async () => {
+    mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ enabled: false, walletStatus: 'not_configured', wallet: null });
+    expect(mocks.walletMaybeSingle).not.toHaveBeenCalled();
+  });
+
   it('fails closed if wallet settings exist but the wallet relation is missing', async () => {
     mocks.settingsMaybeSingle.mockResolvedValueOnce({
       data: { enabled: true, topups_enabled: false, spending_enabled: true, centavos_per_coin: 100 },

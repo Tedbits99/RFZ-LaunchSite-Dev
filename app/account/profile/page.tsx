@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, CheckCircle2 } from 'lucide-react';
 import AccountFooter from '@/components/account/AccountFooter';
-import ThemeSelector from '@/components/ThemeSelector';
 
 type PageState = 'loading' | 'idle' | 'pending' | 'saved' | 'load-error' | 'save-error';
 
@@ -76,7 +75,6 @@ export default function AccountProfile() {
 
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-4"><a href="/account" className="text-xs text-cyan-300">← Account</a><ThemeSelector /></div></header>
       <div className="mx-auto max-w-2xl px-5 py-10">
         <nav className="flex items-center gap-2 text-xs text-slate-500"><Link href="/account">Account</Link><ChevronRight size={12} /><span className="text-slate-300">Profile</span></nav>
         <h1 className="font-display mt-4 text-2xl font-bold">Profile Settings</h1>

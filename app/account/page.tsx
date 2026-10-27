@@ -3,7 +3,6 @@ import AccountFooter from '@/components/account/AccountFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
-import ThemeSelector from '@/components/ThemeSelector';
 import { getCustomerLoginUrl } from '@/lib/authRedirect';
 import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 import { summarizeAccountOrders } from '@/lib/accountOrderSummary';
@@ -46,7 +45,6 @@ export default async function Account() {
 
   return (
     <main className="rfz-account-page min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto flex max-w-[1180px] items-center justify-between gap-4 px-5 py-4"><a href="/" className="text-xs text-cyan-300">← Back to store</a><ThemeSelector /></div></header>
       <div className="mx-auto max-w-[1180px] px-5 py-10">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs uppercase tracking-[.18em] text-cyan-300">RunFazone Command Center</p><h1 className="font-display mt-2 text-3xl font-bold">Welcome back, {displayName}</h1><p className="mt-2 break-all text-sm text-slate-400">{email} <span className="ml-2 inline-flex items-center gap-1 text-emerald-300"><span aria-hidden="true">✓</span> Verified</span></p></div><a href="/#games" className="inline-flex min-h-11 items-center justify-center rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-4 text-sm font-semibold">Browse games</a></div>
         <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
