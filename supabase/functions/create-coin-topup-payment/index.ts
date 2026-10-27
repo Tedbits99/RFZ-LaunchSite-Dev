@@ -97,9 +97,9 @@ Deno.serve(async (req: Request) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || SERVICE_KEY;
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
     const PAYMONGO_SECRET = Deno.env.get("PAYMENT_PAYMONGO_SECRET_KEY");
-    if (!SUPABASE_URL || !SERVICE_KEY || !PAYMONGO_SECRET) {
+    if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY || !PAYMONGO_SECRET) {
       return json({ error: "Service unavailable." }, 503);
     }
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
