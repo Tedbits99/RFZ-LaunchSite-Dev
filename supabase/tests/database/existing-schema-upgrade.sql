@@ -3,13 +3,21 @@
 -- Assertions unique to the legacy-to-current upgrade runner. This file runs
 -- after the 11-migration hosted baseline and the reviewed post-baseline
 -- sequence, never against the hosted project.
+SELECT set_config('rfz.expected_migration_count', :'expected_migration_count', false);
 
 DO $$
 DECLARE
   v_policy_count integer;
   v_search_path text[];
+  v_expected_migration_count integer;
 BEGIN
-  IF (SELECT count(*) FROM supabase_migrations.schema_migrations) <> 99 THEN
+  v_expected_migration_count := NULLIF(
+    current_setting('rfz.expected_migration_count', true), ''
+  )::integer;
+
+  IF v_expected_migration_count IS NULL
+     OR (SELECT count(*) FROM supabase_migrations.schema_migrations)
+        <> v_expected_migration_count THEN
     RAISE EXCEPTION 'UPGRADE_MIGRATION_COUNT_INVALID';
   END IF;
 
