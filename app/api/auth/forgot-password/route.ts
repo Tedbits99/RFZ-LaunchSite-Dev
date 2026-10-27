@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
-import { getConfiguredAppOrigin } from '@/lib/authRedirect';
+import { getAuthCallbackUrl, getConfiguredAppOrigin } from '@/lib/authRedirect';
 import { validateEmailInput } from '@/lib/authValidation';
 import { logAuthFlowFailure } from '@/lib/authFlowDiagnostics';
 
@@ -44,7 +44,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const redirectTo = `${getConfiguredAppOrigin()}/auth/callback?type=recovery`;
+    // Supabase's recovery email template owns the query string and appends
+    // token_hash/type to this exact, trusted callback URL. Keep RedirectTo
+    // query-free so the rendered href can never depend on ? versus & state.
+    const redirectTo = getAuthCallbackUrl();
+    if (!redirectTo) return json({ error: GENERIC_503 }, 503);
     const { error } = await client.auth.resetPasswordForEmail(validation.value, { redirectTo });
     if (error) {
       logAuthFlowFailure('password_recovery', 'email_provider', error);
