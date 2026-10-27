@@ -20,6 +20,26 @@ BEGIN
     RAISE EXCEPTION 'HOSTED_SERVICE_ROLE_ADMINS_TABLE_SELECT_MISSING';
   END IF;
 
+  IF NOT has_column_privilege('anon', 'public.games', 'name', 'SELECT')
+     OR NOT has_column_privilege('authenticated', 'public.games', 'name', 'SELECT')
+     OR NOT has_column_privilege('anon', 'public.games', 'is_active', 'SELECT')
+     OR NOT has_column_privilege('authenticated', 'public.games', 'is_active', 'SELECT') THEN
+    RAISE EXCEPTION 'HOSTED_PUBLIC_GAME_CATALOG_SELECT_MISSING';
+  END IF;
+  IF NOT has_column_privilege('anon', 'public.packages', 'name', 'SELECT')
+     OR NOT has_column_privilege('authenticated', 'public.packages', 'amount', 'SELECT')
+     OR NOT has_column_privilege('authenticated', 'public.packages', 'is_active', 'SELECT') THEN
+    RAISE EXCEPTION 'HOSTED_PUBLIC_PACKAGE_CATALOG_SELECT_MISSING';
+  END IF;
+  IF has_column_privilege('anon', 'public.packages', 'supplier_cost_usd', 'SELECT')
+     OR has_column_privilege('authenticated', 'public.packages', 'supplier_cost_usd', 'SELECT')
+     OR has_column_privilege('anon', 'public.packages', 'supplier_offer_id', 'SELECT')
+     OR has_column_privilege('authenticated', 'public.packages', 'supplier_offer_id', 'SELECT')
+     OR has_column_privilege('anon', 'public.packages', 'markup_percent', 'SELECT')
+     OR has_column_privilege('authenticated', 'public.packages', 'markup_percent', 'SELECT') THEN
+    RAISE EXCEPTION 'HOSTED_PRIVATE_PACKAGE_CATALOG_COLUMN_EXPOSED';
+  END IF;
+
   FOREACH sensitive_table IN ARRAY ARRAY[
     'customer_profiles', 'orders', 'payment_submissions',
     'payment_transactions', 'refunds', 'supplier_credentials',

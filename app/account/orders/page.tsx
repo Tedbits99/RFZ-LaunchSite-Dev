@@ -6,6 +6,7 @@ import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
 import ThemeSelector from '@/components/ThemeSelector';
 import { getCustomerLoginUrl } from '@/lib/authRedirect';
+import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,7 +57,7 @@ export default async function AccountOrders({ searchParams }: { searchParams: Pr
         <p className="mt-2 text-sm text-slate-400">View your order history and track status.</p>
 
         {error ? (
-          <div className="mt-6 rounded-xl border border-rose-400/30 bg-rose-400/5 p-6 text-sm text-rose-200" role="alert">Your order history could not be loaded. Refresh the page to try again.</div>
+          <div className="mt-6 rounded-xl border border-rose-400/30 bg-rose-400/5 p-6 text-sm text-rose-200" role="alert"><p>Your order history could not be loaded. Your account data has not been changed.</p><RetryServerDataButton /></div>
         ) : orders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6 text-center text-sm text-slate-500">
             <Package className="mx-auto mb-2 text-slate-700" size={24} />

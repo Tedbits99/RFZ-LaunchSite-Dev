@@ -7,6 +7,7 @@ import { ChevronRight, CheckCircle2, Clock, XCircle, Circle, RefreshCw } from 'l
 import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
 import SiteFooter from '@/components/SiteFooter';
 import { getOrderPresentation } from '@/lib/orderPresentation';
+import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 
 type Order = {
   id: string;
@@ -82,12 +83,15 @@ const LOG_PREFIX = '[OrderStatus]';
 export default function AccountOrderDetailClient({
   order: initialOrder,
   timeline: initialTimeline,
+  timelineUnavailable: initialTimelineUnavailable,
 }: {
   order: Order;
   timeline: TimelineEntry[];
+  timelineUnavailable: boolean;
 }) {
   const [order, setOrder] = useState(initialOrder);
   const [timeline, setTimeline] = useState(initialTimeline);
+  const [timelineUnavailable, setTimelineUnavailable] = useState(initialTimelineUnavailable);
   const [refreshing, setRefreshing] = useState(false);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<string>('connecting');
@@ -124,7 +128,10 @@ export default function AccountOrderDetailClient({
           updated_at: data.updated_at || prev.updated_at,
         } : prev);
       }
-      if (data.timeline) setTimeline(data.timeline);
+      if (data.timeline) {
+        setTimeline(data.timeline);
+        setTimelineUnavailable(false);
+      }
       setLastPolledAt(new Date().toISOString());
     } catch (err) {
       console.log(LOG_PREFIX, 'poll error:', err instanceof Error ? err.message : 'unknown');
@@ -324,7 +331,8 @@ export default function AccountOrderDetailClient({
           </div>
         )}
 
-        {timeline.length > 0 && (
+        {timelineUnavailable ? <div className="mt-5 rounded-xl border border-amber-400/25 bg-amber-400/5 p-5 text-sm text-amber-100" role="status"><p>Order events are temporarily unavailable; the current order status above is still shown.</p><RetryServerDataButton label="Retry order events" /></div> : null}
+        {!timelineUnavailable && timeline.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6">
             <h2 className="font-display text-sm font-semibold mb-4">Order Timeline</h2>
             <div className="space-y-3">

@@ -40,7 +40,7 @@ export default function Home() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [catalogFilter, setCatalogFilter] = useState<StorefrontCatalogFilter>('all');
 
-  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('*').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => { /* Homepage remains usable with its empty catalog state. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
+  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('id, slug, name, short_name, description, is_featured, sort_order').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => { /* Homepage remains usable with its empty catalog state. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
   useEffect(() => {
     try {
       const client = db();

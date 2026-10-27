@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { adminSupabase } from '@/lib/supabaseAdmin';
 import { notFound } from 'next/navigation';
 import GameTopUp from './GameTopUp';
 
@@ -26,12 +27,16 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function GamePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   if (!supabase) return <div className="grid min-h-screen place-items-center bg-[#030718] text-slate-400">Database not configured.</div>;
-  const { data: game } = await supabase.from('games').select('*').eq('slug', slug).eq('is_active', true).maybeSingle();
+  const { data: game } = await supabase.from('games')
+    .select('id, slug, name, description, region, currency, banner_url, logo_url')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .maybeSingle();
   if (!game) notFound();
   const { data: fields } = await supabase.from('game_input_fields').select('*').eq('game_id', game.id).order('sort_order');
   const { data: packages } = await supabase
     .from('packages')
-    .select('id, name, amount, price_cents, original_price_cents, bonus, sort_order, badge, image_url, supplier_offer_id, supplier_category_id')
+    .select('id, name, amount, price_cents, original_price_cents, bonus, sort_order, badge, image_url')
     .eq('game_id', game.id)
     .eq('is_active', true)
     .gt('price_cents', 0)
@@ -68,17 +73,31 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     const normalizedName = pkg.name.toLowerCase();
     return normalizedName === 'weekly diamond pass' || normalizedName === 'twilight pass' || normalizedName.includes('first top-up bonus');
   };
-  let customerPackages: CustomerPackage[] = packageRecords.map(({ supplier_offer_id: _offerId, supplier_category_id: _categoryId, ...customerPackage }) => customerPackage);
+  let customerPackages: CustomerPackage[] = packageRecords;
   if (game.slug === 'mobile-legends' || game.slug === 'mlbb') {
-    const { data: supplier } = await supabase
+    // Supplier mappings and offer identifiers are internal configuration.
+    // Read them only with the server-side service client; never ask the public
+    // catalog key for those columns or pass them to the browser.
+    const { data: supplierPackages, error: supplierPackagesError } = adminSupabase && packageRecords.length
+      ? await adminSupabase.from('packages')
+        .select('id, supplier_offer_id, supplier_category_id')
+        .in('id', packageRecords.map((pkg) => pkg.id))
+      : { data: [], error: null };
+    const supplierPackageById = new Map(
+      (supplierPackages || []).map((pkg) => [pkg.id, pkg]),
+    );
+    const customerPackageById = new Map(packageRecords.map((pkg) => [pkg.id, pkg]));
+    const { data: supplier } = adminSupabase
+      ? await adminSupabase
       .from('suppliers')
       .select('id')
       .eq('code', 'fazercards')
       .eq('enabled', true)
-      .maybeSingle();
+      .maybeSingle()
+      : { data: null };
 
-    if (supplier) {
-      const { data: mappings } = await supabase
+    if (supplier && adminSupabase && !supplierPackagesError) {
+      const { data: mappings } = await adminSupabase
         .from('supplier_package_mappings')
         .select('package_id, supplier_product_id, metadata')
         .eq('supplier_id', supplier.id)
@@ -87,7 +106,7 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
       const validMappingPackageIds = new Set(
         (mappings || [])
           .filter((mapping) => {
-            const pkg = packageRecords.find((candidate) => candidate.id === mapping.package_id);
+            const pkg = supplierPackageById.get(mapping.package_id);
             const metadata = mapping.metadata as { category_id?: string } | null;
             return pkg?.supplier_category_id === 'mobile_legends_philippines'
               && Boolean(pkg.supplier_offer_id)
@@ -97,8 +116,8 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
           .map((mapping) => mapping.package_id),
       );
       customerPackages = customerPackages.filter((pkg) => {
-        const packageRecord = packageRecords.find((candidate) => candidate.id === pkg.id);
-        return packageRecord ? isSpecialPackage(packageRecord) || validMappingPackageIds.has(pkg.id) : false;
+        const customerPackage = customerPackageById.get(pkg.id);
+        return customerPackage ? isSpecialPackage(customerPackage) || validMappingPackageIds.has(pkg.id) : false;
       });
     } else {
       customerPackages = customerPackages.filter((pkg) => {

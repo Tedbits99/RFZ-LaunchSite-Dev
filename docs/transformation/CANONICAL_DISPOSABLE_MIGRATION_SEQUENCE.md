@@ -2,7 +2,7 @@
 
 **Status:** reviewed executable migration manifest for an unlinked disposable Supabase instance and the repository's deployable `supabase/migrations/` directory. This artifact does not alter any historical migration and is not authorization to apply anything to `ketdhcmwowzztcdlmris`.
 
-**Source history:** 118 SQL files are present; **executable:** 99; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
+**Source history:** 119 SQL files are present; **executable:** 100; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
 
 ## Selection rules
 
@@ -11,7 +11,7 @@
 3. The corrected fulfillment, RPC, and slug-based Honor of Kings migrations are the executable replacements for their archived predecessors.
 4. Fail closed if an executable migration contains an external scheduler or HTTP target. Development must have no `pg_cron`, `pg_net`, payment, supplier, SMTP, webhook, or external HTTP activity.
 5. Treat Vault/provider migrations as schema-only with synthetic values; no secrets or external endpoints may be inherited. Verify RLS, grants, `SECURITY DEFINER` authorization, ownership, payment boundaries, supplier reconciliation, receipt outbox, and concurrency after reset.
-6. A fresh-install PASS requires the complete 99-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
+6. A fresh-install PASS requires the complete 100-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
 
 ## Generated file selection
 
@@ -136,6 +136,7 @@
 | 97 | INCLUDE | `20261026053026_fazercards_signed_webhook_inbox.sql` | `56cbfb5d6622067c9280ce36f7232c553514304da7082dae8d0d78a4b3ffe8af` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | signed supplier event inbox, restricted RLS, admin notifications; publication metadata only |
 | 98 | INCLUDE | `20261026120000_admins_select_privilege.sql` | `dce788c276dc804f337ff0f8259bc56c0c477c707d31ab4dd6cee6dc4da667f9` | 97. 20261026053026_fazercards_signed_webhook_inbox.sql | minimum API-role SELECT grant for existing admin RLS; no anonymous access or outbound target |
 | 99 | INCLUDE | `20261026130000_lock_first_admin_bootstrap.sql` | `405e1e03115c394a1ef3c7d496952aa020d8edbc4443039dc67b970330820991` | 98. 20261026120000_admins_select_privilege.sql | revoke client-role execution from legacy first-admin bootstrap; no outbound target |
+| 100 | INCLUDE | `20261027110000_grant_public_catalog_columns.sql` | `ed297e3c69578a0dbf6268e06213e055a200cbc291bccea095fdee1466db852b` | 99. 20261026130000_lock_first_admin_bootstrap.sql | minimum public catalog column grants; RLS still restricts inactive rows; supplier cost/offer/markup columns remain private |
 
 ## Execution gates
 

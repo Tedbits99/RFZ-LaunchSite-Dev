@@ -132,6 +132,23 @@ status="$(request_json GET "$token_a" "$SUPABASE_URL/rest/v1/customer_profiles?s
 status="$(request_json GET "$token_b" "$SUPABASE_URL/rest/v1/customer_profiles?select=user_id&user_id=eq.$user_a")"; expect_zero_or_denied "$status" customer_b_profile_isolation
 status="$(request_json GET "$token_a" "$SUPABASE_URL/rest/v1/orders?select=id,customer_user_id&id=eq.$order_id")"; expect_one "$status" customer_a_order
 status="$(request_json GET "$token_b" "$SUPABASE_URL/rest/v1/orders?select=id,customer_user_id&id=eq.$order_id")"; expect_zero_or_denied "$status" customer_b_order_isolation
+# Exercise the exact PostgREST relationship projection used by account order
+# history. On failure, report only status, API error code, and a safe category;
+# never emit the response body or Auth material into CI logs.
+catalog_embed_status="$(request_json GET "$token_a" "$SUPABASE_URL/rest/v1/orders?select=id,reference,games(name),packages(name,amount)&id=eq.$order_id")"
+if [[ "$catalog_embed_status" != 200 ]] || ! jq -e 'type == "array" and length == 1 and .[0].games != null and .[0].packages != null' "$response_file" >/dev/null; then
+  postgrest_code="$(jq -r '.code // "unknown"' "$response_file" | tr -cd 'A-Za-z0-9_-' | cut -c1-32)"
+  postgrest_message="$(jq -r '.message // ""' "$response_file" | tr '[:upper:]' '[:lower:]')"
+  case "$postgrest_code:$postgrest_message" in
+    *42501*|*permission\ denied*) postgrest_category=permission_denied ;;
+    *PGRST200*|*relationship*) postgrest_category=relationship_resolution ;;
+    *) postgrest_category=postgrest_query_failure ;;
+  esac
+  echo "HOSTED_CUSTOMER_SECURITY_FAIL=owned_order_catalog_embed status=$catalog_embed_status code=$postgrest_code category=$postgrest_category" >&2
+  exit 1
+fi
+echo 'HOSTED_CUSTOMER_ORDER_CATALOG_EMBED_PASS owner_only=true public_fields_only=true'
+status="$(request_json GET "$token_b" "$SUPABASE_URL/rest/v1/orders?select=id,reference,games(name),packages(name,amount)&id=eq.$order_id")"; expect_zero_or_denied "$status" customer_b_order_catalog_embed_isolation
 status="$(request_json GET "$token_b" "$SUPABASE_URL/rest/v1/payment_submissions?select=id&order_id=eq.$order_id")"; expect_zero_or_denied "$status" customer_b_payment_isolation
 status="$(request_json GET "" "$SUPABASE_URL/rest/v1/orders?select=id&id=eq.$order_id")"; expect_zero_or_denied "$status" anonymous_order_denial
 status="$(request_json GET "" "$SUPABASE_URL/rest/v1/customer_profiles?select=user_id&user_id=eq.$user_a")"; expect_zero_or_denied "$status" anonymous_profile_denial
