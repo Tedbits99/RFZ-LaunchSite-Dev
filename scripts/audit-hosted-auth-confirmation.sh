@@ -73,6 +73,7 @@ recovery_confirmation_url=false
 [[ "$recovery_lower" == *confirmationurl* ]] && recovery_confirmation_url=true
 recovery_contract="$(node scripts/lib/auth-recovery-template.mjs validate "$callback_url" <<<"$recovery_template")"
 recovery_url_contract="$(jq -r '.valid == true and .reason == "valid"' <<<"$recovery_contract")"
+recovery_structure="$(node scripts/lib/auth-recovery-template.mjs inspect "$callback_url" <<<"$recovery_template")"
 
 site_origin="$(python3 - "$site_url" <<'PY'
 from urllib.parse import urlsplit
@@ -107,6 +108,7 @@ echo "AUTH_RECOVERY_TEMPLATE_HAS_TOKEN_HASH=$recovery_token_hash"
 echo "AUTH_RECOVERY_TEMPLATE_HAS_REDIRECT_TO=$recovery_redirect_to"
 echo "AUTH_RECOVERY_TEMPLATE_USES_CONFIRMATION_URL=$recovery_confirmation_url"
 echo "AUTH_RECOVERY_TEMPLATE_RENDERED_URL_CONTRACT=$recovery_url_contract"
+echo "AUTH_RECOVERY_TEMPLATE_STRUCTURE=$recovery_structure"
 
 if [[ "$callback_allowed" != true ]]; then
   echo "OWNER_ACTION_REQUIRED: add the exact protected PR${AUTH_PREVIEW_PR} candidate callback or its narrowly scoped wildcard to Supabase Auth redirect URLs." >&2
