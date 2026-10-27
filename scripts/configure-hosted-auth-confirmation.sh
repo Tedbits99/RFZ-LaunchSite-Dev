@@ -28,20 +28,22 @@ status="$(curl --silent --show-error --max-time 30 \
 config="$(jq -c 'if (.result | type) == "object" then .result else . end' "$before")"
 allowlist_json="$(jq -c '.uri_allow_list // empty' <<<"$config")"
 existing_template="$(jq -r '.mailer_templates_confirmation_content // empty' <<<"$config")"
+existing_recovery_template="$(jq -r '.mailer_templates_recovery_content // empty' <<<"$config")"
 test -n "$existing_template" || { echo 'BLOCKED: existing Confirm signup template is unavailable.' >&2; exit 1; }
+test -n "$existing_recovery_template" || { echo 'BLOCKED: existing Password recovery template is unavailable.' >&2; exit 1; }
 [[ "$allowlist_json" != null && -n "$allowlist_json" ]] || { echo 'BLOCKED: existing Auth redirect allowlist is unavailable.' >&2; exit 1; }
 
 candidate_callback="${AUTH_ORIGIN%/}/auth/callback"
 candidate_wildcard="$AUTH_PREVIEW_CALLBACK_WILDCARD"
 new_allowlist="$(node scripts/lib/auth-redirect-allowlist.mjs merge "$candidate_callback" "$candidate_wildcard" <<<"$allowlist_json")"
 
-# This is the documented Supabase server-side confirmation pattern. The
-# supplied RedirectTo is the already trusted /auth/callback URL from signup;
-# no request-controlled destination is introduced here.
-confirmation_template='<h2>Confirm your signup</h2><p>Follow this link to confirm your user:</p><p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">Confirm your email address</a></p>'
-recovery_template='<h2>Reset your password</h2><p>Follow this link to choose a new password:</p><p><a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}">Reset your password</a></p>'
-payload="$(jq -n --arg uri_allow_list "$new_allowlist" --arg confirmation_template "$confirmation_template" --arg recovery_template "$recovery_template" \
-  '{uri_allow_list: $uri_allow_list, mailer_templates_confirmation_content: $confirmation_template, mailer_templates_recovery_content: $recovery_template}')"
+# RedirectTo is exactly the trusted /auth/callback URL without a query. Repair
+# only the recovery anchor's href so all approved branding and layout remain
+# byte-for-byte unchanged outside that href. The helper fails closed if it
+# cannot identify exactly one existing recovery link.
+recovery_template="$(node scripts/lib/auth-recovery-template.mjs repair "$candidate_callback" <<<"$existing_recovery_template")"
+payload="$(jq -n --arg uri_allow_list "$new_allowlist" --arg recovery_template "$recovery_template" \
+  '{uri_allow_list: $uri_allow_list, mailer_templates_recovery_content: $recovery_template}')"
 
 patch_status="$(curl --silent --show-error --max-time 30 -X PATCH \
   --output "$after" --write-out '%{http_code}' \
@@ -83,12 +85,9 @@ verify_template_lower="${verify_template,,}"
   exit 1
 }
 verify_recovery_lower="${verify_recovery_template,,}"
-[[ "$verify_recovery_lower" == *token_hash* || "$verify_recovery_lower" == *tokenhash* ]] || {
-  echo 'BLOCKED: Password recovery template read-back is not TokenHash based.' >&2
-  exit 1
-}
-[[ "$verify_recovery_lower" == *redirectto* ]] || {
-  echo 'BLOCKED: Password recovery template read-back is not bound to the trusted RedirectTo.' >&2
+recovery_contract="$(node scripts/lib/auth-recovery-template.mjs validate "$candidate_callback" <<<"$verify_recovery_template")"
+jq -e '.valid == true and .reason == "valid"' <<<"$recovery_contract" >/dev/null || {
+  echo 'BLOCKED: Password recovery template read-back does not render the canonical HTTPS callback URL.' >&2
   exit 1
 }
 [[ "$verify_recovery_lower" != *confirmationurl* ]] || {
@@ -97,4 +96,4 @@ verify_recovery_lower="${verify_recovery_template,,}"
 }
 
 verify_recovery_hash="$(printf '%s' "$verify_recovery_template" | sha256sum | cut -d' ' -f1)"
-echo "HOSTED_AUTH_CONFIRMATION_CONFIGURED project=$PROJECT_ID allowlist_sha256=$verify_allowlist_hash confirmation_template_sha256=$verify_template_hash recovery_template_sha256=$verify_recovery_hash signup_token_hash=true recovery_token_hash=true"
+echo "HOSTED_AUTH_RECOVERY_TEMPLATE_CONFIGURED project=$PROJECT_ID allowlist_sha256=$verify_allowlist_hash confirmation_template_sha256=$verify_template_hash recovery_template_sha256=$verify_recovery_hash signup_template_preserved=true recovery_branding_preserved=true recovery_url_contract=PASS"

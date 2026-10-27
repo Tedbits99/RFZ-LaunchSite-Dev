@@ -71,6 +71,8 @@ recovery_confirmation_url=false
 [[ "$recovery_lower" == *tokenhash* || "$recovery_lower" == *token_hash* ]] && recovery_token_hash=true
 [[ "$recovery_lower" == *redirectto* ]] && recovery_redirect_to=true
 [[ "$recovery_lower" == *confirmationurl* ]] && recovery_confirmation_url=true
+recovery_contract="$(node scripts/lib/auth-recovery-template.mjs validate "$callback_url" <<<"$recovery_template")"
+recovery_url_contract="$(jq -r '.valid == true and .reason == "valid"' <<<"$recovery_contract")"
 
 site_origin="$(python3 - "$site_url" <<'PY'
 from urllib.parse import urlsplit
@@ -104,6 +106,7 @@ echo "AUTH_CONFIRMATION_TEMPLATE_HAS_REDIRECT_TO=$template_redirect_to"
 echo "AUTH_RECOVERY_TEMPLATE_HAS_TOKEN_HASH=$recovery_token_hash"
 echo "AUTH_RECOVERY_TEMPLATE_HAS_REDIRECT_TO=$recovery_redirect_to"
 echo "AUTH_RECOVERY_TEMPLATE_USES_CONFIRMATION_URL=$recovery_confirmation_url"
+echo "AUTH_RECOVERY_TEMPLATE_RENDERED_URL_CONTRACT=$recovery_url_contract"
 
 if [[ "$callback_allowed" != true ]]; then
   echo "OWNER_ACTION_REQUIRED: add the exact protected PR${AUTH_PREVIEW_PR} candidate callback or its narrowly scoped wildcard to Supabase Auth redirect URLs." >&2
@@ -113,9 +116,9 @@ if [[ "$template_token_hash" != true || "$template_email_type" != true ]]; then
   echo 'OWNER_ACTION_REQUIRED: configure Confirm signup to link the supplied TokenHash to the trusted callback with type=email.' >&2
   exit 1
 fi
-if [[ "$recovery_token_hash" != true || "$recovery_redirect_to" != true || "$recovery_confirmation_url" == true ]]; then
-  echo 'OWNER_ACTION_REQUIRED: configure Password recovery to link TokenHash to the trusted RedirectTo callback, not the provider ConfirmationURL.' >&2
+if [[ "$recovery_token_hash" != true || "$recovery_redirect_to" != true || "$recovery_confirmation_url" == true || "$recovery_url_contract" != true ]]; then
+  echo 'OWNER_ACTION_REQUIRED: configure Password recovery to render exactly one TokenHash link to the HTTPS /auth/callback with type=recovery, not the provider ConfirmationURL.' >&2
   exit 1
 fi
 
-echo 'HOSTED_AUTH_CONFIRMATION_AUDIT_PASS callback_allowlisted=true signup_token_hash=true recovery_token_hash=true'
+echo 'HOSTED_AUTH_CONFIRMATION_AUDIT_PASS callback_allowlisted=true signup_token_hash=true recovery_url_contract=true'
