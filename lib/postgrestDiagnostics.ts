@@ -13,6 +13,7 @@ export function logPostgrestQueryFailure(surface: string, error: unknown): void 
 
   console.error('postgrest_query_failure', {
     surface,
+    timestamp_utc: new Date().toISOString(),
     ...(code ? { code } : {}),
     ...(status ? { http_status: status } : {}),
   });

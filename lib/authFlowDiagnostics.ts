@@ -28,6 +28,7 @@ export function logAuthFlowFailure(flow: string, stage: string, error?: unknown)
     flow,
     stage,
     category,
+    timestamp_utc: new Date().toISOString(),
     ...(status ? { http_status: status } : {}),
   });
 }

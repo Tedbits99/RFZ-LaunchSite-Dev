@@ -12,11 +12,12 @@ describe('sanitized PostgREST diagnostics', () => {
       message: 'permission denied for private@example.test order SECRET-REFERENCE',
     });
 
-    expect(error).toHaveBeenCalledWith('postgrest_query_failure', {
+    expect(error).toHaveBeenCalledWith('postgrest_query_failure', expect.objectContaining({
       surface: 'admin_dashboard_orders',
       code: '42501',
       http_status: 403,
-    });
+      timestamp_utc: expect.stringMatching(/^\d{4}-\d\d-\d\dT.*Z$/),
+    }));
     expect(JSON.stringify(error.mock.calls)).not.toContain('private@example.test');
     expect(JSON.stringify(error.mock.calls)).not.toContain('SECRET-REFERENCE');
   });
@@ -25,7 +26,10 @@ describe('sanitized PostgREST diagnostics', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     logPostgrestQueryFailure('customer_orders', { code: 'secret value', status: 200, message: 'private detail' });
 
-    expect(error).toHaveBeenCalledWith('postgrest_query_failure', { surface: 'customer_orders' });
+    expect(error).toHaveBeenCalledWith('postgrest_query_failure', expect.objectContaining({
+      surface: 'customer_orders',
+      timestamp_utc: expect.stringMatching(/^\d{4}-\d\d-\d\dT.*Z$/),
+    }));
     expect(JSON.stringify(error.mock.calls)).not.toContain('private detail');
   });
 });

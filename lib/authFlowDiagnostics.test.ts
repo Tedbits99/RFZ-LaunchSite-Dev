@@ -12,12 +12,13 @@ describe('authentication flow diagnostics', () => {
       message: 'private@example.test bearer token-secret',
     });
 
-    expect(warn).toHaveBeenCalledWith('auth_flow_failure', {
+    expect(warn).toHaveBeenCalledWith('auth_flow_failure', expect.objectContaining({
       flow: 'password_recovery',
       stage: 'email_request',
       category: 'rate_limited',
+      timestamp_utc: expect.stringMatching(/^\d{4}-\d\d-\d\dT.*Z$/),
       http_status: 429,
-    });
+    }));
     expect(JSON.stringify(warn.mock.calls)).not.toContain('private@example.test');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('token-secret');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('sensitive_provider_code');
@@ -27,11 +28,12 @@ describe('authentication flow diagnostics', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     logAuthFlowFailure('confirmation_resend', 'rate_limit_reservation', new Error('private detail'));
 
-    expect(warn).toHaveBeenCalledWith('auth_flow_failure', {
+    expect(warn).toHaveBeenCalledWith('auth_flow_failure', expect.objectContaining({
       flow: 'confirmation_resend',
       stage: 'rate_limit_reservation',
       category: 'provider_error',
-    });
+      timestamp_utc: expect.stringMatching(/^\d{4}-\d\d-\d\dT.*Z$/),
+    }));
     expect(JSON.stringify(warn.mock.calls)).not.toContain('private detail');
   });
 });
