@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Coins, Loader2, RefreshCw, X, QrCode } from 'lucide-react';
 import { formatCoins, formatCoinPrice, type RfCoinPackage, type RfCoinLedgerEntry, type RfCoinWallet } from '@/lib/rfCoins';
+import { shouldLoadRfCoinLedger, type RfCoinWalletStatus } from '@/lib/rfCoinWalletStatus';
 
 type WalletResponse = {
   wallet: RfCoinWallet | null;
@@ -11,7 +12,7 @@ type WalletResponse = {
   spendingEnabled?: boolean;
   topupsEnabled?: boolean;
   centavosPerCoin?: number;
-  walletStatus?: 'ready' | 'disabled' | 'not_deployed' | 'not_configured' | 'incomplete';
+  walletStatus?: RfCoinWalletStatus;
 };
 
 type LedgerResponse = { entries?: RfCoinLedgerEntry[] };
@@ -52,13 +53,23 @@ export default function WalletClient() {
       }
       setWallet(data.wallet);
       setPackages(data.packages || []);
-      setWalletStatus(data.walletStatus || (data.enabled ? 'ready' : 'disabled'));
+      const resolvedWalletStatus = data.walletStatus || (data.enabled ? 'ready' : 'disabled');
+      setWalletStatus(resolvedWalletStatus);
       setSettings({
         enabled: Boolean(data.enabled),
         spendingEnabled: Boolean(data.spendingEnabled),
         topupsEnabled: Boolean(data.topupsEnabled),
         centavosPerCoin: Number(data.centavosPerCoin || 100),
       });
+      if (!shouldLoadRfCoinLedger(Boolean(data.enabled), resolvedWalletStatus)) {
+        // Do not query an absent or disabled RF Coins schema. The wallet API
+        // already returned the authoritative unavailable state; a ledger
+        // request here would create a predictable 500 and a false failure.
+        setLedger([]);
+        setLedgerError('');
+        setError('');
+        return;
+      }
       const ledgerRes = await fetch('/api/account/wallet/ledger', { cache: 'no-store' });
       if (ledgerRes.ok) {
         const ledgerData = await ledgerRes.json().catch(() => null) as LedgerResponse | null;
