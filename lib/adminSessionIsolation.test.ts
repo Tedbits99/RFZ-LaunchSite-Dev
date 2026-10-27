@@ -12,7 +12,10 @@ describe('admin authentication namespace and bootstrap boundaries', () => {
     expect(login).toContain('createAdminBrowserClient');
     expect(login).not.toContain('claim_first_admin');
     expect(login).toContain(".from('admins')");
-    expect(login).toContain("['ADMIN', 'SUPER_ADMIN']");
+    expect(login).toContain('authenticateAdmin');
+    const flow = source('lib/adminLoginFlow.ts');
+    expect(flow).toContain("['ADMIN', 'SUPER_ADMIN']");
+    expect(flow).toContain('!admin.is_active');
   });
 
   it('uses the dedicated admin namespace for server guards and cookie refresh', () => {

@@ -144,6 +144,10 @@ BEGIN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_DISABLED'::text;
     RETURN;
   END;
+  IF NOT s.enabled THEN
+    RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_DISABLED'::text;
+    RETURN;
+  END IF;
   IF NOT s.topups_enabled THEN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_TOPUPS_DISABLED'::text;
     RETURN;

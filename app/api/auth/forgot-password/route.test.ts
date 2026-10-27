@@ -70,12 +70,19 @@ describe('POST /api/auth/forgot-password', () => {
     { data: {}, error: { message: 'rate limited', status: 429 } },
     { data: {}, error: { message: 'provider detail', code: 'user_not_found' } },
   ])('returns the same generic response for any Auth error (no enumeration)', async (result) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.resetPasswordForEmail.mockResolvedValueOnce(result);
 
     const response = await POST(request({ email: 'customer@example.com' }));
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ message: GENERIC_OK });
+    expect(warn).toHaveBeenCalledWith('auth_flow_failure', expect.objectContaining({
+      flow: 'password_recovery',
+      stage: 'email_provider',
+    }));
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('customer@example.com');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('provider detail');
   });
 
   it.each([

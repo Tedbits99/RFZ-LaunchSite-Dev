@@ -123,6 +123,23 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(cleared).toContain('HttpOnly');
   });
 
+  it('still reports the committed password update as success if local sign-out fails, while expiring only recovery cookies', async () => {
+    mocks.signOut.mockRejectedValueOnce(new Error('synthetic cookie cleanup failure'));
+    const response = await POST(postRequest(
+      { password: 'new-password-1' },
+      { cookie: `rfz-recovery-auth=synthetic-session; rfz-recovery-proof=${makeProof()}` },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ message: 'Password updated.' });
+    expect(mocks.updateUser).toHaveBeenCalledOnce();
+    const cookies = setCookies(response);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-recovery-proof=') && cookie.includes('Max-Age=0'))).toBe(true);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-recovery-auth=') && cookie.includes('Max-Age=0'))).toBe(true);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-customer-auth='))).toBe(false);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-admin-auth='))).toBe(false);
+  });
+
   it('rejects a request with NO recovery proof cookie', async () => {
     const response = await POST(postRequest({ password: 'new-password-1' }));
 

@@ -103,6 +103,15 @@ describe('canonical RF Coins ACL contract', () => {
     expect(createTopup).toContain('RETURN QUERY SELECT pending_topup.id');
   });
 
+  it('requires the wallet itself and top-ups to be enabled before a top-up can be created', () => {
+    const start = functionsSql.indexOf('CREATE OR REPLACE FUNCTION rf_coin_create_topup');
+    const end = functionsSql.indexOf('CREATE OR REPLACE FUNCTION rf_coin_credit_paid_topup', start);
+    const createTopup = functionsSql.slice(start, end);
+    expect(createTopup).toMatch(/IF NOT s\.enabled THEN[\s\S]*?'RF_COIN_DISABLED'/);
+    expect(createTopup).toMatch(/IF NOT s\.topups_enabled THEN[\s\S]*?'RF_COIN_TOPUPS_DISABLED'/);
+    expect(createTopup.indexOf('IF NOT s.enabled')).toBeLessThan(createTopup.indexOf('IF NOT s.topups_enabled'));
+  });
+
   it('does not broaden project defaults or mutate the live database during tests', () => {
     expect(functionsSql).not.toMatch(/^\s*ALTER DEFAULT PRIVILEGES/m);
     expect(schemaSql).not.toMatch(/^\s*ALTER DEFAULT PRIVILEGES/m);

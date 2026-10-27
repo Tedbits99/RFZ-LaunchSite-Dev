@@ -177,6 +177,7 @@ describe('POST /api/auth/resend-confirmation', () => {
   });
 
   it('never echoes Auth resend errors or provider details', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.resend.mockResolvedValue({ data: null, error: { message: 'provider detail: rate limited upstream', code: 'over_email_send_rate_limit' } });
 
     const response = await POST(request({ email: 'customer@example.com' }));
@@ -186,6 +187,13 @@ describe('POST /api/auth/resend-confirmation', () => {
     expect(body).toEqual(JSON.stringify({ message: GENERIC_OK }));
     expect(body).not.toContain('rate limited upstream');
     expect(body).not.toContain('over_email_send_rate_limit');
+    expect(warn).toHaveBeenCalledWith('auth_flow_failure', expect.objectContaining({
+      flow: 'confirmation_resend',
+      stage: 'auth_email_provider',
+      category: 'provider_error',
+    }));
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('customer@example.com');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('rate limited upstream');
   });
 
   it('gives existing and nonexistent accounts the same generic response when allowed', async () => {

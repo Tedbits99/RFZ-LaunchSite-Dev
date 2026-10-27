@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   recoveryExchangeCodeForSession: vi.fn(),
   recoveryVerifyOtp: vi.fn(),
   recoveryGetUser: vi.fn(),
+  recoverySignOut: vi.fn(),
 }));
 
 vi.mock('@/lib/authSessionClients', () => ({
@@ -32,6 +33,7 @@ vi.mock('@/lib/authSessionClients', () => ({
       exchangeCodeForSession: mocks.recoveryExchangeCodeForSession,
       verifyOtp: mocks.recoveryVerifyOtp,
       getUser: mocks.recoveryGetUser,
+      signOut: mocks.recoverySignOut,
     },
   })),
 }));
@@ -97,6 +99,7 @@ describe('email confirmation callback (customer namespace)', () => {
     mocks.recoveryVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
     mocks.customerVerifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'invalid token' } });
     mocks.recoveryGetUser.mockResolvedValue({ data: { user: null }, error: null });
+    mocks.recoverySignOut.mockResolvedValue({ error: null });
   });
 
   it('exchanges a valid code and activates only the authenticated pending profile', async () => {
@@ -288,6 +291,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(proofCookie(response)).toBeUndefined();
     expect(mocks.recoveryGetUser).not.toHaveBeenCalled();
+    expect(mocks.recoverySignOut).toHaveBeenCalledWith({ scope: 'local' });
     expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(location(response)).not.toContain('secret-code');
@@ -310,6 +314,20 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     const response = await GET(request('?code=secret-code&type=recovery'));
 
     expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(proofCookie(response)).toBeUndefined();
+    expect(mocks.recoverySignOut).toHaveBeenCalledWith({ scope: 'local' });
+  });
+
+  it('keeps unexpected recovery exceptions in the recovery flow and clears its session', async () => {
+    mocks.recoveryGetUser.mockRejectedValueOnce(new Error('synthetic provider exception'));
+
+    const response = await GET(request('?code=recovery-code&type=recovery'));
+
+    expect(location(response)).toBe('https://example.test/auth/reset-password');
+    expect(location(response)).not.toContain('/auth/confirmation');
+    expect(mocks.recoverySignOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(proofCookie(response)).toBeUndefined();
   });
 

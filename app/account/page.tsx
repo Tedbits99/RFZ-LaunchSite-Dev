@@ -6,6 +6,7 @@ import { getOrderPresentation } from '@/lib/orderPresentation';
 import { getCustomerLoginUrl } from '@/lib/authRedirect';
 import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 import { summarizeAccountOrders } from '@/lib/accountOrderSummary';
+import { logPostgrestQueryFailure } from '@/lib/postgrestDiagnostics';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ export default async function Account() {
     .eq('customer_user_id', session.user.id)
     .order('created_at', { ascending: false })
     .limit(20);
+  if (ordersError) logPostgrestQueryFailure('customer_account_recent_orders', ordersError);
   const orders = (data as unknown as Order[]) || [];
   // The recent-order list is intentionally bounded for rendering. Summary
   // numbers come from a separate owner-scoped query so older orders cannot be
@@ -29,6 +31,7 @@ export default async function Account() {
     .from('orders')
     .select('id', { count: 'exact', head: true })
     .eq('customer_user_id', session.user.id);
+  if (countError) logPostgrestQueryFailure('customer_account_order_count', countError);
   // Keep list and count states separate: an exact owner-scoped count can remain
   // trustworthy even when the related recent-order query is temporarily down.
   const summary = summarizeAccountOrders({
@@ -37,7 +40,8 @@ export default async function Account() {
     listError: Boolean(ordersError),
     countError: Boolean(countError),
   });
-  const { data: profileData } = await session.client.from('customer_profiles').select('display_name').eq('user_id', session.user.id).maybeSingle();
+  const { data: profileData, error: profileError } = await session.client.from('customer_profiles').select('display_name').eq('user_id', session.user.id).maybeSingle();
+  if (profileError) logPostgrestQueryFailure('customer_account_profile', profileError);
   const email = typeof session.user.email === 'string' ? session.user.email.trim().toLowerCase() : null;
   const displayName = (profileData as { display_name?: string } | null)?.display_name?.trim() || email?.split('@')[0] || 'Player';
 

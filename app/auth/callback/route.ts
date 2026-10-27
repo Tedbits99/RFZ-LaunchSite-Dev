@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createCustomerServerClient, createRecoveryServerClient } from '@/lib/authSessionClients';
 import { getConfiguredAppOrigin, getConfirmationUrl } from '@/lib/authRedirect';
 import { newRecoveryProofCookie, sessionFingerprint } from '@/lib/recoveryProof';
+import { logAuthFlowFailure } from '@/lib/authFlowDiagnostics';
 
 type ConfirmationStatus = 'success' | 'pending' | 'restricted' | 'invalid' | 'error';
 
@@ -35,6 +36,10 @@ function activationResult(data: unknown): { status?: string; error?: string | nu
 
 async function clearCustomerSession(client: Awaited<ReturnType<typeof createCustomerServerClient>>) {
   try { await client.auth.signOut({ scope: 'local' }); } catch { /* Denial remains enforced by the profile status check. */ }
+}
+
+async function clearRecoverySession(client: Awaited<ReturnType<typeof createRecoveryServerClient>>) {
+  try { await client.auth.signOut({ scope: 'local' }); } catch { /* Invalid recovery authority remains unusable without its proof. */ }
 }
 
 export async function GET(request: NextRequest) {
@@ -90,17 +95,28 @@ export async function GET(request: NextRequest) {
       const recoveryResult = tokenHash
         ? await recovery.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
         : await recovery.auth.exchangeCodeForSession(code!, exchangeOptions);
-      if (recoveryResult.error) return redirectToResetPassword(origin);
+      if (recoveryResult.error) {
+        logAuthFlowFailure('password_recovery', tokenHash ? 'token_hash_verification' : 'pkce_exchange', recoveryResult.error);
+        await clearRecoverySession(recovery);
+        return redirectToResetPassword(origin);
+      }
 
       // The documented contract: exchangeCodeForSession returns the session
       // via data.session. getUser() is used only to confirm the identity.
       const session = recoveryResult.data?.session;
       const accessToken = session?.access_token;
-      if (!session?.user?.id || !accessToken) return redirectToResetPassword(origin);
+      if (!session?.user?.id || !accessToken) {
+        logAuthFlowFailure('password_recovery', 'session_from_exchange');
+        await clearRecoverySession(recovery);
+        return redirectToResetPassword(origin);
+      }
 
       const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
-      if (recoveryUserError || !recoveryUser.user) return redirectToResetPassword(origin);
-      if (recoveryUser.user.id !== session.user.id) return redirectToResetPassword(origin);
+      if (recoveryUserError || !recoveryUser.user || recoveryUser.user.id !== session.user.id) {
+        logAuthFlowFailure('password_recovery', 'verified_user_lookup', recoveryUserError);
+        await clearRecoverySession(recovery);
+        return redirectToResetPassword(origin);
+      }
 
       // The proof is signed over the verified recovery user ID and a SHA-256
       // fingerprint of the exchange-issued access token, so the reset
@@ -116,6 +132,8 @@ export async function GET(request: NextRequest) {
         res.cookies.set(proof.name, proof.value, proof.options);
         return res;
       } catch {
+        logAuthFlowFailure('password_recovery', 'proof_signing');
+        await clearRecoverySession(recovery);
         return redirectToResetPassword(origin);
       }
     }
@@ -159,6 +177,14 @@ export async function GET(request: NextRequest) {
     await clearCustomerSession(supabase!);
     return redirectToConfirmation('error');
   } catch {
+    if (recovery) {
+      // Recovery callback failures must stay in the recovery UI. Sending a
+      // reset link to the signup-confirmation error route hides the actual
+      // failure and can leave a stale recovery session in its cookie jar.
+      logAuthFlowFailure('password_recovery', 'callback_exception');
+      await clearRecoverySession(recovery);
+      return redirectToResetPassword(origin);
+    }
     if (customerSessionEstablished && supabase) await clearCustomerSession(supabase);
     return redirectToConfirmation('error');
   }

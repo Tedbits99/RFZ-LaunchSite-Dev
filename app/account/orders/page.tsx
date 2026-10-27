@@ -6,6 +6,7 @@ import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
 import { getCustomerLoginUrl } from '@/lib/authRedirect';
 import RetryServerDataButton from '@/components/account/RetryServerDataButton';
+import { logPostgrestQueryFailure } from '@/lib/postgrestDiagnostics';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,7 @@ export default async function AccountOrders({ searchParams }: { searchParams: Pr
     .eq('customer_user_id', session.user.id)
     .order('created_at', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);
+  if (error) logPostgrestQueryFailure('customer_account_orders_page', error);
   const orders = (data || []) as unknown as Order[];
   const pageCount = Math.max(1, Math.ceil((count || 0) / pageSize));
 
