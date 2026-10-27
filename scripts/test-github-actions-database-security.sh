@@ -127,7 +127,8 @@ validate_psql_invocation() {
   local actual_url="$1"
   local expected_url="$2"
   shift 2
-  local argument seen_set=0 seen_file=0 seen_command=0
+  local argument seen_error_stop=0 seen_expected_migration_count=0
+  local upgrade_assertion_file=0 seen_file=0 seen_command=0
   local seen_quiet=0 seen_tuples=0 seen_no_align=0 seen_no_psqlrc=0
 
   if [ "$actual_url" != "$expected_url" ] || [ -z "$expected_url" ]; then
@@ -139,9 +140,19 @@ validate_psql_invocation() {
     shift
     case "$argument" in
       --set)
-        [ "$seen_set" -eq 0 ] && [ "$#" -gt 0 ] || return 1
-        [ "$1" = "ON_ERROR_STOP=1" ] || return 1
-        seen_set=1
+        [ "$#" -gt 0 ] || return 1
+        case "$1" in
+          ON_ERROR_STOP=1)
+            [ "$seen_error_stop" -eq 0 ] || return 1
+            seen_error_stop=1
+            ;;
+          expected_migration_count=[1-9][0-9]*)
+            [ "$seen_expected_migration_count" -eq 0 ] || return 1
+            [[ "${1#expected_migration_count=}" =~ ^[1-9][0-9]*$ ]] || return 1
+            seen_expected_migration_count=1
+            ;;
+          *) return 1 ;;
+        esac
         shift
         ;;
       --file)
@@ -162,6 +173,7 @@ validate_psql_invocation() {
           supabase/tests/reconciliation-concurrency-cleanup.sql) ;;
           *) return 1 ;;
         esac
+        [ "$1" = "supabase/tests/database/existing-schema-upgrade.sql" ] && upgrade_assertion_file=1
         seen_file=1
         shift
         ;;
@@ -193,7 +205,10 @@ validate_psql_invocation() {
     esac
   done
 
-  [ "$seen_file" -eq 0 ] || [ "$seen_command" -eq 0 ]
+  [ "$seen_file" -eq 0 ] || [ "$seen_command" -eq 0 ] || return 1
+  [ "$seen_expected_migration_count" -eq 0 ] || {
+    [ "$seen_error_stop" -eq 1 ] && [ "$upgrade_assertion_file" -eq 1 ]
+  }
 }
 
 test_psql_invocation_validator() {
@@ -202,6 +217,8 @@ test_psql_invocation_validator() {
 
   # Exercise every argument shape used by the harness without opening a socket.
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count=100 --file supabase/tests/database/existing-schema-upgrade.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --command "SELECT 1;" || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 || return 1
 
@@ -241,6 +258,13 @@ test_psql_invocation_validator() {
   assert_psql_args_rejected --file --host=remote.example || return 1
   assert_psql_args_rejected --command --host=remote.example || return 1
   assert_psql_args_rejected --set ON_ERROR_STOP=1 --set ON_ERROR_STOP=1 || return 1
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=0 \
+    --file supabase/tests/database/existing-schema-upgrade.sql || return 1
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=100 \
+    --file supabase/tests/privileged-rpc-security.sql || return 1
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=100 \
+    --file supabase/tests/database/existing-schema-upgrade.sql \
+    --set expected_migration_count=101 || return 1
   assert_psql_args_rejected --file supabase/tests/completion-receipt-outbox-worker.sql \
     --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
   assert_psql_args_rejected --command 'SELECT 1;' --command 'SELECT 2;' || return 1
@@ -524,6 +548,7 @@ if [ "$upgrade_mode" = true ]; then
   supabase_local migration up
   echo "LEGACY_UPGRADE_PHASE=canonical-apply-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql
   # A second migration-up must be a no-op. This is separate from db reset so
   # forward-only and duplicate-history behavior are exercised.
