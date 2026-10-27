@@ -3,13 +3,14 @@
 import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, CheckCircle2 } from 'lucide-react';
-import SiteFooter from '@/components/SiteFooter';
+import AccountFooter from '@/components/account/AccountFooter';
 import ThemeSelector from '@/components/ThemeSelector';
 
 type PageState = 'loading' | 'idle' | 'pending' | 'saved' | 'load-error' | 'save-error';
 
 export default function AccountProfile() {
   const [displayName, setDisplayName] = useState('');
+  const [savedDisplayName, setSavedDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [accountStatus, setAccountStatus] = useState('');
   const [state, setState] = useState<PageState>('loading');
@@ -29,6 +30,7 @@ export default function AccountProfile() {
         const body = await res.json() as { display_name?: string; email?: string; status?: string };
         if (cancelled) return;
         setDisplayName(body.display_name ?? '');
+        setSavedDisplayName(body.display_name ?? '');
         setEmail(body.email ?? '');
         setAccountStatus(body.status || 'active');
         setState('idle');
@@ -64,6 +66,7 @@ export default function AccountProfile() {
         setState('save-error');
         return;
       }
+      setSavedDisplayName(displayName);
       setState('saved');
     } catch {
       setError('Unable to save your profile right now.');
@@ -119,13 +122,18 @@ export default function AccountProfile() {
             {state === 'save-error' && error ? (
               <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert">{error}</div>
             ) : null}
-            <button type="submit" disabled={state === 'pending'} className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-5 py-2.5 text-sm font-semibold disabled:opacity-50">
-              {state === 'pending' ? 'Saving…' : 'Save changes'}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button type="submit" disabled={state === 'pending'} className="min-h-11 rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-5 py-2.5 text-sm font-semibold disabled:opacity-50">
+                {state === 'pending' ? 'Saving…' : 'Save changes'}
+              </button>
+              <button type="button" disabled={state === 'pending' || displayName === savedDisplayName} onClick={() => { setDisplayName(savedDisplayName); setError(''); setState('idle'); }} className="min-h-11 rounded-lg border border-[#22314d] px-5 py-2.5 text-sm text-slate-300 hover:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
           </form>
         )}
       </div>
-      <SiteFooter />
+      <AccountFooter />
     </main>
   );
 }

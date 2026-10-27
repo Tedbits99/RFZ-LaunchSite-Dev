@@ -11,6 +11,7 @@ type WalletResponse = {
   spendingEnabled?: boolean;
   topupsEnabled?: boolean;
   centavosPerCoin?: number;
+  walletStatus?: 'ready' | 'disabled' | 'not_deployed' | 'incomplete';
 };
 
 type LedgerResponse = { entries?: RfCoinLedgerEntry[] };
@@ -30,6 +31,7 @@ export default function WalletClient() {
   const [packages, setPackages] = useState<RfCoinPackage[]>([]);
   const [ledger, setLedger] = useState<RfCoinLedgerEntry[]>([]);
   const [settings, setSettings] = useState({ enabled: false, spendingEnabled: false, topupsEnabled: false, centavosPerCoin: 100 });
+  const [walletStatus, setWalletStatus] = useState<WalletResponse['walletStatus']>('disabled');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedPackage, setSelectedPackage] = useState<RfCoinPackage | null>(null);
@@ -50,6 +52,7 @@ export default function WalletClient() {
       }
       setWallet(data.wallet);
       setPackages(data.packages || []);
+      setWalletStatus(data.walletStatus || (data.enabled ? 'ready' : 'disabled'));
       setSettings({
         enabled: Boolean(data.enabled),
         spendingEnabled: Boolean(data.spendingEnabled),
@@ -130,7 +133,12 @@ export default function WalletClient() {
   }
 
   if (!settings.enabled) {
-    return <div className="rounded-xl border border-amber-400/25 bg-amber-400/5 p-6 text-sm text-amber-100">RF Coins wallet functions are currently unavailable. Your account remains protected, and you can return here later.</div>;
+    const message = walletStatus === 'not_deployed'
+      ? 'RF Coins wallet setup has not been deployed to this environment yet. No balance or payment is being presented as active.'
+      : walletStatus === 'incomplete'
+        ? 'RF Coins is temporarily unavailable while its database setup is incomplete. No funding or spending is enabled.'
+        : 'RF Coins wallet functions are currently disabled. No funding or spending is enabled.';
+    return <div className="rounded-xl border border-amber-400/25 bg-amber-400/5 p-6 text-sm text-amber-100">{message} You can return here later.</div>;
   }
 
   return (

@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { ChevronRight, CheckCircle2, Clock, XCircle, Circle, RefreshCw } from 'lucide-react';
 import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
-import SiteFooter from '@/components/SiteFooter';
+import AccountFooter from '@/components/account/AccountFooter';
 import { getOrderPresentation } from '@/lib/orderPresentation';
 import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 
@@ -362,7 +362,7 @@ export default function AccountOrderDetailClient({
           {copyMessage ? <p className="mt-2 text-xs text-slate-400" role="status" aria-live="polite">{copyMessage}</p> : null}
         </section>
       </div>
-      <SiteFooter />
+      <AccountFooter />
     </main>
   );
 }

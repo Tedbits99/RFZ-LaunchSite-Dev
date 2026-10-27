@@ -21,13 +21,15 @@ describe('Cloudflare admin dashboard CPU regression', () => {
     expect(page).toContain("export const dynamic = 'force-dynamic'");
   });
 
-  it('keeps admin-header actions and customer email responsive on narrow screens', () => {
+  it('keeps admin-header actions responsive and the customer summary data-focused', () => {
     const shell = readFileSync('app/admin/AdminShell.tsx', 'utf8');
     const account = readFileSync('app/account/page.tsx', 'utf8');
     expect(shell).toContain('max-w-[92px]');
     expect(shell).toContain('aria-label="Log out of admin dashboard"');
     expect(shell).toContain('hidden sm:inline">Log out');
-    expect(account).toContain('font-display break-all text-base');
+    expect(account).toContain('Total orders');
+    expect(account).toContain('Verified payments · latest 20 orders');
+    expect(account).not.toContain('Profile</p><p className="font-display break-all');
   });
 
   it('uses Supabase Realtime and does not poll admin APIs every ten seconds', () => {

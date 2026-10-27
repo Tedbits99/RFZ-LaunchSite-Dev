@@ -2,13 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { summarizeAccountOrders } from './accountOrderSummary';
 
 describe('summarizeAccountOrders', () => {
-  it('does not display an authoritative zero when either owner-scoped read fails', () => {
+  it('preserves an exact count when the recent list fails and suppresses it when count fails', () => {
     expect(summarizeAccountOrders({
       recentOrders: [],
       exactOrderCount: 0,
       listError: true,
       countError: false,
-    }).totalOrders).toBeNull();
+    }).totalOrders).toBe(0);
+    expect(summarizeAccountOrders({
+      recentOrders: [],
+      exactOrderCount: 12,
+      listError: true,
+      countError: false,
+    }).totalOrders).toBe(12);
     expect(summarizeAccountOrders({
       recentOrders: [],
       exactOrderCount: null,

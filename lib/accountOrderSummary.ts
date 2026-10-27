@@ -9,9 +9,10 @@ export function summarizeAccountOrders(input: {
   listError: boolean;
   countError: boolean;
 }) {
-  const ordersUnavailable = input.listError || input.countError;
   return {
-    totalOrders: ordersUnavailable || input.exactOrderCount === null ? null : input.exactOrderCount,
+    // The exact count is an independent owner-scoped query. A failure to load
+    // the recent list must not discard a successful count (or turn it into 0).
+    totalOrders: input.countError || input.exactOrderCount === null ? null : input.exactOrderCount,
     recentVerifiedPaymentCents: input.listError
       ? null
       : input.recentOrders.reduce(

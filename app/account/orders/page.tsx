@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
-import SiteFooter from '@/components/SiteFooter';
+import AccountFooter from '@/components/account/AccountFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { getOrderPresentation } from '@/lib/orderPresentation';
@@ -96,7 +96,7 @@ export default async function AccountOrders({ searchParams }: { searchParams: Pr
         )}
         {!error && pageCount > 1 ? <nav aria-label="Order history pages" className="mt-4 flex items-center justify-between"><span className="text-xs text-slate-500">Page {page} of {pageCount}</span><div className="flex gap-2"><Link aria-disabled={page <= 1} className={`rounded-lg border px-3 py-2 text-sm ${page <= 1 ? 'pointer-events-none border-[#1b2a45] text-slate-600' : 'border-[#233653] text-cyan-200'}`} href={`/account/orders?page=${page - 1}`}>Previous</Link><Link aria-disabled={page >= pageCount} className={`rounded-lg border px-3 py-2 text-sm ${page >= pageCount ? 'pointer-events-none border-[#1b2a45] text-slate-600' : 'border-[#233653] text-cyan-200'}`} href={`/account/orders?page=${page + 1}`}>Next</Link></div></nav> : null}
       </div>
-      <SiteFooter />
+      <AccountFooter />
     </main>
   );
 }

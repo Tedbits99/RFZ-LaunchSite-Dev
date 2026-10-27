@@ -1,9 +1,11 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
-import { CircleUserRound, LogOut, Package, ShieldCheck, WalletCards } from 'lucide-react';
+import Image from 'next/image';
+import { CircleUserRound, Package, ShieldCheck, WalletCards } from 'lucide-react';
+import CustomerAccountMenu from '@/components/CustomerAccountMenu';
 
 const links = [
   { href: '/account', label: 'Overview', icon: CircleUserRound, exact: true },
@@ -19,8 +21,6 @@ function isCurrent(pathname: string | null, href: string, exact = false) {
 
 export default function AccountNavigation() {
   const pathname = usePathname();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     const onPageShow = (event: PageTransitionEvent) => {
@@ -32,25 +32,6 @@ export default function AccountNavigation() {
     window.addEventListener('pageshow', onPageShow);
     return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
-
-  async function signOut() {
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!response.ok) throw new Error('logout failed');
-      try { window.sessionStorage.setItem('rfz-customer-signed-out', '1'); } catch { /* Server logout remains authoritative. */ }
-      window.location.replace('/login');
-    } catch {
-      setError('Sign out was not completed. Please try again.');
-      setBusy(false);
-    }
-  }
 
   const item = (link: (typeof links)[number]) => {
     const Icon = link.icon;
@@ -72,10 +53,18 @@ export default function AccountNavigation() {
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[#14203a] bg-[#050a1b] px-4 py-6 lg:flex">
-        <Link href="/account" className="mb-8 px-3 text-xs font-semibold uppercase tracking-[.2em] text-cyan-300">
-          Customer hub
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[#14203a] bg-[#050a1b]/95 px-4 py-2.5 backdrop-blur lg:hidden">
+        <Link href="/" aria-label="RunFazone home" className="inline-flex min-h-10 items-center">
+          <Image src="/runfazone-logo.png" alt="RunFazone" width={160} height={44} priority className="h-7 w-auto max-w-32 object-contain" />
         </Link>
+        <CustomerAccountMenu iconOnly />
+      </header>
+
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[#14203a] bg-[#050a1b] px-4 py-6 lg:flex">
+        <Link href="/" aria-label="RunFazone home" className="mb-3 inline-flex min-h-10 items-center px-3">
+          <Image src="/runfazone-logo.png" alt="RunFazone" width={160} height={44} priority className="h-8 w-auto max-w-36 object-contain" />
+        </Link>
+        <p className="mb-6 px-3 text-[10px] font-semibold uppercase tracking-[.2em] text-slate-500">Customer account</p>
         <nav aria-label="Account navigation" className="flex flex-col gap-1">
           {links.map(item)}
           <Link href="/track-order" className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 transition-colors hover:bg-[#101b34] hover:text-slate-100">
@@ -84,28 +73,9 @@ export default function AccountNavigation() {
           </Link>
         </nav>
         <div className="mt-auto">
-          {error ? <p className="mb-3 px-3 text-xs text-rose-300" role="alert">{error}</p> : null}
-          <button type="button" onClick={() => void signOut()} disabled={busy} className="inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 transition-colors hover:bg-rose-400/10 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60">
-            <LogOut size={16} aria-hidden="true" />
-            <span>{busy ? 'Signing out…' : 'Sign out'}</span>
-          </button>
+          <CustomerAccountMenu dropup />
         </div>
       </aside>
-
-      <div className="border-b border-[#14203a] bg-[#050a1b] px-4 py-3 lg:hidden">
-        <nav className="grid grid-cols-2 gap-2" aria-label="Account navigation">
-          {links.map(item)}
-          <Link href="/track-order" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-[#101b34] hover:text-slate-100">
-            <Package size={16} aria-hidden="true" />
-            <span>Track guest order</span>
-          </Link>
-        </nav>
-        <button type="button" onClick={() => void signOut()} disabled={busy} className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-rose-400/25 px-3 py-2 text-sm text-rose-200 disabled:cursor-wait disabled:opacity-60">
-            <LogOut size={16} aria-hidden="true" />
-            <span>{busy ? 'Signing out…' : 'Sign out'}</span>
-        </button>
-        {error ? <p className="mt-2 text-xs text-rose-300" role="alert">{error}</p> : null}
-      </div>
     </>
   );
 }

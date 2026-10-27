@@ -1,4 +1,4 @@
-import SiteFooter from '@/components/SiteFooter';
+import AccountFooter from '@/components/account/AccountFooter';
 import { redirect } from 'next/navigation';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import WalletClient from './WalletClient';
@@ -19,7 +19,7 @@ export default async function WalletPage() {
         <p className="mt-2 text-sm text-slate-400">Balance, coin packages and your transaction history.</p>
         <div className="mt-8"><WalletClient /></div>
       </div>
-      <SiteFooter />
+      <AccountFooter />
     </main>
   );
 }

@@ -57,6 +57,43 @@ describe('GET /api/account/wallet', () => {
     expect(await response.json()).toMatchObject({ error: 'Could not load wallet settings.' });
   });
 
+  it('reports the RF Coins feature as not deployed when its settings table is absent', async () => {
+    mocks.settingsMaybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: { code: 'PGRST205', message: "Could not find the table 'public.rf_coin_settings' in the schema cache" },
+    });
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      wallet: null,
+      enabled: false,
+      topupsEnabled: false,
+      spendingEnabled: false,
+      walletStatus: 'not_deployed',
+    });
+    expect(mocks.walletMaybeSingle).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if wallet settings exist but the wallet relation is missing', async () => {
+    mocks.settingsMaybeSingle.mockResolvedValueOnce({
+      data: { enabled: true, topups_enabled: false, spending_enabled: true, centavos_per_coin: 100 },
+      error: null,
+    });
+    mocks.walletMaybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: { code: '42P01', message: 'relation public.rf_coin_wallets does not exist' },
+    });
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      wallet: null,
+      enabled: false,
+      topupsEnabled: false,
+      spendingEnabled: false,
+      walletStatus: 'incomplete',
+    });
+  });
+
   it('fails visibly if enabled coin packages cannot be read', async () => {
     mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: { enabled: true, topups_enabled: true, spending_enabled: true, centavos_per_coin: 100 }, error: null });
     mocks.packagesOrder.mockResolvedValueOnce({ data: null, error: { message: 'read failed' } });
