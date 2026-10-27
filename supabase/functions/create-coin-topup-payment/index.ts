@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isSafeRfCoinPaymongoSandbox } from "../_shared/rfCoinPaymongoSafety.ts";
 
 /*
   Create a PayMongo QR Ph payment for an RF Coins top-up.
@@ -139,6 +140,28 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Account not eligible." }, 403);
     }
 
+    // This funding feature remains sandbox-only until the hosted RF Coins
+    // schema, webhook reconciliation, ledger, and E2E acceptance gates pass.
+    // Check before creating a top-up record so a misconfigured/live provider
+    // cannot leave pending wallet-funding rows behind.
+    const { data: config, error: configError } = await supabase
+      .from("payment_config")
+      .select("provider_type, provider_name, api_url, is_enabled, is_test_mode, currency, webhook_url")
+      .eq("method_key", "paymongo_qrph")
+      .eq("is_enabled", true)
+      .eq("provider_type", "automated")
+      .maybeSingle();
+    if (configError || !isSafeRfCoinPaymongoSandbox({
+      providerName: config?.provider_name,
+      providerType: config?.provider_type,
+      enabled: config?.is_enabled,
+      testMode: config?.is_test_mode,
+      secretKey: PAYMONGO_SECRET,
+      apiUrl: config?.api_url,
+    })) {
+      return json({ error: "RF Coins payments are unavailable until sandbox funding is verified." }, 503);
+    }
+
     // --- Create the top-up (validates RF Coins settings + active package) ---
     const { data: rpcData, error: rpcError } = await jwtClient.rpc("rf_coin_create_topup", {
       p_user_id: caller.id,
@@ -173,16 +196,6 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, alreadyPaid: true }, 200);
     }
 
-    const { data: config } = await supabase
-      .from("payment_config")
-      .select("provider_name, api_url, is_test_mode, currency, webhook_url")
-      .eq("method_key", "paymongo_qrph")
-      .eq("is_enabled", true)
-      .eq("provider_type", "automated")
-      .maybeSingle();
-    if (!config || (config as Record<string, unknown>).provider_name !== "paymongo") {
-      return json({ error: "QR Ph payment is not configured or enabled." }, 400);
-    }
     const cfg = config as Record<string, unknown>;
     const baseUrl = String(cfg.api_url || "https://api.paymongo.com/v1");
     const currency = String(cfg.currency || "PHP");

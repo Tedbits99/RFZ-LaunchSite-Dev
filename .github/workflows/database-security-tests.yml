@@ -110,6 +110,7 @@ jobs:
           deno check supabase/functions/archive-old-orders/index.ts
           deno check supabase/functions/auto-reconciliation/index.ts
           deno check supabase/functions/create-qrph-payment/index.ts
+          deno check supabase/functions/create-coin-topup-payment/index.ts
           deno check supabase/functions/fazercards-test/index.ts
           deno test supabase/functions/fazercards-test/authorization_test.ts
           deno check supabase/functions/payment-webhook/index.ts
