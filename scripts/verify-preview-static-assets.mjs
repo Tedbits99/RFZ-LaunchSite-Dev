@@ -9,15 +9,19 @@ function location(stepName) {
   assert.ok(found >= 0, 'Missing deployment step: ' + stepName);
   return found;
 }
-const signer = location('Provision preview recovery proof signer before assets deployment');
+const bootstrap = location('Bootstrap Worker version for runtime secret provisioning');
+const signer = location('Provision preview recovery proof signer before final assets deployment');
 const assets = location('Assert immutable artifact contains website CSS and JavaScript');
-const upload = location('Deploy only the named Worker on workers.dev');
+const upload = location('Deploy only the named Worker on workers.dev as final asset-bearing version');
 const verify = location('Resolve normal and immutable version URLs');
-assert.ok(signer < assets && assets < upload && upload < verify,
-  'The full asset-bearing Wrangler deploy must run AFTER secret provisioning.');
+assert.ok(bootstrap < signer && signer < assets && assets < upload && upload < verify,
+  'The bootstrap deploy must precede secret provisioning, and the final asset-bearing deploy must run after it.');
 const afterDeploy = yaml.slice(upload).split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
 assert.ok(!/npx\s+--yes\s+wrangler[^\n]*secret\s+(put|delete)/.test(afterDeploy),
   'Secrets updated after full upload can create an asset-less Worker version.');
+const bootstrapSection = yaml.slice(bootstrap, signer);
+assert.ok(/npx\s+--yes\s+wrangler[^\n]*deploy/.test(bootstrapSection),
+  'The bootstrap step must deploy a Worker version before secret provisioning.');
 assert.ok(yaml.includes('include-hidden-files: true'));
 assert.ok(yaml.includes('.open-next/**'));
 assert.ok(yaml.slice(assets, upload).includes('css_count'));
