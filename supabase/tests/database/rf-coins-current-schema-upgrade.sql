@@ -13,6 +13,7 @@ DECLARE
   v_feature_table_count integer;
   v_bad_rls_tables integer;
   v_has_wallet_method boolean;
+  v_existing_payment_preserved boolean;
   v_handoff_job boolean := false;
   v_handoff_secret_count bigint;
 BEGIN
@@ -90,6 +91,18 @@ BEGIN
     RAISE EXCEPTION 'RF_COINS_PAYMENT_INDEX_COMPATIBILITY_FAILURE';
   END IF;
 
+  SELECT EXISTS (
+    SELECT 1 FROM public.payment_transactions pt
+    JOIN public.orders o ON o.id = pt.order_id
+    WHERE pt.idempotency_key = 'rfz-disposable-existing-product-payment'
+      AND pt.order_id = 'f8200000-0000-4000-8000-000000000001'
+      AND pt.status = 'pending' AND pt.currency = 'PHP'
+      AND pt.amount_cents = o.total_cents
+  ) INTO v_existing_payment_preserved;
+  IF NOT v_existing_payment_preserved THEN
+    RAISE EXCEPTION 'RF_COINS_EXISTING_PRODUCT_PAYMENT_NOT_PRESERVED';
+  END IF;
+
   SELECT count(*) INTO v_feature_table_count
   FROM pg_catalog.pg_class c
   WHERE c.relnamespace = 'public'::regnamespace
@@ -152,6 +165,6 @@ BEGIN
     RAISE EXCEPTION 'RF_COINS_PRIVILEGED_RPC_GRANTS_TOO_BROAD';
   END IF;
 
-  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS order_fk=preserved topup_fk=present payment_rls=enabled admin_policy=preserved indexes=4 release_locks=off handoff_job=absent handoff_secret=absent';
+  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS order_fk=preserved topup_fk=present existing_payment=preserved payment_rls=enabled admin_policy=preserved indexes=4 release_locks=off handoff_job=absent handoff_secret=absent';
 END;
 $$;

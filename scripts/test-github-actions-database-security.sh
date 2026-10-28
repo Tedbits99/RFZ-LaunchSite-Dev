@@ -167,6 +167,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-data-contract.sql|\
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
           supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
           supabase/tests/customer-confirmation-resend-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-setup.sql|\
@@ -424,6 +425,8 @@ cp "$project_root/supabase/tests/completion-receipt-outbox-worker.sql" \
   "$test_root/supabase/tests/completion-receipt-outbox-worker.sql"
 cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
+cp "$project_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql" \
+  "$test_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql"
 cp "$project_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
@@ -553,6 +556,9 @@ if [ "$upgrade_mode" = true ]; then
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql
+  echo "LEGACY_UPGRADE_PHASE=seed-synthetic-order-payment"
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql
   # A second migration-up must be a no-op. This is separate from db reset so
   # forward-only and duplicate-history behavior are exercised.
   supabase_local migration up

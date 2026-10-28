@@ -481,9 +481,11 @@ candidate migrations after all canonical migrations and run the current-schema
 assertion file. That assertion requires all eight wallet tables with RLS, the
 preserved payment order FK and administrator-only SELECT policy, all three
 existing payment indexes plus the new top-up index, the nullable top-up FK,
-disabled release flags, no wallet payment method, no handoff job/secret, and
-restricted privileged RPC ACLs. After these edits, local unit tests completed with 1,035
-passed and 1 skipped; TypeScript and lint completed with no errors (existing
+preservation of a synthetic product payment seeded before the RF Coins
+migrations, disabled release flags, no wallet payment method, no handoff
+job/secret, and restricted privileged RPC ACLs. After these edits, local unit
+tests completed with 1,035 passed and 1 skipped; TypeScript and lint completed
+with no errors (existing
 lint warnings remain). The isolated PostgreSQL 16 concurrency harness passed
 after a serial rerun, including wallet initialization (20), top-up
 creation/credit (16 each), order settlement (12), refund credit/reversal
