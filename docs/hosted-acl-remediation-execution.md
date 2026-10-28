@@ -28,7 +28,7 @@ separate owner decisions. It does not change PR #82's DRAFT hold.
 
 | Operation | File | SHA-256 | Executor scope |
 |---|---|---|---|
-| Supported ACL migration | `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql` | `1f2e15394eded12511e86db5217c8bc534b5846e8de73659ca3fe3fb3a590b4f` | Hosted `postgres`; exact audited relation grants and its own two default contexts |
+| Supported ACL migration | `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql` | `f6cb81a1d8f7f91551c1d91f678624ff7023b74e7be6b55e61fa8b78844701a9` | Hosted `postgres`; exact audited relation grants and its own two default contexts |
 
 The migration-only PR contains no RF Coins SQL. The ACL migration does not
 alter SELECT/DML grants, RLS, policies, table contents, `PUBLIC`, or

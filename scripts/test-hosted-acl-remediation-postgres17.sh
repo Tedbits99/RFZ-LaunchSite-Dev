@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-expected_migration_sha256='1f2e15394eded12511e86db5217c8bc534b5846e8de73659ca3fe3fb3a590b4f'
+expected_migration_sha256='f6cb81a1d8f7f91551c1d91f678624ff7023b74e7be6b55e61fa8b78844701a9'
 migration_file="$project_root/supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql"
 
 actual_migration_sha256="$(sha256sum "$migration_file" | awk '{print $1}')"

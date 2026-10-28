@@ -19,6 +19,7 @@ DECLARE
   v_direct_count integer;
   v_postgres_default_count integer;
   v_provider_default_count integer;
+  v_unexpected_default_entries text;
 BEGIN
   IF current_setting('server_version_num')::integer < 170000 THEN
     RAISE EXCEPTION 'BROWSER_DDL_ACL_REMEDIATION_REQUIRES_POSTGRESQL_17';
@@ -204,8 +205,14 @@ BEGIN
     RAISE EXCEPTION 'BROWSER_DDL_ACL_PROVIDER_DEFAULT_BASELINE_MISMATCH count=%', v_provider_default_count;
   END IF;
 
-  IF EXISTS (
-    SELECT 1
+  SELECT string_agg(entry, ', ' ORDER BY entry)
+  INTO v_unexpected_default_entries
+  FROM (
+    SELECT format('%I.%I grantee=%I privilege=%s', creator.rolname,
+      COALESCE(n.nspname, '<global>'),
+      CASE WHEN acl.grantee = 0 THEN 'PUBLIC'
+        ELSE pg_get_userbyid(acl.grantee) END,
+      acl.privilege_type) AS entry
     FROM pg_default_acl AS d
     LEFT JOIN pg_namespace AS n ON n.oid = d.defaclnamespace
     JOIN pg_roles AS creator ON creator.oid = d.defaclrole
@@ -220,8 +227,11 @@ BEGIN
              OR creator.rolname = 'supabase_admin' AND n.nspname IN ('public', 'graphql', 'graphql_public')
            )
       )
-  ) THEN
-    RAISE EXCEPTION 'BROWSER_DDL_ACL_UNEXPECTED_DEFAULT_GRANT';
+    ORDER BY creator.rolname, n.nspname, acl.grantee, acl.privilege_type
+    LIMIT 10
+  ) AS unexpected_defaults;
+  IF v_unexpected_default_entries IS NOT NULL THEN
+    RAISE EXCEPTION 'BROWSER_DDL_ACL_UNEXPECTED_DEFAULT_GRANT entries=%', v_unexpected_default_entries;
   END IF;
   IF EXISTS (
     SELECT 1
