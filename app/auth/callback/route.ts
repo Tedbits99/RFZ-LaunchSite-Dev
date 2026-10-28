@@ -122,16 +122,23 @@ export async function GET(request: NextRequest) {
         return redirectToResetPassword(origin);
       }
 
+      const recoverySessionFingerprint = sessionFingerprint(accessToken);
+      if (!recoverySessionFingerprint) {
+        logAuthFlowFailure('password_recovery', 'session_binding');
+        await clearRecoverySession(recovery);
+        return redirectToResetPassword(origin);
+      }
+
       // The proof is signed over the verified recovery user ID and a SHA-256
-      // fingerprint of the exchange-issued access token, so the reset
-      // endpoint can re-verify both against its own recovery-namespace
-      // session. The raw token never enters the cookie. If signing fails
+      // fingerprint of the exchange-issued session_id, so the reset endpoint
+      // can re-verify both against its own recovery-namespace session even if
+      // the access token refreshes. The raw session ID never enters the cookie. If signing fails
       // (e.g. the HMAC secret is missing) no proof is issued.
       try {
         const res = redirectToResetPassword(origin);
         const proof = newRecoveryProofCookie({
           userId: recoveryUser.user.id,
-          sessionFingerprint: sessionFingerprint(accessToken),
+          sessionFingerprint: recoverySessionFingerprint,
         });
         res.cookies.set(proof.name, proof.value, proof.options);
         return res;

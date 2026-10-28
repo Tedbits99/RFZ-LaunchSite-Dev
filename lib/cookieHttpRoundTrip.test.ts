@@ -12,7 +12,15 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 // Set-Cookie headers, absorbed the way a browser stores them.
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
-const ACCESS_TOKEN = 'recovery-access-token-roundtrip';
+const SESSION_ID = '7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a';
+
+function accessToken(sessionId = SESSION_ID, issuedAt = 1) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ session_id: sessionId, iat: issuedAt }), 'utf8').toString('base64url');
+  return `${header}.${payload}.synthetic-signature`;
+}
+
+const ACCESS_TOKEN = accessToken();
 const USER_ID = 'customer-roundtrip-1';
 
 const fetchMock = vi.spyOn(globalThis, 'fetch');
@@ -24,7 +32,8 @@ function getSetCookieHeaders(response: Response): string[] {
 }
 
 function fingerprintOf(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+  const sessionId = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).session_id as string;
+  return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
 }
 
 // A minimal browser cookie store: absorbs Set-Cookie headers (path scoping

@@ -4,7 +4,15 @@ import { createHash, createHmac } from 'node:crypto';
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
 const USER_ID = 'customer-1';
-const ACCESS_TOKEN = 'recovery-access-token';
+const SESSION_ID = '2b2b2b2b-2b2b-42b2-82b2-2b2b2b2b2b2b';
+
+function accessToken(sessionId = SESSION_ID, issuedAt = 1) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ session_id: sessionId, iat: issuedAt }), 'utf8').toString('base64url');
+  return `${header}.${payload}.synthetic-signature`;
+}
+
+const ACCESS_TOKEN = accessToken();
 
 const mocks = vi.hoisted(() => ({
   customerExchangeCodeForSession: vi.fn(),
@@ -70,7 +78,8 @@ function recoveryExchangeResult(opts: { accessToken?: string | null } = {}) {
 }
 
 function fingerprintOf(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+  const sessionId = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).session_id as string;
+  return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
 }
 
 function decodeProof(cookie: string) {

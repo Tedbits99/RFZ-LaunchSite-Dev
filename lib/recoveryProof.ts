@@ -9,16 +9,31 @@ const MIN_SECRET_BYTES = 32;
 const MAX_AGE_SECONDS = Math.min(RECOVERY_PROOF_MAX_AGE_SECONDS, 600);
 
 /**
- * SHA-256 fingerprint of the recovery session's access token. Both the
- * callback (from exchangeCodeForSession().data.session.access_token) and the
- * completion endpoint (from getSession().data.session.access_token) derive
- * the same binding value; the raw token itself is never stored or
- * transmitted in the proof cookie. If the access token is refreshed the
- * fingerprint no longer matches and the reset fails closed — the user
- * requests a new reset link.
+ * Stable fingerprint for the verified Supabase Auth session. Access tokens
+ * rotate during normal refreshes, including while a user is on the recovery
+ * page, so binding the proof to the raw JWT makes a valid reset fail after a
+ * refresh. The callback and completion route first verify the JWT with
+ * auth.getUser(accessToken); this helper then binds the HMAC proof to the
+ * stable session_id claim rather than the rotating bearer token. The session
+ * ID itself is never stored in the proof cookie.
+ *
+ * Returns null for malformed or non-Supabase tokens so callers fail closed.
  */
-export function sessionFingerprint(accessToken: string): string {
-  return createHash('sha256').update(accessToken, 'utf8').digest('hex');
+export function sessionFingerprint(accessToken: string): string | null {
+  const segments = accessToken.split('.');
+  if (segments.length !== 3 || !segments[1]) return null;
+
+  try {
+    const claims = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8')) as unknown;
+    if (!claims || typeof claims !== 'object' || !('session_id' in claims)) return null;
+    const sessionId = (claims as { session_id?: unknown }).session_id;
+    if (typeof sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
+      return null;
+    }
+    return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
+  } catch {
+    return null;
+  }
 }
 
 /**

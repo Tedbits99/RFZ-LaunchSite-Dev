@@ -10,7 +10,15 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 // resetPasswordForEmail seeds it in production.
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
-const ACCESS_TOKEN = 'recovery-access-token-integration';
+const SESSION_ID = '5e5e5e5e-5e5e-45e5-85e5-5e5e5e5e5e5e';
+
+function accessToken(sessionId = SESSION_ID, issuedAt = 1) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ session_id: sessionId, iat: issuedAt }), 'utf8').toString('base64url');
+  return `${header}.${payload}.synthetic-signature`;
+}
+
+const ACCESS_TOKEN = accessToken();
 const USER_ID = 'customer-int-1';
 const VERIFIER_KEY = 'rfz-recovery-auth-code-verifier';
 
@@ -27,7 +35,8 @@ function setCookieHeaders(response: Response): string[] {
 }
 
 function fingerprintOf(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+  const sessionId = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).session_id as string;
+  return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
 }
 
 function makeProof(fingerprint: string, userId = USER_ID): string {
@@ -210,7 +219,8 @@ describe('Phase 1B-3: real SDK + real Next.js cookie plumbing (network mocked)',
     const resWrongUser = await post(`rfz-recovery-auth=<session>; rfz-recovery-proof=${wrongUserProof}`);
     expect(resWrongUser.status).toBe(403);
 
-    const resWrongSession = await post(`rfz-recovery-auth=<session>; rfz-recovery-proof=${makeProof(fingerprintOf('different-token'))}`);
+    const differentSessionToken = accessToken('6f6f6f6f-6f6f-46f6-86f6-6f6f6f6f6f6f');
+    const resWrongSession = await post(`rfz-recovery-auth=<session>; rfz-recovery-proof=${makeProof(fingerprintOf(differentSessionToken))}`);
     expect(resWrongSession.status).toBe(403);
 
     delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;

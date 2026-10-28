@@ -403,22 +403,47 @@ async function seedWalletFixtures(client: SupabaseClient, customerA: string, cus
     console.error('ISOLATED_WALLET_FIXTURE_ADMIN_AUTH_FAILURE', { step: 'super_admin_sign_in', http_status: status, code });
   }
   assert(!signedIn.error && signedIn.data.user, 'synthetic Super Admin has a real Auth session for wallet fixture RPC');
-  const adjustment = await admin.rpc('rf_coin_request_adjustment', {
-    p_target_user_id: customerB,
-    p_direction: 'credit',
-    p_amount_coins: 321,
-    p_reason: 'Disposable isolated acceptance fixture',
-    p_category: 'correction',
-    p_idempotency_key: `pr82-e2e-${process.env.E2E_RUN_TAG}-customer-b`,
-  });
-  if (adjustment.error) {
-    const code = typeof adjustment.error.code === 'string' && /^[0-9A-Z]{5}$/.test(adjustment.error.code) ? adjustment.error.code : 'unknown';
-    const status = 'status' in adjustment.error && typeof adjustment.error.status === 'number' ? adjustment.error.status : null;
-    console.error('ISOLATED_WALLET_FIXTURE_RPC_FAILURE', { step: 'super_admin_adjustment', http_status: status, code });
+  // The real adjustment RPC intentionally refuses to run while the wallet
+  // feature is disabled. In this disposable PostgreSQL stack only, open the
+  // non-financial wallet flag for the duration of one role-checked fixture
+  // operation; top-ups and spending remain OFF, and all provider credentials
+  // and external network requests are absent. Always restore the locked state
+  // before browser assertions or cleanup.
+  const enableFixtureOnly = await client.from('rf_coin_settings')
+    .update({ enabled: true })
+    .eq('id', 1)
+    .select('enabled,topups_enabled,spending_enabled')
+    .single();
+  assert(!enableFixtureOnly.error && enableFixtureOnly.data.enabled
+    && !enableFixtureOnly.data.topups_enabled && !enableFixtureOnly.data.spending_enabled,
+  'disposable fixture enables only the internal wallet ledger while funding and spending stay locked');
+  try {
+    const adjustment = await admin.rpc('rf_coin_request_adjustment', {
+      p_target_user_id: customerB,
+      p_direction: 'credit',
+      p_amount_coins: 321,
+      p_reason: 'Disposable isolated acceptance fixture',
+      p_category: 'correction',
+      p_idempotency_key: `pr82-e2e-${process.env.E2E_RUN_TAG}-customer-b`,
+    });
+    if (adjustment.error) {
+      const code = typeof adjustment.error.code === 'string' && /^[0-9A-Z]{5}$/.test(adjustment.error.code) ? adjustment.error.code : 'unknown';
+      const status = 'status' in adjustment.error && typeof adjustment.error.status === 'number' ? adjustment.error.status : null;
+      console.error('ISOLATED_WALLET_FIXTURE_RPC_FAILURE', { step: 'super_admin_adjustment', http_status: status, code });
+    }
+    const result = Array.isArray(adjustment.data) ? adjustment.data[0] as { out_status?: string; out_error?: string | null } | undefined : undefined;
+    assert(!adjustment.error && result?.out_status === 'APPLIED' && result.out_error === null, `synthetic Super Admin adjustment creates the immutable ledger through its authorized RPC (result=${result?.out_error ?? result?.out_status ?? 'missing'})`);
+  } finally {
+    const restoreLocks = await client.from('rf_coin_settings')
+      .update({ enabled: false })
+      .eq('id', 1)
+      .select('enabled,topups_enabled,spending_enabled')
+      .single();
+    assert(!restoreLocks.error && !restoreLocks.data.enabled
+      && !restoreLocks.data.topups_enabled && !restoreLocks.data.spending_enabled,
+    'disposable wallet feature and financial settings are locked again after fixture creation');
+    await admin.auth.signOut();
   }
-  const result = Array.isArray(adjustment.data) ? adjustment.data[0] as { out_status?: string; out_error?: string | null } | undefined : undefined;
-  assert(!adjustment.error && result?.out_status === 'APPLIED' && result.out_error === null, `synthetic Super Admin adjustment creates the immutable ledger through its authorized RPC (result=${result?.out_error ?? result?.out_status ?? 'missing'})`);
-  await admin.auth.signOut();
 }
 
 async function sameOriginJson(page: Page, pathname: string, method = 'GET', body?: unknown) {

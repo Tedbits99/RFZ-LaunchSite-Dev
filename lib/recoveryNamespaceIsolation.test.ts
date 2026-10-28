@@ -27,8 +27,8 @@ function cookieNames() {
   return Array.from(cookieJar.keys());
 }
 
-function token(subject: string, padding = 0) {
-  const payload = Buffer.from(JSON.stringify({ sub: subject, exp: Math.floor(Date.now() / 1000) + 3600, padding: 'x'.repeat(padding) })).toString('base64url');
+function token(subject: string, padding = 0, sessionId = '8b8b8b8b-8b8b-48b8-88b8-8b8b8b8b8b8b') {
+  const payload = Buffer.from(JSON.stringify({ sub: subject, session_id: sessionId, exp: Math.floor(Date.now() / 1000) + 3600, padding: 'x'.repeat(padding) })).toString('base64url');
   return `eyJhbGciOiJub25lIn0.${payload}.sig`;
 }
 
@@ -126,7 +126,10 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
     delete (globalThis as { window?: unknown }).window;
     process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
     try {
-      const binding = { userId: 'customer-1', sessionFingerprint: sessionFingerprint('some-access-token') };
+      const originalAccessToken = token('customer-1', 0, '9c9c9c9c-9c9c-49c9-89c9-9c9c9c9c9c9c');
+      const rotatedAccessToken = token('customer-1', 1, '9c9c9c9c-9c9c-49c9-89c9-9c9c9c9c9c9c');
+      const otherSessionAccessToken = token('customer-1', 0, 'adadadad-adad-4dad-8dad-adadadadadad');
+      const binding = { userId: 'customer-1', sessionFingerprint: sessionFingerprint(originalAccessToken)! };
       const proof = newRecoveryProofCookie(binding);
       expect(proof.name).toBe(RECOVERY_PROOF_COOKIE);
       expect(proof.value).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
@@ -141,8 +144,10 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
       expect(isRecoveryProofPresent({ get: (n: string) => (n === RECOVERY_PROOF_COOKIE ? { value: 'short' } : undefined) })).toBe(false);
 
       expect(verifyRecoveryProof(proof.value, binding)).toMatchObject({ ok: true, claims: { userId: 'customer-1', purpose: 'password-reset' } });
+      expect(sessionFingerprint(rotatedAccessToken)).toBe(binding.sessionFingerprint);
       expect(verifyRecoveryProof(proof.value, { userId: 'other', sessionFingerprint: binding.sessionFingerprint })).toMatchObject({ ok: false, reason: 'user_mismatch' });
-      expect(verifyRecoveryProof(proof.value, { userId: 'customer-1', sessionFingerprint: sessionFingerprint('other-token') })).toMatchObject({ ok: false, reason: 'session_mismatch' });
+      expect(verifyRecoveryProof(proof.value, { userId: 'customer-1', sessionFingerprint: sessionFingerprint(otherSessionAccessToken)! })).toMatchObject({ ok: false, reason: 'session_mismatch' });
+      expect(sessionFingerprint('not-a-jwt')).toBeNull();
       expect(verifyRecoveryProof('garbage', binding)).toMatchObject({ ok: false, reason: 'malformed_proof' });
 
       const cleared = clearRecoveryProofCookie();
@@ -158,8 +163,10 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
   it('recovery proof fails closed without a signing secret', () => {
     delete (globalThis as { window?: unknown }).window;
     delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
-    expect(() => newRecoveryProofCookie({ userId: 'u', sessionFingerprint: sessionFingerprint('t') })).toThrow();
-    expect(verifyRecoveryProof('anything', { userId: 'u', sessionFingerprint: sessionFingerprint('t') })).toMatchObject({ ok: false, reason: 'secret_unavailable' });
+    const testToken = token('u');
+    const fingerprint = sessionFingerprint(testToken)!;
+    expect(() => newRecoveryProofCookie({ userId: 'u', sessionFingerprint: fingerprint })).toThrow();
+    expect(verifyRecoveryProof('anything', { userId: 'u', sessionFingerprint: fingerprint })).toMatchObject({ ok: false, reason: 'secret_unavailable' });
   });
 
   it('keeps the recovery flow wired end to end in application code', () => {

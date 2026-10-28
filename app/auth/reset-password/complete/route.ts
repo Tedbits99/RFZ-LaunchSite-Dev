@@ -91,13 +91,18 @@ export async function POST(request: NextRequest) {
     }
 
     // The signed proof must be valid, unexpired, issued for exactly this
-    // recovery user and this recovery session (SHA-256 access-token
-    // fingerprint, same derivation as the callback), and carry the
+    // recovery user and this recovery session (SHA-256 stable Supabase
+    // session_id fingerprint, same derivation as the callback), and carry the
     // password-reset purpose. Fail closed on any mismatch.
     stage = 'proof_validation';
+    const recoverySessionFingerprint = sessionFingerprint(accessToken);
+    if (!recoverySessionFingerprint) {
+      logAuthFlowFailure('password_recovery', 'proof_validation_session_binding');
+      return json({ error: GENERIC_INVALID }, 403);
+    }
     const proof = verifyRecoveryProof(request.cookies.get(RECOVERY_PROOF_COOKIE)?.value, {
       userId: user.id,
-      sessionFingerprint: sessionFingerprint(accessToken),
+      sessionFingerprint: recoverySessionFingerprint,
     });
     if (!proof.ok) {
       // The reason is a fixed, non-sensitive enum. It helps distinguish a
