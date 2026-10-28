@@ -74,7 +74,7 @@ async function gotoMailLink(page: Page, link: string, label: string) {
 }
 
 async function assertRunFazoneLogo(page: Page) {
-  const logo = page.locator('img[alt="RunFazone"]').first();
+  const logo = page.locator('img[alt="RunFazone"]:visible').first();
   await expect(logo).toBeVisible();
   await expect.poll(
     () => logo.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0),
