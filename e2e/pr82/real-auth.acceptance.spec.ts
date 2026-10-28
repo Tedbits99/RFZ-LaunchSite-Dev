@@ -28,6 +28,9 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const mailpitURL = process.env.E2E_MAILPIT_URL;
 const schemaMode = process.env.E2E_WALLET_SCHEMA_MODE;
+const localApiPort = schemaMode === 'installed-locked' ? '55321' : '54321';
+const localDbPort = schemaMode === 'installed-locked' ? '55322' : '54322';
+const localMailpitPort = schemaMode === 'installed-locked' ? '55324' : '54324';
 const candidateSha = process.env.E2E_CANDIDATE_SHA;
 const oldPassword = 'Disposable-Old-42!abc';
 const newPassword = 'Disposable-New-84!xyz';
@@ -40,12 +43,13 @@ function assert(condition: unknown, label: string): asserts condition {
 function requireLocalConfiguration() {
   assert(supabaseUrl && anonKey && serviceKey && mailpitURL, 'local Auth services are configured');
   assert(schemaMode === 'absent' || schemaMode === 'installed-locked', 'wallet schema test mode is explicit');
+  assert(process.env.E2E_LOCAL_API_PORT === localApiPort && process.env.E2E_LOCAL_DB_PORT === localDbPort && process.env.E2E_LOCAL_MAILPIT_PORT === localMailpitPort, 'isolated local service ports match the selected schema mode');
   assert(candidateSha && /^[0-9a-f]{40}$/.test(candidateSha), 'candidate SHA is exact');
   const url = new URL(supabaseUrl);
-  assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === '54321', 'Supabase URL is loopback only');
+  assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === localApiPort, 'Supabase URL is loopback only');
   assert(url.hostname === '127.0.0.1', 'browser Supabase origin uses the exact permitted loopback host');
   const mailpit = new URL(mailpitURL);
-  assert(mailpit.protocol === 'http:' && mailpit.hostname === '127.0.0.1' && mailpit.port === '54324', 'Mailpit uses the exact permitted loopback origin');
+  assert(mailpit.protocol === 'http:' && mailpit.hostname === '127.0.0.1' && mailpit.port === localMailpitPort, 'Mailpit uses the exact permitted loopback origin');
   for (const key of [
     'PAYMONGO_SECRET_KEY', 'PAYMENT_PAYMONGO_SECRET_KEY', 'FAZERCARDS_API_KEY',
     'SUPPLIER_FAZERCARDS_API_KEY', 'SMTP_PASSWORD', 'CRYPTO_PROVIDER_SECRET',
@@ -66,7 +70,7 @@ async function gotoPath(page: Page, pathname: string, label: string) {
 
 async function gotoMailLink(page: Page, link: string, label: string) {
   const url = new URL(link);
-  assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === '54321', `${label} link targets local GoTrue`);
+  assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === localApiPort, `${label} link targets local GoTrue`);
   try {
     await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   } catch {
@@ -95,7 +99,7 @@ async function guardedContext(browser: Browser, testInfo: TestInfo, observations
     const requestUrl = new URL(route.request().url());
     const allowed = requestUrl.protocol === 'http:'
       && requestUrl.hostname === '127.0.0.1'
-      && ([3000, 54321, 54324].includes(Number(requestUrl.port)));
+      && ([3000, Number(localApiPort), Number(localMailpitPort)].includes(Number(requestUrl.port)));
     if (allowed) {
       await route.continue();
       return;
@@ -513,7 +517,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
   // viewport exactly matches the desktop/mobile project definition.
   await page.context().route('**/*', async (route) => {
     const requestUrl = new URL(route.request().url());
-    const allowed = requestUrl.protocol === 'http:' && requestUrl.hostname === '127.0.0.1' && [3000, 54321, 54324].includes(Number(requestUrl.port));
+    const allowed = requestUrl.protocol === 'http:' && requestUrl.hostname === '127.0.0.1' && [3000, Number(localApiPort), Number(localMailpitPort)].includes(Number(requestUrl.port));
     if (allowed) return route.continue();
     const host = requestUrl.hostname.toLowerCase();
     if (/supabase\.co$|paymongo|fazercards|moogold|smtp|sendgrid|mailgun|coinbase|crypto|supplier/.test(host)) observations.blockedProviderHosts.push(host);
@@ -599,8 +603,11 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       const anonymousResponse = await sameOriginJson(anonymousPage, '/api/account/wallet');
       assert(anonymousResponse.status === 401, 'anonymous wallet API is denied');
       await gotoPath(anonymousPage, '/account', 'anonymous account denial');
+      await expect(anonymousPage).toHaveURL((url) => url.pathname === '/login', { timeout: 10_000 });
       assert(safePath(anonymousPage) === '/login', 'anonymous customer route redirects to login');
       await expect(anonymousPage.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+      await expect(anonymousPage.getByRole('heading', { name: /Welcome back/ })).toHaveCount(0);
+      await expect(anonymousPage.getByText(customerAEmail, { exact: true })).toHaveCount(0);
 
       const bOrderList = await sameOriginJson(customerBPage, '/api/account/profile');
       assert(bOrderList.status === 200, 'Customer B account session is accepted');

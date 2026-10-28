@@ -86,6 +86,25 @@ jobs:
           stack_root="$RUNNER_TEMP/rfz-pr82-${MODE}"
           mkdir -p "$stack_root/supabase/migrations"
           cp supabase/e2e/config.toml "$stack_root/supabase/config.toml"
+          case "$MODE" in
+            absent) port_offset=0 ;;
+            installed-locked) port_offset=1000 ;;
+            *) echo 'Unknown isolated wallet-schema mode.' >&2; exit 1 ;;
+          esac
+          api_port=$((54321 + port_offset))
+          db_port=$((54322 + port_offset))
+          shadow_port=$((54320 + port_offset))
+          mailpit_port=$((54324 + port_offset))
+          smtp_port=$((54325 + port_offset))
+          pop3_port=$((54326 + port_offset))
+          sed -i \
+            -e "s/^port = 54321$/port = ${api_port}/" \
+            -e "s/^port = 54322$/port = ${db_port}/" \
+            -e "s/^shadow_port = 54320$/shadow_port = ${shadow_port}/" \
+            -e "s/^port = 54324$/port = ${mailpit_port}/" \
+            -e "s/^smtp_port = 54325$/smtp_port = ${smtp_port}/" \
+            -e "s/^pop3_port = 54326$/pop3_port = ${pop3_port}/" \
+            "$stack_root/supabase/config.toml"
           expected_wallet_files=(
             20261028120000_rf_coins_schema.sql
             20261028120100_rf_coins_functions.sql
@@ -114,7 +133,8 @@ jobs:
             echo 'Refusing a linked local Supabase project.' >&2
             exit 1
           fi
-          printf 'RFZ_STACK_ROOT=%s\nRFZ_MIGRATION_FILE_COUNT=%s\n' "$stack_root" "$copied" >> "$GITHUB_ENV"
+          printf 'RFZ_STACK_ROOT=%s\nRFZ_MIGRATION_FILE_COUNT=%s\nE2E_LOCAL_API_PORT=%s\nE2E_LOCAL_DB_PORT=%s\nE2E_LOCAL_MAILPIT_PORT=%s\n' \
+            "$stack_root" "$copied" "$api_port" "$db_port" "$mailpit_port" >> "$GITHUB_ENV"
           printf 'ISOLATED_MIGRATION_MODE=%s files=%s candidate=%s\n' "$MODE" "$copied" "$EXPECTED_SHA"
 
       - name: Start disposable PostgreSQL 17, GoTrue, PostgREST and local email catcher
@@ -200,7 +220,7 @@ jobs:
           const service = values.SERVICE_ROLE_KEY || values.SUPABASE_SERVICE_ROLE_KEY;
           if (!api || !anon || !service) throw new Error('Disposable Supabase did not report required local services.');
           const parsed = new URL(api);
-          if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || parsed.port !== '54321' || parsed.pathname !== '/') {
+          if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || parsed.port !== process.env.E2E_LOCAL_API_PORT || parsed.pathname !== '/') {
             throw new Error('Refusing non-loopback or unexpected Supabase API origin.');
           }
           const forbidden = [
@@ -217,7 +237,7 @@ jobs:
             `SUPABASE_SERVICE_ROLE_KEY=${service}`,
             `RFZ_RECOVERY_PROOF_HMAC_SECRET=${hmac}`,
             `RFZ_CUSTOMER_CONFIRMATION_RESEND_HMAC_SECRET=${hmac}`,
-            `E2E_MAILPIT_URL=http://127.0.0.1:54324`,
+            `E2E_MAILPIT_URL=http://127.0.0.1:${process.env.E2E_LOCAL_MAILPIT_PORT}`,
           ];
           for (const secret of [anon, service, hmac]) process.stdout.write(`::add-mask::${secret}\n`);
           fs.appendFileSync(githubEnvPath, `${lines.join('\n')}\n`);
@@ -253,7 +273,7 @@ jobs:
           const dbUrl = values.DB_URL || values.DATABASE_URL;
           if (!dbUrl) throw new Error('Disposable Supabase did not report a database URL.');
           const database = new URL(dbUrl);
-          if (!['postgres:', 'postgresql:'].includes(database.protocol) || database.hostname !== '127.0.0.1' || database.port !== '54322' || database.pathname !== '/postgres') {
+          if (!['postgres:', 'postgresql:'].includes(database.protocol) || database.hostname !== '127.0.0.1' || database.port !== process.env.E2E_LOCAL_DB_PORT || database.pathname !== '/postgres') {
             throw new Error('Refusing database catalog inspection outside the disposable loopback PostgreSQL endpoint.');
           }
           const tableNames = ['rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger'];
