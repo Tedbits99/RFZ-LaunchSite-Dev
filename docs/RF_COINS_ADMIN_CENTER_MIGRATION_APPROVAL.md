@@ -12,17 +12,17 @@ to migrate or enable funding/spending.
 
 Apply only after reviewing the exact migration files in the approved PR head:
 
-1. `supabase/migrations-pending/20261018160000_rf_coins_schema.sql` — tables,
+1. `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` — tables,
    indexes, checks, append-only triggers, customer RLS, grants, a disabled
    `rf_coin_wallet` payment-config row (`ON CONFLICT DO NOTHING`), the nullable
    `payment_transactions.order_id` compatibility change, and the private
    fulfillment handoff queue. It creates (but does not schedule) a cron trigger
    function. It inserts no cron secret and schedules no job.
-2. `supabase/migrations-pending/20261018160100_rf_coins_functions.sql` —
+2. `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` —
    authenticated identity-checked wallet/top-up/order functions, Super Admin
    adjustment/package/settings operations, service-role settlement and handoff
    functions, explicit execute grants, and hard-coded disabled release guards.
-3. `supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql` —
+3. `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` —
    bounded, active-Super-Admin-only report and export-audit RPCs, indexes,
    derived exception reporting, and explicit RPC ACLs.
 
@@ -38,7 +38,7 @@ this batch.
 ## Exact source and fresh hosted inventory
 
 - Migration source reviewed: PR #82 code commit
-  `69921e560a4d4e0420cdd8c052edfcfb80f7969c` (based on owner-accepted Admin
+  `01076dfbf59206c1ec6101584ddcd819fb9e931e` (based on owner-accepted Admin
   Center candidate `cc5687f45835c423860ae94c33cc640155f8e96b`). This source
   commit includes the release-lock correction described below.
 - Hosted audit workflow: run `40623744044`, operation `audit`, terminal
@@ -46,7 +46,8 @@ this batch.
   `7f72ba18a6e1641e0a6347895342e365d5a81fcb`; protected project identity
   `ketdhcmwowzztcdlmris`, region `ap-southeast-1`.
 - Hosted migration history: 100 source versions and 100 remote versions;
-  before/after migration lists matched. No hosted migrations were applied.
+  before/after migration lists matched. The current maximum executable
+  migration version was `20261027110000`. No hosted migrations were applied.
 - Sanitized metadata summary: 36 public tables; RLS enabled on 36/36; 136
   public policies; 40 public functions; 90 indexes; 7 non-internal triggers.
   No `rf_coin_%` public tables or functions were present. The `payment_transactions`
@@ -67,7 +68,15 @@ this batch.
 
 ### Review findings and corrective change
 
-**P1 found and fixed before any hosted apply:** in the original pending
+**P1 found and fixed before any hosted apply:** the original pending migration
+versions began `2026101816…`, which sorts before later already-deployed
+migrations even though the documented plan was to apply the feature after the
+current schema. Their version prefixes are now `20261028120000`, `20261028120100`,
+and `20261028120200`, strictly after current executable version
+`20261027110000`; a regression test compares the pending sequence with the
+maximum executable version so a future migration cannot silently overtake it.
+
+The SQL review also found that in the original pending
 `rf_coin_set_settings` RPC, an active Super Admin could set `enabled`,
 `topups_enabled`, and `spending_enabled` to `true` directly, bypassing the
 application API release lock. The new PostgreSQL regression test reproduced
@@ -86,16 +95,17 @@ not included in the audit artifact, so do not infer that ACL from this change.
 ## Migration checksums
 
 SHA-256 for the exact SQL files in source commit
-`69921e560a4d4e0420cdd8c052edfcfb80f7969c`:
+`01076dfbf59206c1ec6101584ddcd819fb9e931e`:
 
 | Order | File | SHA-256 |
 |---|---|---|
-| 1 | `supabase/migrations-pending/20261018160000_rf_coins_schema.sql` | `f2f5120fe048293b6264483bec0d5a137a5b87215c18ab10543718363b4f25ca` |
-| 2 | `supabase/migrations-pending/20261018160100_rf_coins_functions.sql` | `9d02b95f409204988cf22d5a8bd5e1d805a1049747c0a53ed3ab8e2a269f64b3` |
-| 3 | `supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql` | `d6ea8c453c411cfe66ddbaa2e2cfd868a2ffaef87c9211c55fe63218ea9d4005` |
+| 1 | `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` | `2e8ea07baa07ed7fb6ab766aed7e9983572ccf94e91ed0818aa9407ae2e871d3` |
+| 2 | `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` | `8dbc11a82062f0cd1ebdd77ba5500ebae7fca89fa75f2450b0eaec26635efcb8` |
+| 3 | `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` | `1bef2626e079781180336a13990088db6ab7d07af09b144b77508a9a2563d924` |
 
 The same filenames and digests must be rechecked against the final PR head
-before any later migration decision.
+before any later migration decision. The migration-version regression test
+also verifies that all three pending versions sort after the active set.
 
 ## Local security and behavior evidence
 
