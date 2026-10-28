@@ -7,9 +7,9 @@ import { describe, expect, it } from 'vitest';
   roles. These tests inspect SQL only; they never mutate a hosted database.
 */
 
-const functionsSql = readFileSync('supabase/migrations-pending/20261018160100_rf_coins_functions.sql', 'utf8');
-const schemaSql = readFileSync('supabase/migrations-pending/20261018160000_rf_coins_schema.sql', 'utf8');
-const adminCenterSql = readFileSync('supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql', 'utf8');
+const functionsSql = readFileSync('supabase/migrations-pending/20261028120100_rf_coins_functions.sql', 'utf8');
+const schemaSql = readFileSync('supabase/migrations-pending/20261028120000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
 
 describe('canonical RF Coins ACL contract', () => {
   it('revokes anonymous access from customer and guarded admin RPCs', () => {

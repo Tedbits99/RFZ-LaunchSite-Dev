@@ -1,5 +1,5 @@
 -- STATUS: PENDING — NOT applied to the live database. Requires separate owner approval.
--- Apply via the Supabase migration tool with filename 20261018160100_rf_coins_functions.sql
+-- Apply via the Supabase migration tool with filename 20261028120100_rf_coins_functions.sql
 /*
 # RF Coins — Secured Functions (Phase 3)
 

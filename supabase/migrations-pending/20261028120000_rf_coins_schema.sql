@@ -1,5 +1,5 @@
 -- STATUS: PENDING — NOT applied to the live database. Requires separate owner approval.
--- Apply via the Supabase migration tool with filename 20261018160000_rf_coins_schema.sql
+-- Apply via the Supabase migration tool with filename 20261028120000_rf_coins_schema.sql
 /*
 # RF Coins — Schema (Phase 3, feature DISABLED by default)
 
@@ -97,7 +97,7 @@
    - RLS ENABLED on every table.
    - Wallets/ledger/topups: customer SELECT scoped to own rows via auth.uid();
      NO client writes — all mutations go through SECURITY DEFINER functions
-     (companion migration 20261018160100_rf_coins_functions.sql).
+     (companion migration 20261028120100_rf_coins_functions.sql).
    - Packages: authenticated SELECT of active rows only.
    - Adjustment requests: requester SELECT own rows only.
    - Settings & audit: no client policies at all (fail closed).
@@ -399,7 +399,7 @@ ALTER TABLE rf_coin_fulfillment_handoffs ENABLE ROW LEVEL SECURITY;
 
 -- No client policies and no table grants at all (fail closed): the queue is
 -- touched only by the SECURITY DEFINER enqueue/claim/ack/fail functions in
--- 20261018160100_rf_coins_functions.sql, granted to service_role only.
+-- 20261028120100_rf_coins_functions.sql, granted to service_role only.
 REVOKE ALL ON TABLE rf_coin_fulfillment_handoffs
   FROM PUBLIC, anon, authenticated, service_role;
 

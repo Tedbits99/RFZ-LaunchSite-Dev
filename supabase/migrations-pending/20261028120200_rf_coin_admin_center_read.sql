@@ -1,7 +1,7 @@
 -- RF Coins Admin Center: bounded, role-checked reporting surface.
 -- STATUS: PENDING. This migration has not been applied to the hosted project.
--- Requires 20261018160000_rf_coins_schema.sql and
--- 20261018160100_rf_coins_functions.sql.
+-- Requires 20261028120000_rf_coins_schema.sql and
+-- 20261028120100_rf_coins_functions.sql.
 
 CREATE INDEX IF NOT EXISTS rf_coin_ledger_created_kind_idx
   ON public.rf_coin_ledger (created_at DESC, kind);

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /*
@@ -10,9 +10,9 @@ import { describe, expect, it } from 'vitest';
   live database.
 */
 
-const functionsSql = readFileSync('supabase/migrations-pending/20261018160100_rf_coins_functions.sql', 'utf8');
-const schemaSql = readFileSync('supabase/migrations-pending/20261018160000_rf_coins_schema.sql', 'utf8');
-const adminCenterSql = readFileSync('supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql', 'utf8');
+const functionsSql = readFileSync('supabase/migrations-pending/20261028120100_rf_coins_functions.sql', 'utf8');
+const schemaSql = readFileSync('supabase/migrations-pending/20261028120000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
 
 function extractFunction(sql: string, name: string): string {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`);
@@ -186,6 +186,25 @@ describe('rf_coin_release_order_payment', () => {
 });
 
 describe('grants and schema', () => {
+  it('orders pending RF Coins migrations after the complete deployable migration set', () => {
+    const currentVersions = readdirSync('supabase/migrations')
+      .filter((name) => name.endsWith('.sql'))
+      .map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
+    const pendingNames = readdirSync('supabase/migrations-pending')
+      .filter((name) => name.endsWith('.sql') && name.includes('rf_coin'))
+      .sort();
+    const pendingVersions = pendingNames.map((name) => name.match(/^([0-9]{14})_/)?.[1] || '');
+    const latestCurrentVersion = Math.max(...currentVersions);
+
+    expect(latestCurrentVersion).toBeGreaterThan(0);
+    expect(pendingNames).toEqual([
+      '20261028120000_rf_coins_schema.sql',
+      '20261028120100_rf_coins_functions.sql',
+      '20261028120200_rf_coin_admin_center_read.sql',
+    ]);
+    expect(pendingVersions.every((version) => Number(version) > latestCurrentVersion)).toBe(true);
+  });
+
   it('super admin guard denies inactive or suspended admins', () => {
     const guard = extractFunction(functionsSql, 'rf_coin_assert_super_admin');
     expect(guard).toMatch(/admins\.role = 'SUPER_ADMIN'/);

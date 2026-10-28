@@ -101,14 +101,14 @@ CREATE FUNCTION net.http_post(url text, body jsonb, headers jsonb, timeout_milli
 CREATE SCHEMA extensions;
 SQL
 
-docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261018160000_rf_coins_schema.sql" >/dev/null
+docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261028120000_rf_coins_schema.sql" >/dev/null
 # Exercise the future transaction bodies only inside this fresh local DB. The
 # committed release constants remain false and are checked above.
 sed -e 's/v_funding_release_enabled CONSTANT boolean := false/v_funding_release_enabled CONSTANT boolean := true/g' \
     -e 's/v_spending_release_enabled CONSTANT boolean := false/v_spending_release_enabled CONSTANT boolean := true/g' \
-  "$ROOT_DIR/supabase/migrations-pending/20261018160100_rf_coins_functions.sql" \
+  "$ROOT_DIR/supabase/migrations-pending/20261028120100_rf_coins_functions.sql" \
   | docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null
-docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql" >/dev/null
+docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql" >/dev/null
 
 docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres <<SQL >/dev/null
 INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
