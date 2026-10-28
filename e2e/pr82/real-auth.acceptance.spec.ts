@@ -632,11 +632,20 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         `Customer B cross-order denial: http_status=${detailStatus ?? 'no_response'} streamed_not_found=${streamedNotFound} protected_reference_visible=${otherCustomerOrderReferenceVisible}`,
       );
       const adminRouteResponse = await customerBPage.goto(`${baseURL}/admin`, { waitUntil: 'domcontentloaded' });
-      assert(adminRouteResponse?.status() === 404, 'authenticated customer is denied administrator dashboard');
-      await expect(customerBPage.getByText('Overview', { exact: true })).toHaveCount(0);
+      const adminStatus = adminRouteResponse?.status() ?? null;
+      const streamedAdminNotFound = adminStatus === 200;
+      if (streamedAdminNotFound) {
+        await expect(customerBPage.getByText('This page could not be found.', { exact: true })).toBeVisible();
+      }
+      const adminOverviewVisible = await customerBPage.getByText('Overview', { exact: true }).count() > 0;
+      const adminDashboardVisible = await customerBPage.getByText('Dashboard', { exact: true }).count() > 0;
+      await evidence(customerBPage, testInfo, observations, 'customer-admin-denial');
+      assert(
+        (adminStatus === 404 || streamedAdminNotFound) && !adminOverviewVisible && !adminDashboardVisible,
+        `Authenticated customer admin denial: http_status=${adminStatus ?? 'no_response'} streamed_not_found=${streamedAdminNotFound} admin_content_visible=${adminOverviewVisible || adminDashboardVisible}`,
+      );
       const adminApi = await sameOriginJson(customerBPage, '/api/admin/rf-coins');
       assert(adminApi.status === 401 || adminApi.status === 403, 'customer cannot read privileged RF Coins API');
-      await evidence(customerBPage, testInfo, observations, 'customer-admin-denial');
     });
 
     await test.step('verify customer session persistence, invalid password, logout, and login', async () => {
