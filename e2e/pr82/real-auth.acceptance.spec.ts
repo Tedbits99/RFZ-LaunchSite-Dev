@@ -246,6 +246,17 @@ async function mailboxMessages(email: string): Promise<MailSummary[]> {
     .filter((item) => item.id.length > 0);
 }
 
+async function waitForLocalAuthEmailCooldown(messages: MailSummary[]) {
+  const latestSentAt = Math.max(...messages.map((message) => Date.parse(message.date || '')));
+  assert(Number.isFinite(latestSentAt), 'Mailpit exposes the previous local email delivery timestamp');
+  // The disposable GoTrue config enforces a 1s per-user SMTP cooldown. Wait
+  // against the actual delivered message time, with margin for Mailpit's
+  // timestamp precision and runner scheduling, instead of racing the provider.
+  const resendAllowedAt = latestSentAt + 2_000;
+  await expect.poll(() => Date.now(), { timeout: 10_000, intervals: [50, 100, 250] })
+    .toBeGreaterThanOrEqual(resendAllowedAt);
+}
+
 async function capturedLink(email: string, minMessageCount: number, kind: 'signup' | 'recovery') {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
@@ -503,7 +514,9 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await expect.poll(async () => (await mailboxMessages(customerBEmail)).length, { timeout: 30_000 }).toBeGreaterThan(startingCount);
       await gotoPath(customerBPage, `/auth/confirmation?status=pending&email=${encodeURIComponent(customerBEmail)}`, 'confirmation resend');
       await customerBPage.getByLabel('Email').fill(customerBEmail);
-      const beforeResend = (await mailboxMessages(customerBEmail)).length;
+      const messagesBeforeResend = await mailboxMessages(customerBEmail);
+      const beforeResend = messagesBeforeResend.length;
+      await waitForLocalAuthEmailCooldown(messagesBeforeResend);
       await customerBPage.getByRole('button', { name: 'Resend confirmation email' }).click();
       await expect(customerBPage.getByRole('status')).toContainText('confirmation instructions will be sent');
       await expect.poll(async () => (await mailboxMessages(customerBEmail)).length, { timeout: 30_000 }).toBeGreaterThan(beforeResend);

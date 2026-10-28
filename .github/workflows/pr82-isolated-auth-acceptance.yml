@@ -163,11 +163,16 @@ jobs:
           auth_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${auth_containers[0]}")"
           smtp_host="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_HOST=//p')"
           smtp_port="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_PORT=//p')"
-          SMTP_HOST="$smtp_host" SMTP_PORT="$smtp_port" node <<'NODE'
+          email_rate_limit="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_RATE_LIMIT_EMAIL_SENT=//p')"
+          smtp_max_frequency="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_MAX_FREQUENCY=//p')"
+          SMTP_HOST="$smtp_host" SMTP_PORT="$smtp_port" EMAIL_RATE_LIMIT="$email_rate_limit" SMTP_MAX_FREQUENCY="$smtp_max_frequency" node <<'NODE'
           if (process.env.SMTP_HOST !== 'inbucket' || process.env.SMTP_PORT !== '1025') {
             throw new Error(`Isolated SMTP binding mismatch: observed host=${process.env.SMTP_HOST || 'missing'} port=${process.env.SMTP_PORT || 'missing'}, expected host=inbucket port=1025.`);
           }
-          console.log('LOCAL_AUTH_SMTP_BINDING_PASS host=inbucket container_port=1025');
+          if (process.env.EMAIL_RATE_LIMIT !== '30' || process.env.SMTP_MAX_FREQUENCY !== '1s') {
+            throw new Error(`Isolated Auth email policy mismatch: expected email rate limit 30/hour and SMTP cooldown 1s; observed rate=${process.env.EMAIL_RATE_LIMIT || 'missing'} cooldown=${process.env.SMTP_MAX_FREQUENCY || 'missing'}.`);
+          }
+          console.log('LOCAL_AUTH_EMAIL_POLICY_PASS rate_limit=30_per_hour cooldown=1s SMTP=inbucket:1025');
           NODE
 
       - name: Bind application only to validated loopback Supabase and mask local keys
