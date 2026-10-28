@@ -97,7 +97,10 @@ export async function POST(request: NextRequest) {
       sessionFingerprint: sessionFingerprint(accessToken),
     });
     if (!proof.ok) {
-      logAuthFlowFailure('password_recovery', stage);
+      // The reason is a fixed, non-sensitive enum. It helps distinguish a
+      // cookie transport/configuration defect from a genuine session mismatch
+      // without logging proof contents, user IDs, tokens or secret material.
+      logAuthFlowFailure('password_recovery', `${stage}_${proof.reason}`);
       return json({ error: GENERIC_INVALID }, 403);
     }
 

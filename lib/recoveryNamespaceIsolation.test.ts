@@ -141,9 +141,9 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
       expect(isRecoveryProofPresent({ get: (n: string) => (n === RECOVERY_PROOF_COOKIE ? { value: 'short' } : undefined) })).toBe(false);
 
       expect(verifyRecoveryProof(proof.value, binding)).toMatchObject({ ok: true, claims: { userId: 'customer-1', purpose: 'password-reset' } });
-      expect(verifyRecoveryProof(proof.value, { userId: 'other', sessionFingerprint: binding.sessionFingerprint }).ok).toBe(false);
-      expect(verifyRecoveryProof(proof.value, { userId: 'customer-1', sessionFingerprint: sessionFingerprint('other-token') }).ok).toBe(false);
-      expect(verifyRecoveryProof('garbage', binding).ok).toBe(false);
+      expect(verifyRecoveryProof(proof.value, { userId: 'other', sessionFingerprint: binding.sessionFingerprint })).toMatchObject({ ok: false, reason: 'user_mismatch' });
+      expect(verifyRecoveryProof(proof.value, { userId: 'customer-1', sessionFingerprint: sessionFingerprint('other-token') })).toMatchObject({ ok: false, reason: 'session_mismatch' });
+      expect(verifyRecoveryProof('garbage', binding)).toMatchObject({ ok: false, reason: 'malformed_proof' });
 
       const cleared = clearRecoveryProofCookie();
       expect(cleared.value).toBe('');
@@ -159,7 +159,7 @@ describe('recovery namespace isolation (real SDK storage behavior, mocked networ
     delete (globalThis as { window?: unknown }).window;
     delete process.env.RFZ_RECOVERY_PROOF_HMAC_SECRET;
     expect(() => newRecoveryProofCookie({ userId: 'u', sessionFingerprint: sessionFingerprint('t') })).toThrow();
-    expect(verifyRecoveryProof('anything', { userId: 'u', sessionFingerprint: sessionFingerprint('t') }).ok).toBe(false);
+    expect(verifyRecoveryProof('anything', { userId: 'u', sessionFingerprint: sessionFingerprint('t') })).toMatchObject({ ok: false, reason: 'secret_unavailable' });
   });
 
   it('keeps the recovery flow wired end to end in application code', () => {

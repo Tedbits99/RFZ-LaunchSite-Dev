@@ -708,6 +708,11 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await gotoMailLink(page, resetLink, 'password recovery callback');
       assert(safePath(page) === '/auth/reset-password', 'recovery email reaches trusted reset page');
       await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
+      const recoveryProofCookie = (await page.context().cookies()).find((cookie) => cookie.name === 'rfz-recovery-proof');
+      assert(
+        recoveryProofCookie?.path === '/auth/reset-password',
+        `recovery callback must persist its path-scoped proof cookie (present=${Boolean(recoveryProofCookie)} path=${recoveryProofCookie?.path ?? 'absent'} secure=${recoveryProofCookie?.secure ?? 'absent'})`,
+      );
       await page.locator('input[autocomplete="new-password"]').fill(newPassword);
       await page.getByRole('button', { name: 'Update password' }).click();
       await expect(page.getByRole('heading', { name: 'Password set' })).toBeVisible();

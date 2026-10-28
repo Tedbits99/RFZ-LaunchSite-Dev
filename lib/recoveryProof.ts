@@ -37,9 +37,20 @@ export type RecoveryProofClaims = {
 };
 
 export type RecoveryProof = { name: string; value: string; options: CookieOptions };
+export type RecoveryProofFailureCode =
+  | 'missing_or_oversized'
+  | 'secret_unavailable'
+  | 'malformed_proof'
+  | 'malformed_claims'
+  | 'wrong_purpose'
+  | 'expired'
+  | 'invalid_signature'
+  | 'user_mismatch'
+  | 'session_mismatch';
+
 type RecoveryProofVerification =
   | { ok: true; claims: RecoveryProofClaims }
-  | { ok: false };
+  | { ok: false; reason: RecoveryProofFailureCode };
 
 interface CookieOptions {
   httpOnly: boolean;
@@ -120,28 +131,28 @@ export function verifyRecoveryProof(
   expected: { userId: string; sessionFingerprint: string },
 ): RecoveryProofVerification {
   if (typeof cookieValue !== 'string' || cookieValue.length === 0 || cookieValue.length > 4096) {
-    return { ok: false };
+    return { ok: false, reason: 'missing_or_oversized' };
   }
 
   let secret: string;
   try {
     secret = getSecret();
   } catch {
-    return { ok: false };
+    return { ok: false, reason: 'secret_unavailable' };
   }
 
   const parts = cookieValue.split('.');
-  if (parts.length !== 2) return { ok: false };
+  if (parts.length !== 2) return { ok: false, reason: 'malformed_proof' };
   const [payload, sig] = parts;
 
   let claims: unknown;
   try {
     claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
-    return { ok: false };
+    return { ok: false, reason: 'malformed_claims' };
   }
 
-  if (!claims || typeof claims !== 'object') return { ok: false };
+  if (!claims || typeof claims !== 'object') return { ok: false, reason: 'malformed_claims' };
   const record = claims as Partial<RecoveryProofClaims>;
   if (
     typeof record.token !== 'string' ||
@@ -154,14 +165,14 @@ export function verifyRecoveryProof(
     typeof record.exp !== 'number' ||
     !Number.isFinite(record.exp)
   ) {
-    return { ok: false };
+    return { ok: false, reason: 'malformed_claims' };
   }
 
-  if (record.purpose !== RECOVERY_PROOF_PURPOSE) return { ok: false };
-  if (record.exp <= Math.floor(Date.now() / 1000)) return { ok: false };
-  if (!safeEqual(sig, sign(payload, secret))) return { ok: false };
-  if (!safeEqual(record.userId, expected.userId)) return { ok: false };
-  if (!safeEqual(record.sessionFingerprint, expected.sessionFingerprint)) return { ok: false };
+  if (record.purpose !== RECOVERY_PROOF_PURPOSE) return { ok: false, reason: 'wrong_purpose' };
+  if (record.exp <= Math.floor(Date.now() / 1000)) return { ok: false, reason: 'expired' };
+  if (!safeEqual(sig, sign(payload, secret))) return { ok: false, reason: 'invalid_signature' };
+  if (!safeEqual(record.userId, expected.userId)) return { ok: false, reason: 'user_mismatch' };
+  if (!safeEqual(record.sessionFingerprint, expected.sessionFingerprint)) return { ok: false, reason: 'session_mismatch' };
 
   return {
     ok: true,
