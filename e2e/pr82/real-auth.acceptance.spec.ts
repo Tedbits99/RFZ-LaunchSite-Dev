@@ -675,7 +675,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await page.getByLabel('Email').fill(customerAEmail);
       await page.locator('input[autocomplete="current-password"]').fill('Disposable-Wrong-77!xyz');
       await page.getByRole('button', { name: 'Sign In' }).click();
-      await expect(page.getByRole('alert')).toContainText('Unable to sign in with those credentials');
+      await expect(page.getByText('Unable to sign in with those credentials.', { exact: true })).toBeVisible();
       assert(safePath(page) === '/login', 'incorrect customer password is rejected');
       await page.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await page.getByRole('button', { name: 'Sign In' }).click();
@@ -716,7 +716,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await page.getByLabel('Email').fill(customerAEmail);
       await page.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await page.getByRole('button', { name: 'Sign In' }).click();
-      await expect(page.getByRole('alert')).toContainText('Unable to sign in with those credentials');
+      await expect(page.getByText('Unable to sign in with those credentials.', { exact: true })).toBeVisible();
       assert(safePath(page) === '/login', 'old password is rejected after recovery');
       await page.locator('input[autocomplete="current-password"]').fill(newPassword);
       await page.getByRole('button', { name: 'Sign In' }).click();
@@ -730,7 +730,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       assert(safePath(page) === '/auth/reset-password', 'reused recovery link stays at reset boundary');
       await page.locator('input[autocomplete="new-password"]').fill(rejectedReusePassword);
       await page.getByRole('button', { name: 'Update password' }).click();
-      await expect(page.getByRole('alert')).toContainText('invalid or has expired');
+      await expect(page.locator('form [role="alert"]')).toContainText('invalid or has expired');
       await assertLogin(page, customerAEmail, newPassword);
       await evidence(page, testInfo, observations, 'password-reuse-denied');
     });
