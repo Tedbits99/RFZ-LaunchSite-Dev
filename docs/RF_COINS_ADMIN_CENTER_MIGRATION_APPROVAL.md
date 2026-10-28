@@ -2,6 +2,37 @@
 
 Status: **HOLD — READ-ONLY PREFLIGHT FOUND A RELEASE-LOCK DEFECT; FIXED IN THE PR, BUT HOSTED CONTRACT/UPGRADED-REHEARSAL EVIDENCE IS INCOMPLETE. DO NOT APPLY.**
 
+## 2026-10-28 hosted ACL follow-up — source-only, still NO-GO
+
+The protected metadata-only ACL audit (`40639888077`, artifact
+`hosted-acl-metadata.json`, SHA-256
+`1c53092074c39e8330dd3287b61452678ae3c70fc1f8b58aa5f8482de10ee321`)
+identified excessive `TRUNCATE`, `REFERENCES`, `TRIGGER`, and PostgreSQL 17
+`MAINTAIN` grants to `anon` and `authenticated` on 24 public tables, plus the
+same four grants to `authenticated` on `admins`, `order_timeline`, and `orders`.
+It also identified those browser-role defaults in five audited creator/schema
+contexts: `postgres/public`, `supabase_admin/public`, `supabase_admin/graphql`,
+`supabase_admin/graphql_public`, and `postgres/storage`. The audit did not
+report PUBLIC or `service_role` grants for those privileges. This finding is
+not proof that the grants were exploitable through PostgREST; the migration is
+limited to reducing the recorded ACL surface without changing RLS, policies,
+or ordinary data privileges.
+
+Source migration `supabase/migrations/20261028130000_revoke_browser_table_ddl_privileges.sql`
+now fails closed on an unexpected PUBLIC grant, missing audited object/role,
+disabled RLS, wrong PostgreSQL major version, unexpected PUBLIC defaults, or
+global browser-role defaults that a schema-scoped revoke could not cancel. It
+revokes only the four audited privileges for the recorded role/table pairs and
+five scoped default ACLs. The disposable rehearsal
+`supabase/tests/database/hosted-acl-remediation-rehearsal.sql` reconstructs
+the audited grants in a transaction, applies the migration, and verifies
+ordinary SELECT/DML grants, RLS and policies, PUBLIC/service-role ACLs,
+unrelated default ACLs, and the `payment_transactions` access contract remain
+unchanged. The transaction rolls back. This is source/test preparation only:
+the migration has **not** been applied to the hosted project, no ACL has been
+changed, and the migration recommendation remains **NO-GO** pending successful
+disposable PostgreSQL 17 rehearsal and separate release authorization.
+
 The RF Coins wallet tables and reporting RPCs were absent in fresh read-only
 audit run `40623744044` against development project `ketdhcmwowzztcdlmris`.
 The Admin Center therefore reports the feature as unavailable; it does not

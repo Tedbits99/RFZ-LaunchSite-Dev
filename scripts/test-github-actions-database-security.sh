@@ -168,6 +168,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
           supabase/tests/hosted-acl-metadata-audit.sql|\
+          supabase/tests/database/hosted-acl-remediation-rehearsal.sql|\
           supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
           supabase/tests/database/rf-coins-default-acl-fixture.sql|\
           supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
@@ -216,19 +217,25 @@ validate_psql_invocation() {
 }
 
 test_psql_invocation_validator() {
-  local valid_url
+  local valid_url manifest_count
   valid_url="$(validate_db_url "postgresql://postgres:test%40pass@127.0.0.1:${local_db_port}/postgres" "$local_db_port")" || return 1
+  manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' \
+    "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")" || return 1
+  [[ "$manifest_count" =~ ^[1-9][0-9]*$ ]] || return 1
 
   # Exercise every argument shape used by the harness without opening a socket.
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
-    --set expected_migration_count=100 --file supabase/tests/database/existing-schema-upgrade.sql || return 1
+    --set expected_migration_count="$manifest_count" \
+    --file supabase/tests/database/existing-schema-upgrade.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
     --file supabase/tests/database/rf-coins-default-acl-fixture.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --command "SELECT 1;" || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --quiet --tuples-only --no-align \
     --set ON_ERROR_STOP=1 --file supabase/tests/hosted-acl-metadata-audit.sql || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/hosted-acl-remediation-rehearsal.sql || return 1
 
   assert_psql_args_rejected() {
     if validate_psql_invocation "$valid_url" "$valid_url" "$@"; then
@@ -268,11 +275,11 @@ test_psql_invocation_validator() {
   assert_psql_args_rejected --set ON_ERROR_STOP=1 --set ON_ERROR_STOP=1 || return 1
   assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=0 \
     --file supabase/tests/database/existing-schema-upgrade.sql || return 1
-  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=100 \
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count="$manifest_count" \
     --file supabase/tests/privileged-rpc-security.sql || return 1
-  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=100 \
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql \
-    --set expected_migration_count=101 || return 1
+    --set expected_migration_count="$((manifest_count + 1))" || return 1
   assert_psql_args_rejected --file supabase/tests/completion-receipt-outbox-worker.sql \
     --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
   assert_psql_args_rejected --command 'SELECT 1;' --command 'SELECT 2;' || return 1
@@ -434,6 +441,8 @@ cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
 cp "$project_root/supabase/tests/hosted-acl-metadata-audit.sql" \
   "$test_root/supabase/tests/hosted-acl-metadata-audit.sql"
+cp "$project_root/supabase/tests/database/hosted-acl-remediation-rehearsal.sql" \
+  "$test_root/supabase/tests/database/hosted-acl-remediation-rehearsal.sql"
 cp "$project_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql" \
   "$test_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql"
 cp "$project_root/supabase/tests/database/rf-coins-default-acl-fixture.sql" \
@@ -636,6 +645,11 @@ echo "Executing completion receipt outbox worker assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/completion-receipt-outbox-worker.sql
+
+echo "Rehearsing the hosted ACL remediation against disposable PostgreSQL 17 metadata..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/database/hosted-acl-remediation-rehearsal.sql
 
 echo "Executing metadata-only ACL inventory against the disposable PostgreSQL 17 database..."
 acl_metadata_output="$test_root/hosted-acl-metadata-validation.jsonl"
