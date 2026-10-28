@@ -326,6 +326,11 @@ async function createOrderFixture(localAdmin: SupabaseClient, email: string, pas
   assert(!game.error && game.data, 'canonical synthetic game fixture is available');
   const product = await client.from('packages').select('id').eq('game_id', game.data.id).eq('is_active', true).limit(1).single();
   assert(!product.error && product.data, 'canonical synthetic product package is available');
+  const manualPayment = await localAdmin.from('payment_config')
+    .select('method_key,provider_type,is_enabled')
+    .eq('method_key', 'gcash')
+    .single();
+  assert(!manualPayment.error && manualPayment.data.is_enabled && manualPayment.data.provider_type === 'manual', 'disposable database exposes its seeded manual payment method');
   // Match the real checkout route: generate an unguessable capability, send
   // only its SHA-256 digest through the customer-authenticated RPC, and let
   // the database trigger persist that digest outside player_inputs.
@@ -341,7 +346,7 @@ async function createOrderFixture(localAdmin: SupabaseClient, email: string, pas
       server_id: '1001',
       __rfz_order_access_hash: orderCapabilityHash,
     },
-    p_payment_method: 'manual',
+    p_payment_method: manualPayment.data.method_key,
     p_voucher_code: null,
     p_voucher_email: null,
   });
