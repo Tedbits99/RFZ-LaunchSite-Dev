@@ -275,6 +275,29 @@ jobs:
             echo 'BLOCKED: source migration files do not match the reviewed main-branch manifest.' >&2
             exit 1
           }
+          command -v sha256sum >/dev/null || {
+            echo 'BLOCKED: required SHA-256 migration verifier is unavailable.' >&2
+            exit 1
+          }
+          awk -F'|' '/\| INCLUDE \|/ {
+            gsub(/`/, "", $4)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $4)
+            gsub(/`/, "", $5)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $5)
+            if ($4 !~ /^[A-Za-z0-9_.-]+\.sql$/ || length($5) != 64 || $5 !~ /^[0-9a-f]+$/) exit 2
+            print $4 "\t" $5
+          }' "$manifest" > "$RUNNER_TEMP/expected-migration-hashes.txt" || {
+            echo 'BLOCKED: canonical migration manifest contains an invalid filename or SHA-256.' >&2
+            exit 1
+          }
+          while IFS="$(printf '\t')" read -r migration_name expected_hash; do
+            [ -n "$migration_name" ] || continue
+            actual_hash="$(sha256sum -- "$migration_dir/$migration_name" | awk '{print $1}')"
+            [ "$actual_hash" = "$expected_hash" ] || {
+              echo "BLOCKED: source migration checksum does not match the trusted manifest: $migration_name" >&2
+              exit 1
+            }
+          done < "$RUNNER_TEMP/expected-migration-hashes.txt"
           count="$(wc -l < "$RUNNER_TEMP/source-migrations.txt" | tr -d ' ')"
           if rg -n -i --glob '*.sql' \
             '(drop[[:space:]]+(table|schema|database)|truncate([[:space:];]|$)|alter[[:space:]]+table[^;]*(drop[[:space:]]+column)|cron\.schedule|net\.http|http_(post|get)|https?://)' \

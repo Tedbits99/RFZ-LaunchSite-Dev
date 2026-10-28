@@ -133,10 +133,11 @@
 | 95 | INCLUDE | `20261019110000_restrict_order_archive_rpc.sql` | `cc165f381d0a256b215a4e0907eed7f3488d94e6222a6b1033e3b16999a8075f` | 94. 20261018153746_20261018160000_restore_mlbb_package_count_filter.sql | no outbound target; run in isolated disposable DB |
 | 96 | INCLUDE | `20261019120000_completion_receipt_reconciliation_contract.sql` | `4dc3561332c5c4b604d7e3d880380e076b32b83d691c546f880ec5dd0902b7e2` | 95. 20261019110000_restrict_order_archive_rpc.sql | no outbound target; run in isolated disposable DB |
 
-| 97 | INCLUDE | `20261026053026_fazercards_signed_webhook_inbox.sql` | `56cbfb5d6622067c9280ce36f7232c553514304da7082dae8d0d78a4b3ffe8af` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | signed supplier event inbox, restricted RLS, admin notifications; publication metadata only |
+| 97 | INCLUDE | `20261026053026_fazercards_signed_webhook_inbox.sql` | `bdef9625c14f05ca7f4dec384d2170b04e2605612d71341d6d2f51577e598e76` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | signed supplier event inbox, restricted RLS, admin notifications; publication metadata only |
 | 98 | INCLUDE | `20261026120000_admins_select_privilege.sql` | `dce788c276dc804f337ff0f8259bc56c0c477c707d31ab4dd6cee6dc4da667f9` | 97. 20261026053026_fazercards_signed_webhook_inbox.sql | minimum API-role SELECT grant for existing admin RLS; no anonymous access or outbound target |
 | 99 | INCLUDE | `20261026130000_lock_first_admin_bootstrap.sql` | `405e1e03115c394a1ef3c7d496952aa020d8edbc4443039dc67b970330820991` | 98. 20261026120000_admins_select_privilege.sql | revoke client-role execution from legacy first-admin bootstrap; no outbound target |
 | 100 | INCLUDE | `20261027110000_grant_public_catalog_columns.sql` | `ed297e3c69578a0dbf6268e06213e055a200cbc291bccea095fdee1466db852b` | 99. 20261026130000_lock_first_admin_bootstrap.sql | minimum public catalog column grants; RLS still restricts inactive rows; supplier cost/offer/markup columns remain private |
+| 101 | INCLUDE | `20261028113000_revoke_browser_table_ddl_privileges.sql` | `a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d` | 100. 20261027110000_grant_public_catalog_columns.sql | revoke only audited anon/authenticated TRUNCATE/REFERENCES/TRIGGER/MAINTAIN grants; postgres defaults only; all supabase_admin defaults unchanged |
 
 ## Execution gates
 
