@@ -1,0 +1,254 @@
+name: PR82 isolated real-auth acceptance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr82-isolated-auth-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-real-auth:
+    if: github.event.pull_request.number == 82
+    name: Isolated real Auth (${{ matrix.wallet-schema }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        wallet-schema: [absent, installed-locked]
+    env:
+      CI: "true"
+      E2E_WALLET_SCHEMA_MODE: ${{ matrix.wallet-schema }}
+      E2E_RUN_TAG: pr82-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.wallet-schema }}
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000
+      PAYMENT_MODE: mock
+      PAYMENT_PROVIDER: mock
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - name: Check out exact PR head without persisting credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify this is the exact PR #82 candidate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" == 82 ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf 'ISOLATED_AUTH_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install application and browser-test dependencies
+        run: npm ci
+
+      - name: Install pinned Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.121.0
+
+      - name: Verify isolated local CLI capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version | grep -Fx '2.121.0'
+          supabase start --help | grep -q -- '--exclude'
+          supabase db reset --help >/dev/null
+          supabase status --help | grep -q -- '--output'
+
+      - name: Build isolated migration project
+        shell: bash
+        env:
+          MODE: ${{ matrix.wallet-schema }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/verify-deployable-migrations.sh
+          stack_root="$RUNNER_TEMP/rfz-pr82-${MODE}"
+          mkdir -p "$stack_root/supabase/migrations"
+          cp supabase/e2e/config.toml "$stack_root/supabase/config.toml"
+          expected_wallet_files=(
+            20261028120000_rf_coins_schema.sql
+            20261028120100_rf_coins_functions.sql
+            20261028120200_rf_coin_admin_center_read.sql
+          )
+          copied=0
+          while IFS= read -r -d '' migration; do
+            name="${migration##*/}"
+            if [[ "$MODE" == absent ]]; then
+              case "$name" in
+                20261028120000_rf_coins_schema.sql|20261028120100_rf_coins_functions.sql|20261028120200_rf_coin_admin_center_read.sql)
+                  continue
+                  ;;
+              esac
+            fi
+            cp -- "$migration" "$stack_root/supabase/migrations/$name"
+            copied=$((copied + 1))
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print0 | sort -z)
+          [[ "$copied" -gt 0 ]]
+          if [[ "$MODE" == installed-locked ]]; then
+            for name in "${expected_wallet_files[@]}"; do
+              test -s "$stack_root/supabase/migrations/$name"
+            done
+          fi
+          if [[ -e "$stack_root/supabase/.temp/project-ref" ]]; then
+            echo 'Refusing a linked local Supabase project.' >&2
+            exit 1
+          fi
+          printf 'RFZ_STACK_ROOT=%s\nRFZ_MIGRATION_FILE_COUNT=%s\n' "$stack_root" "$copied" >> "$GITHUB_ENV"
+          printf 'ISOLATED_MIGRATION_MODE=%s files=%s candidate=%s\n' "$MODE" "$copied" "$EXPECTED_SHA"
+
+      - name: Start disposable PostgreSQL 17, GoTrue, PostgREST and local email catcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(sed -n 's/^project_id = "\([^"]*\)"$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")" == runfazone-pr82-isolated-auth ]]
+          [[ ! -e "$RFZ_STACK_ROOT/supabase/.temp/project-ref" ]]
+          cli_log="$RUNNER_TEMP/rfz-pr82-cli-${E2E_WALLET_SCHEMA_MODE}.log"
+          trap 'rm -f "$cli_log"' EXIT
+          report_sanitized_cli_failure() {
+            node - "$cli_log" <<'NODE'
+          import fs from 'node:fs';
+          const file = process.argv[2];
+          const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => /error|failed|refused|timeout|cannot|denied/i.test(line));
+          const safe = lines.map((line) => line
+            .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[REDACTED_DATABASE_URL]')
+            .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_LOCAL_JWT]')
+            .replace(/((?:service_role|anon|api|db)[ _-]?(?:key|password|secret)\s*[:=]\s*)[^\s,]+/gi, '$1[REDACTED]')
+            .replace(/(password\s*[=:]\s*)[^\s,]+/gi, '$1[REDACTED]'));
+          for (const line of safe.slice(-8)) console.error(line.slice(0, 500));
+          NODE
+          }
+          if ! env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_PASSWORD -u SUPABASE_PROJECT_ID \
+            supabase --workdir "$RFZ_STACK_ROOT" start --exclude studio,storage-api,imgproxy,realtime,edge-runtime,logflare,vector,postgres-meta,supavisor >"$cli_log" 2>&1; then
+            echo 'Disposable Supabase startup failed; sanitized CLI diagnostics follow.' >&2
+            report_sanitized_cli_failure
+            exit 1
+          fi
+          if ! env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_PASSWORD -u SUPABASE_PROJECT_ID \
+            supabase --workdir "$RFZ_STACK_ROOT" db reset --local >"$cli_log" 2>&1; then
+            echo 'Disposable migration reset failed; sanitized CLI diagnostics follow.' >&2
+            report_sanitized_cli_failure
+            exit 1
+          fi
+
+      - name: Bind application only to validated loopback Supabase and mask local keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_file="$RUNNER_TEMP/rfz-pr82-supabase-status.env"
+          env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_PASSWORD -u SUPABASE_PROJECT_ID \
+            supabase --workdir "$RFZ_STACK_ROOT" status --output env > "$status_file"
+          node --input-type=module - "$status_file" "$GITHUB_ENV" <<'NODE'
+          import fs from 'node:fs';
+          import { randomBytes } from 'node:crypto';
+          import { URL } from 'node:url';
+          const [statusPath, githubEnvPath] = process.argv.slice(2);
+          const values = Object.fromEntries(fs.readFileSync(statusPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
+            const at = line.indexOf('=');
+            if (at < 1) throw new Error('Unexpected local Supabase status format.');
+            const key = line.slice(0, at);
+            let value = line.slice(at + 1).trim();
+            if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+            return [key, value];
+          }));
+          const api = values.API_URL || values.SUPABASE_URL;
+          const anon = values.ANON_KEY || values.SUPABASE_ANON_KEY;
+          const service = values.SERVICE_ROLE_KEY || values.SUPABASE_SERVICE_ROLE_KEY;
+          if (!api || !anon || !service) throw new Error('Disposable Supabase did not report required local services.');
+          const parsed = new URL(api);
+          if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || parsed.port !== '54321' || parsed.pathname !== '/') {
+            throw new Error('Refusing non-loopback or unexpected Supabase API origin.');
+          }
+          const forbidden = [
+            'PAYMONGO_SECRET_KEY', 'PAYMENT_PAYMONGO_SECRET_KEY', 'FAZERCARDS_API_KEY',
+            'SUPPLIER_FAZERCARDS_API_KEY', 'SMTP_PASSWORD', 'CRYPTO_PROVIDER_SECRET',
+          ];
+          for (const key of forbidden) if (process.env[key]) throw new Error('External provider credentials are not allowed in isolated acceptance.');
+          const hmac = randomBytes(48).toString('base64url');
+          const lines = [
+            `NEXT_PUBLIC_SUPABASE_URL=${api}`,
+            `SUPABASE_URL=${api}`,
+            `NEXT_PUBLIC_SUPABASE_ANON_KEY=${anon}`,
+            `SUPABASE_ANON_KEY=${anon}`,
+            `SUPABASE_SERVICE_ROLE_KEY=${service}`,
+            `RFZ_RECOVERY_PROOF_HMAC_SECRET=${hmac}`,
+            `RFZ_CUSTOMER_CONFIRMATION_RESEND_HMAC_SECRET=${hmac}`,
+            `E2E_MAILPIT_URL=http://127.0.0.1:54324`,
+          ];
+          for (const secret of [anon, service, hmac]) process.stdout.write(`::add-mask::${secret}\n`);
+          fs.appendFileSync(githubEnvPath, `${lines.join('\n')}\n`);
+          fs.unlinkSync(statusPath);
+          console.log(`LOCAL_SUPABASE_BINDING_PASS origin=${parsed.origin} project=runfazone-pr82-isolated-auth`);
+          NODE
+
+      - name: Verify disposable migration state and release locks
+        shell: bash
+        env:
+          MODE: ${{ matrix.wallet-schema }}
+        run: |
+          set -euo pipefail
+          supabase --workdir "$RFZ_STACK_ROOT" migration list --local >/dev/null
+          node --input-type=module <<'NODE'
+          import { createClient } from '@supabase/supabase-js';
+          const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+          const expected = process.env.MODE === 'installed-locked';
+          const tables = ['rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger'];
+          const results = await Promise.all(tables.map((table) => client.from(table).select('*', { head: true, count: 'exact' }).limit(0)));
+          const present = results.every((result) => !result.error);
+          if (present !== expected) throw new Error('RF Coins schema does not match requested isolated test mode.');
+          if (expected) {
+            const { data, error } = await client.from('rf_coin_settings').select('enabled,topups_enabled,spending_enabled').eq('id', 1).single();
+            if (error || data.enabled || data.topups_enabled || data.spending_enabled) throw new Error('RF Coins default release locks are not all off.');
+          }
+          console.log(`LOCAL_SCHEMA_STATE_PASS mode=${process.env.MODE} wallets=${expected ? 'installed-locked' : 'absent'}`);
+          NODE
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build the exact candidate with local-only Auth bindings
+        run: npm run build
+
+      - name: Run real customer and admin Auth browser acceptance
+        env:
+          E2E_EVIDENCE_DIR: artifacts/isolated-auth/${{ matrix.wallet-schema }}
+          E2E_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npm run test:e2e:isolated-auth
+
+      - name: Upload sanitized browser evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr82-isolated-auth-${{ matrix.wallet-schema }}-${{ github.event.pull_request.head.sha }}
+          path: artifacts/isolated-auth/${{ matrix.wallet-schema }}
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop disposable Supabase services
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${RFZ_STACK_ROOT:-}" && -d "$RFZ_STACK_ROOT" ]]; then
+            env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_PASSWORD -u SUPABASE_PROJECT_ID \
+              supabase --workdir "$RFZ_STACK_ROOT" stop --no-backup >/dev/null 2>&1 || true
+          fi

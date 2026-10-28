@@ -9,6 +9,7 @@
     "cloudflare:build": "mkdir -p ${XDG_CONFIG_HOME:-/tmp/rfz-xdg} && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} opennextjs-cloudflare build",
     "cloudflare:dev": "npm run cloudflare:build && XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-/tmp/rfz-xdg} wrangler dev",
     "start": "next start",
+    "test:e2e:isolated-auth": "playwright test --config=playwright.pr82.config.ts",
     "lint": "eslint .",
     "test": "vitest run"
   },
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10",
     "@opennextjs/cloudflare": "1.20.12",
+    "@playwright/test": "^1.64.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "globals": "^17.13.0",
