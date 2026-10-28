@@ -39,6 +39,12 @@ enable_manual_linking = false
 minimum_password_length = 12
 refresh_token_reuse_interval = 0
 
+[auth.rate_limit]
+# Supabase's CLI default is 2 emails/hour, too low for the synthetic signup,
+# resend, and recovery journeys in this disposable local-only test stack.
+# This does not change the shared/hosted Auth project's rate limits.
+email_sent = 30
+
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
