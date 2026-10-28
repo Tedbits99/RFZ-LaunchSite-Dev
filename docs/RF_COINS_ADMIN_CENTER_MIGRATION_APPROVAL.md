@@ -680,3 +680,94 @@ schema.
 evidence are still missing. Hosted schema/ACL changes, wallet funding and
 spending remain unapplied/disabled. No hosted data export, backup, restore,
 payment, supplier activity, or Worker activation occurred.
+
+## Supplemental trusted-audit and main-line status (2026-10-28)
+
+This section supersedes earlier statements about PR #88 and the current main
+SHA only from the timestamped evidence below. Earlier run results and hashes
+remain historical and candidate-bound.
+
+### Infrastructure workflow and CI
+
+- PR #88 source commit `873af01ab81a14a986cad6ff661ec4a44baa480d` passed
+  Frontend validation run `40636301347` and Development validation run
+  `40636301329`; both runs have terminal SUCCESS on that exact SHA. The
+  Development run emitted
+  `HOSTED_ACL_METADATA_POSTGRES17_FIXTURE_PASS tables=36 sections=9` in both
+  the isolated database-security and legacy-upgrade steps. This verifies the
+  query/validator against a disposable PostgreSQL 17 fixture only; it is not
+  hosted-project evidence.
+- The PR #88 change was subsequently merged by `github-actions[bot]` through
+  the pre-existing `Trusted Codex auto-merge` workflow. Workflow run
+  `40636873664` completed SUCCESS; merge commit/current main is
+  `b726746dfd42b0976188cb8e0c731e46cd97f092`. The PR had no recorded review.
+  The workflow's verifier accepted the repository rule set with zero required
+  approvals and then requested native auto-merge. No hosted metadata audit was
+  dispatched as part of that merge. This is recorded as an automation event,
+  not as owner review or approval of hosted execution.
+- The exact merged-main SHA passed Frontend validation run `40637177407` and
+  Development validation run `40637180208`, both terminal SUCCESS. The
+  Development run's `Production release safety`, isolated Supabase RPC
+  security, and legacy-to-current upgrade jobs all completed SUCCESS.
+- The protected `runfazone-development-db` environment's persisted deployment
+  branch policy was read back: selected branches, exactly one allowed branch,
+  `main`. No hosted database operation was launched.
+- Before this supplemental document-only update, PR #82 was OPEN/DRAFT at
+  `1f81165151b8b22065d97af13faa3485dba640d9` and reported
+  `CONFLICTING` against main. A read-only merge-tree comparison identifies one
+  content conflict in `scripts/test-github-actions-database-security.sh`,
+  where PR #82 and PR #88 independently added harness changes. The conflict
+  has not been resolved or pushed in this update.
+
+### Hosted ACL audit remains unverified
+
+The trusted `metadata-acl-audit` operation is now present on main, but there
+is still no run, artifact, or fresh hosted catalog capture after the merge.
+Accordingly, the 36-table counts, effective privilege counts, direct grantors,
+default ACL grantors, and role-inheritance observations above remain
+owner-provided evidence only. Exact affected relations and post-default-ACL
+provenance are not yet independently verified. Public SQL/PostgREST
+exploitability remains **NOT ESTABLISHED**. No ACL remediation is prepared at
+relation-level precision and no hosted ACL was changed.
+
+The current request requires approval before hosted execution; therefore no
+`metadata-acl-audit` dispatch was made. Before a future run, the owner must
+review the PR #88 merge/automation event and explicitly authorize a read-only
+dispatch from `main` using the new `metadata-acl-audit` operation. The run
+must use the fixed project reference, produce its bounded metadata-only
+artifact, and be checked for successful completion and unchanged migration
+history. This does not authorize `plan`, `apply`, migration, or ACL writes.
+
+### Provider recovery evidence remains unverified
+
+No authorized backup-management metadata or restore evidence was obtained.
+Backup type/status, most recent recovery point and timezone, retention, PITR
+status, PostgreSQL compatibility, restore destinations, plan constraints, and
+isolated restore verification are all **UNVERIFIED**. No backup/export was
+created and no restore was attempted.
+
+Owner evidence required: in Supabase Dashboard, open **Database → Backups**
+and **Database → Point in time recovery** and provide sanitized screenshots
+or copied metadata for backup type/status, latest recovery point with
+timezone, retention window, PITR status, compatible restore version, available
+restore destination, and any plan/region/billing constraints. If the project
+does not expose the information, ask Supabase Support for those metadata only.
+Do not provide credentials, customer rows, or backup contents.
+
+Before any later destructive schema operation, the safe recovery plan is to
+confirm an available provider recovery point (or separately authorize an
+encrypted export), restore only to a disposable isolated project/branch,
+disable payment/supplier/email/webhook egress there, compare schema and
+non-sensitive integrity checks, and clean up the disposable destination. Do
+not restore over this project. No such restore verification exists yet.
+
+### Current decision
+
+The PostgreSQL 17 rehearsal and exact-main CI are verified PASS, but neither
+proves live ACL provenance or provider recovery. Owner-reported ACL findings
+remain unverified because the merged workflow has not been run; backup/PITR
+and isolated restore remain unverified; PR #82 also has the unresolved
+harness conflict.
+The migration recommendation remains **NO-GO**. Hosted data export,
+migrations, ACL changes, wallet funding/spending, payment/supplier activity,
+and Worker activation remain **NONE / DISABLED**.
