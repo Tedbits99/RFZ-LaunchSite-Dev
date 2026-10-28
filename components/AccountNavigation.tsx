@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { CircleUserRound, Package, ShieldCheck, WalletCards } from 'lucide-react';
 import CustomerAccountMenu from '@/components/CustomerAccountMenu';
 import ThemeSelector from '@/components/ThemeSelector';
+import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets';
 
 const links = [
   { href: '/account', label: 'Overview', icon: CircleUserRound, exact: true },
@@ -58,7 +59,7 @@ export default function AccountNavigation() {
         <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-2 lg:px-8">
           <div className="min-w-0">
             <Link href="/" aria-label="RunFazone home" className="inline-flex min-h-10 items-center lg:hidden">
-              <Image src="/runfazone-logo.png" alt="RunFazone" width={160} height={44} priority className="h-7 w-auto max-w-32 object-contain" />
+              <Image src={RFZ_PUBLIC_ASSETS.logo} alt="RunFazone" width={160} height={44} priority className="h-7 w-auto max-w-32 object-contain" />
             </Link>
             <div className="hidden items-center gap-2 text-xs lg:flex">
               <Link href="/" className="text-cyan-300 hover:text-cyan-200">← Store</Link>
@@ -75,7 +76,7 @@ export default function AccountNavigation() {
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[#14203a] bg-[#050a1b] px-4 py-6 lg:flex">
         <Link href="/" aria-label="RunFazone home" className="mb-3 inline-flex min-h-10 items-center px-3">
-          <Image src="/runfazone-logo.png" alt="RunFazone" width={160} height={44} priority className="h-8 w-auto max-w-36 object-contain" />
+          <Image src={RFZ_PUBLIC_ASSETS.logo} alt="RunFazone" width={160} height={44} priority className="h-8 w-auto max-w-36 object-contain" />
         </Link>
         <p className="mb-6 px-3 text-[10px] font-semibold uppercase tracking-[.2em] text-slate-500">Customer account</p>
         <nav aria-label="Account navigation" className="flex flex-col gap-1">

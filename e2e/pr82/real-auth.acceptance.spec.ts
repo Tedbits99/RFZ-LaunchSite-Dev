@@ -73,6 +73,15 @@ async function gotoMailLink(page: Page, link: string, label: string) {
   }
 }
 
+async function assertRunFazoneLogo(page: Page) {
+  const logo = page.locator('img[alt="RunFazone"]').first();
+  await expect(logo).toBeVisible();
+  await expect.poll(
+    () => logo.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0),
+    { timeout: 15_000 },
+  ).toBe(true);
+}
+
 async function guardedContext(browser: Browser, testInfo: TestInfo, observations: Observation): Promise<BrowserContext> {
   const mobile = testInfo.project.name.startsWith('mobile');
   const context = await browser.newContext({
@@ -474,6 +483,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
     await test.step('register customer A, capture real confirmation mail, and verify account activation', async () => {
       await registerCustomer(page, customerAEmail, 'Synthetic Customer A', testInfo, observations, 'customer-register');
+      await assertRunFazoneLogo(page);
       const profile = await localAdmin.from('customer_profiles').select('status').eq('email_snapshot', customerAEmail).single();
       assert(!profile.error && profile.data.status === 'active', 'confirmation callback activates only the verified profile');
       await evidence(page, testInfo, observations, 'customer-account-dashboard');
@@ -686,6 +696,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await adminPage.getByRole('button', { name: 'Sign In' }).click();
       await expect(adminPage.getByRole('heading', { name: 'Overview' })).toBeVisible();
       assert(safePath(adminPage) === '/admin', 'active Super Admin reaches the real dashboard');
+      await assertRunFazoneLogo(adminPage);
       const crossNamespace = await sameOriginJson(adminPage, '/api/account/profile');
       assert(crossNamespace.status === 401, 'administrator cookie does not authenticate customer account APIs');
       await adminPage.reload({ waitUntil: 'domcontentloaded' });
