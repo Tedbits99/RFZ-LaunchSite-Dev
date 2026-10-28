@@ -68,6 +68,12 @@ async function gotoPath(page: Page, pathname: string, label: string) {
   }
 }
 
+async function waitForCustomerLoginReady(page: Page) {
+  const form = page.locator('form[data-auth-ready="true"]');
+  await expect(form).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Sign In' })).toBeEnabled();
+}
+
 async function gotoMailLink(page: Page, link: string, label: string) {
   const url = new URL(link);
   assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === localApiPort, `${label} link targets local GoTrue`);
@@ -527,6 +533,7 @@ async function registerCustomer(page: Page, email: string, name: string, testInf
 
 async function assertLogin(page: Page, email: string, password: string) {
   await gotoPath(page, '/login', 'customer login');
+  await waitForCustomerLoginReady(page);
   await page.getByLabel('Email').fill(email);
   await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
@@ -710,6 +717,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await page.getByRole('button', { name: /Account menu for/ }).click();
       await page.getByRole('button', { name: 'Sign out' }).click();
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+      await waitForCustomerLoginReady(page);
       assert(safePath(page) === '/login', 'customer logout clears the customer session');
       await evidence(page, testInfo, observations, 'customer-login');
       await page.getByLabel('Email').fill(customerAEmail);
@@ -771,6 +779,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
       await page.getByRole('link', { name: 'Sign in' }).click();
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+      await waitForCustomerLoginReady(page);
       await page.getByLabel('Email').fill(customerAEmail);
       await page.locator('input[autocomplete="current-password"]').fill(oldPassword);
       const oldPasswordLogin = page.waitForResponse((response) => {
@@ -907,11 +916,29 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
       const adminRows = await localAdmin.from('admins').select('id').eq('email', superEmail);
       assert(!adminRows.error && adminRows.data.length === 1, 'Super Admin identity remains mapped to exactly one local role row');
+      const adminLogoutResponse = adminPage.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === baseURL && url.pathname === '/api/auth/admin-logout' && response.request().method() === 'POST';
+      });
       await adminPage.getByRole('button', { name: 'Log out of admin dashboard' }).click();
+      const logoutResponse = await adminLogoutResponse;
+      recordTrace(observations, 'admin_server_logout', logoutResponse.url(), { method: 'POST', status: logoutResponse.status() });
+      assert(logoutResponse.status() === 200, `administrator server logout returns HTTP ${logoutResponse.status()}`);
       await expect(adminPage.getByRole('heading', { name: 'Admin sign in' })).toBeVisible();
       assert(safePath(adminPage) === '/secure-admin-login', 'administrator logout returns to its login boundary');
+      const remainingAdminSession = (await adminPage.context().cookies())
+        .some((cookie) => cookie.name === 'rfz-admin-auth' || cookie.name.startsWith('rfz-admin-auth.'));
+      assert(!remainingAdminSession, 'administrator logout removes all admin session cookie chunks');
       const protectedAfterLogout = await adminPage.goto(`${baseURL}/admin`, { waitUntil: 'domcontentloaded' });
-      assert(protectedAfterLogout?.status() === 404, 'administrator dashboard is denied after logout');
+      const protectedStatus = protectedAfterLogout?.status() ?? null;
+      const streamedNotFound = protectedStatus === 200
+        && await adminPage.getByText('This page could not be found.', { exact: true }).isVisible().catch(() => false);
+      const protectedAdminContent = await adminPage.getByRole('heading', { name: 'Overview', exact: true }).count() > 0
+        || await adminPage.getByText(superEmail, { exact: true }).count() > 0;
+      assert(
+        (protectedStatus === 404 || streamedNotFound) && !protectedAdminContent,
+        `administrator dashboard denial after logout: http_status=${protectedStatus ?? 'no_response'} streamed_not_found=${streamedNotFound} protected_content_visible=${protectedAdminContent}`,
+      );
       await evidence(adminPage, testInfo, observations, 'admin-logout-denial');
 
       await gotoPath(adminPage, '/secure-admin-login', 'ordinary staff authentication');

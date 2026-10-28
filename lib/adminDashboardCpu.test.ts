@@ -26,7 +26,9 @@ describe('Cloudflare admin dashboard CPU regression', () => {
     const account = readFileSync('app/account/page.tsx', 'utf8');
     expect(shell).toContain('max-w-[92px]');
     expect(shell).toContain('aria-label="Log out of admin dashboard"');
-    expect(shell).toContain('hidden sm:inline">Log out');
+    expect(shell).toContain('hidden sm:inline">{loggingOut ?');
+    expect(shell).toContain("fetch('/api/auth/admin-logout'");
+    expect(shell).toContain('Sign out could not be completed. Please try again.');
     expect(account).toContain('Total orders');
     expect(account).toContain('Verified payments · latest 20 orders');
     expect(account).not.toContain('Profile</p><p className="font-display break-all');
