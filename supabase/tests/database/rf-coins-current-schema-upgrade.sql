@@ -203,6 +203,10 @@ BEGIN
     RAISE EXCEPTION 'RF_COINS_FULFILLMENT_JOB_WAS_SCHEDULED';
   END IF;
 
+  IF to_regprocedure('public.trigger_fulfillment_handoff()') IS NOT NULL THEN
+    RAISE EXCEPTION 'RF_COINS_OUTBOUND_HANDOFF_DISPATCHER_WAS_INSTALLED';
+  END IF;
+
   SELECT count(*) INTO v_handoff_secret_count
   FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret';
   IF v_handoff_secret_count <> 0 THEN

@@ -43,10 +43,10 @@ describe('canonical RF Coins ACL contract', () => {
     expect(functionsSql).toMatch(/REVOKE ALL ON FUNCTION rf_coin_settle_order_payment\(uuid, uuid\)\s+FROM PUBLIC, anon, authenticated;/);
   });
 
-  it('locks append-only trigger helpers against direct RPC invocation', () => {
+  it('locks append-only helpers and omits the outbound dispatcher', () => {
     expect(schemaSql).toContain('REVOKE ALL ON FUNCTION rf_coin_ledger_append_only() FROM PUBLIC, anon, authenticated;');
     expect(schemaSql).toContain('REVOKE ALL ON FUNCTION rf_coin_audit_append_only() FROM PUBLIC, anon, authenticated;');
-    expect(schemaSql).toMatch(/REVOKE EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\)\s+FROM PUBLIC, anon, authenticated;/);
+    expect(schemaSql).not.toContain('trigger_fulfillment_handoff');
   });
 
   it('removes inherited table defaults and restores only the intended RF Coins read grants', () => {

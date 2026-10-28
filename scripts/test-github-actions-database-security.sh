@@ -6,6 +6,47 @@ local_api_port=""
 local_db_port=""
 upgrade_mode=false
 
+# Pending migrations are reviewed but not deployed by normal `db push`; scan
+# every one explicitly before the disposable upgrade rehearsal so a queued
+# migration cannot hide an outbound HTTP request or scheduled side effect.
+if ! command -v grep >/dev/null 2>&1; then
+  echo "ERROR: Required pending-migration safety scanner (grep) is unavailable." >&2
+  exit 2
+fi
+pending_migrations="$(find "$project_root/supabase/migrations-pending" -maxdepth 1 -type f -name '*.sql' -print | sort)" || {
+  echo "ERROR: Could not inventory pending SQL migrations." >&2
+  exit 2
+}
+if [ -n "$pending_migrations" ]; then
+  pending_migration_count=0
+  while IFS= read -r pending_migration; do
+    [ -n "$pending_migration" ] || continue
+    pending_migration_count=$((pending_migration_count + 1))
+    scan_status=0
+    grep -Eiq '(cron\.schedule|net\.http|(extensions\.)?http_(post|get|put|delete|head|patch)|https?://)' \
+      "$pending_migration" || scan_status=$?
+    case "$scan_status" in
+      0)
+        echo "ERROR: Pending migration contains an outbound/scheduled operation: $(basename "$pending_migration")" >&2
+        exit 3
+        ;;
+      1) ;;
+      *)
+        echo "ERROR: Pending migration safety scanner failed for $(basename "$pending_migration") (exit $scan_status)." >&2
+        exit 2
+        ;;
+    esac
+  done <<EOF_PENDING_MIGRATIONS
+$pending_migrations
+EOF_PENDING_MIGRATIONS
+else
+  pending_migration_count=0
+fi
+echo "PENDING_MIGRATION_SAFETY_PASS count=$pending_migration_count"
+if [ "${1:-}" = "--scan-pending-migrations" ]; then
+  exit 0
+fi
+
 if [ "${1:-}" = "--existing-schema-upgrade" ]; then
   upgrade_mode=true
   shift

@@ -112,7 +112,8 @@ SQL
 docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261028120000_rf_coins_schema.sql" >/dev/null
 no_transport_schemas="$(db_sql "SELECT (to_regnamespace('cron') IS NULL AND to_regnamespace('net') IS NULL)::text")"
 assert_value 'migration applies without pg_cron or pg_net schemas' 'true' "$no_transport_schemas"
-db_sql 'SELECT public.trigger_fulfillment_handoff()' >/dev/null
+handoff_dispatcher_absent="$(db_sql "SELECT (to_regprocedure('public.trigger_fulfillment_handoff()') IS NULL)::text")"
+assert_value 'migration installs no outbound handoff dispatcher' 'true' "$handoff_dispatcher_absent"
 # Exercise the future transaction bodies only inside this fresh local DB. The
 # committed release constants remain false and are checked above.
 sed -e 's/v_funding_release_enabled CONSTANT boolean := false/v_funding_release_enabled CONSTANT boolean := true/g' \

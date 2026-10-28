@@ -1,6 +1,35 @@
 # RF Coins Admin Center — hosted migration review package
 
-Status: **HOLD — source ACL remediation passed disposable PostgreSQL 17 rehearsal, but hosted execution authority, hosted compatibility, and recovery evidence remain incomplete. DO NOT APPLY.**
+Status: **PREPARED, NOT APPLIED — paid backup/PITR and a production-style restore rehearsal are not prerequisites for this unreleased Supabase Free development project. The remaining apply gates are trusted-main source/ledger verification and hosted authority for the audited default ACL owners.**
+
+## Current owner policy — Supabase Free development
+
+This section supersedes earlier backup, PITR, export, and restore requirements
+in the historical review notes below. Do not upgrade the project or require a
+paid backup feature to continue routine development. A manual recovery snapshot
+is recommended when practical, but is not a mandatory gate for these additive,
+forward-only development migrations. Migration history tracks schema versions;
+it is not a backup of database rows. Do not export customer/order data merely
+to satisfy a prior checklist.
+
+The protected audit on main `b726746dfd42b0976188cb8e0c731e46cd97f092`
+verified the existing project and ACL metadata; the hosted ledger matched 100
+repository migration versions. The four proposed SQL files remain under
+`supabase/migrations-pending/` on draft PR #82, not in the trusted main
+migration source, so the main-only workflow cannot apply them yet. The exact
+PR-head PostgreSQL 17 rehearsal and security/build CI passed, but do not
+substitute for a hosted workflow `plan` or a matching hosted-ledger check.
+
+Before considering a narrowly scoped development apply: verify the exact
+trusted main SHA contains the reviewed files; confirm the hosted ledger and
+schema still match the expected preconditions; verify the database execution
+role can alter the five audited default-ACL contexts (a disposable runner
+previously returned SQLSTATE `42501` for `supabase_admin`); run the protected
+workflow plan and review its exact migration list; then use the protected
+apply operation only for those reviewed files. Do not use reset or migration
+repair. Existing data must be preserved. The RF Coins funding/spending release
+constants remain false, and the migration does not enable payments, suppliers,
+emails, or a Worker. No hosted change is authorized by this preparation note.
 
 ## 2026-10-28 hosted ACL follow-up — source-only, still NO-GO
 
@@ -39,9 +68,11 @@ unchanged. It must run in a dedicated disposable PostgreSQL 17 superuser
 fixture, never against the hosted project; the transaction rolls back. This is
 source/test preparation only:
 the migration has **not** been applied to the hosted project, no ACL has been
-changed, and the migration recommendation remains **NO-GO** pending verified
-hosted execution authority for all audited default-ACL owners, recovery
-evidence, and separate release authorization. The disposable PostgreSQL 17
+changed, and the migration recommendation remains **NO-GO for apply** until
+the trusted-main source/ledger preconditions and hosted execution authority for
+all audited default-ACL owners are verified. Paid backup/PITR or a full restore
+rehearsal is not a prerequisite under the current development policy. The
+disposable PostgreSQL 17
 rehearsal passed as recorded below; that isolated superuser result does not
 prove the hosted migration role has authority over `supabase_admin` defaults.
 
@@ -55,28 +86,30 @@ to migrate or enable funding/spending.
 
 Apply only after reviewing the exact migration files in the approved PR head:
 
-1. `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` — tables,
+1. `supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql` —
+   remove only the audited excess browser-role DDL privileges and matching
+   default ACLs; fail closed if hosted authority or audit assumptions differ.
+2. `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` — tables,
    indexes, checks, append-only triggers, customer RLS, grants, a disabled
    `rf_coin_wallet` payment-config row (`ON CONFLICT DO NOTHING`), the nullable
    `payment_transactions.order_id` compatibility change, and the private
-   fulfillment handoff queue. It creates (but does not schedule) a cron trigger
-   function. It inserts no cron secret and schedules no job.
-2. `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` —
+   fulfillment handoff queue. It creates no outbound dispatcher or cron job.
+   The shared cron-secret table is created empty and inaccessible.
+3. `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` —
    authenticated identity-checked wallet/top-up/order functions, Super Admin
    adjustment/package/settings operations, service-role settlement and handoff
    functions, explicit execute grants, and hard-coded disabled release guards.
-3. `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` —
+4. `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` —
    bounded, active-Super-Admin-only report and export-audit RPCs, indexes,
    derived exception reporting, and explicit RPC ACLs.
 
 No hosted migration was applied in preparing this package. No live payment,
 wallet credit, supplier order, customer email, or cron schedule was run.
-The staged fulfillment trigger URL was corrected to the explicitly approved
-project ref `ketdhcmwowzztcdlmris`; the former SQL referenced a different
-project. A regression contract test pins this destination before any future
-activation review. This source migration does not insert the handoff secret or
-schedule the job; the current live cron/secret inventory was not re-audited in
-this batch.
+An earlier draft contained a SQL HTTP fulfillment trigger and a hard-coded
+function URL. That dispatcher and URL were removed from the current pending
+schema migration; regression tests now require no network URL, HTTP call, or
+cron schedule in that migration. The queue and inert secret-store contract do
+not dispatch work. No secret is inserted and no job is scheduled.
 
 ## Exact source and fresh hosted inventory
 
@@ -180,19 +213,18 @@ mutations remain RPC-only, never direct balance writes.
 1. Confirm the target is the existing development project `ketdhcmwowzztcdlmris`
    using the protected `runfazone-development-db` workflow. Do not use PR code
    or a caller-selected project reference as the identity source.
-2. Review the exact three SQL files and their checksums from the selected source
+2. Review the exact four SQL files and their checksums from the selected source
    commit. Confirm migration ordering and the hosted ledger has no conflicting
    version/name. Stop on any mismatch; do not use migration repair or reset.
-3. No fresh hosted export was created in this preflight. Before an approved
-   schema apply, use the protected database workflow to create a restricted
-   export, validate non-empty artifact/checksum/retention, and restore only to
-   an isolated disposable database. Verify schema/table counts and
-   representative sanitized order/payment integrity there; never restore over
-   the existing project. This step remains a pre-apply owner/release gate.
-4. Disable provider credentials/toggles in the isolated test harness and stub
-   outbound HTTP. Do not schedule `trigger_fulfillment_handoff`; do not add a
-   cron secret. Keep payment, fulfillment, and customer-email integrations
-   untouched.
+3. A manual, appropriately restricted recovery snapshot is recommended when
+   practical, but is not required for routine forward-only development changes
+   on the Free plan. Do not create a row-bearing export or restore solely to
+   satisfy superseded production-style backup requirements. Migration history
+   is not a substitute for a data backup.
+4. Keep provider credentials/toggles disabled in the isolated test harness
+   and stub outbound HTTP. These migrations install no outbound handoff
+   dispatcher or schedule; do not add a cron secret or activate fulfillment.
+   Keep payment and customer-email integrations untouched.
 5. Apply in order using the protected workflow after explicit owner approval.
    Stop immediately on an error and preserve the full sanitized failure output
    and migration ledger. Do not mark a failed migration successful.
@@ -257,9 +289,9 @@ select enabled, topups_enabled, spending_enabled from public.rf_coin_settings wh
 select count(*) as handoff_secrets from public._cron_secrets where key = 'fulfillment_handoff_secret';
 ```
 
-If `pg_cron` is installed, separately inspect `cron.job` for any command that
-calls `trigger_fulfillment_handoff`; the migration intentionally schedules
-none. Do not create or enable a job during this acceptance.
+If `pg_cron` is installed, inspect `cron.job` for relevant existing jobs; the
+migrations intentionally install no dispatcher and schedule nothing. Do not
+create or enable a job during this acceptance.
 
 Then, using disposable verified test identities only, verify a new wallet is
 created exactly once at `0 RF`; its owner can read it; another customer and
@@ -310,84 +342,51 @@ payment/webhook and scheduled side-effect isolation remain **UNVERIFIED**.
   root filesystem (83 MB free; Docker reported `no space left on device`). No
   Docker images/volumes were deleted because their ownership/use was not
   established. The full current-schema rehearsal remains **BLOCKED**.
-- No actual hosted backup/export or hosted restore was performed. A protected
-  sanitized export and disposable restore is still required before a later
-  approved schema apply. No hosted migration, data write, payment, supplier,
-  email, cron, or financial operation occurred in this preflight.
+- No hosted backup/export or restore was performed. Under the current
+  Supabase-Free development policy, a paid backup/PITR product or a
+  production-style restore rehearsal is not a routine migration prerequisite.
+  No hosted migration, data write, payment, supplier, email, cron, or financial
+  operation occurred in this preflight.
 - Reporting RPC bounds (50-row pages, 90-day range, at most 1,000 export rows)
   and KPI/alert assertions are covered by code/tests, but query latency and
   index plans have not been benchmarked against production-scale synthetic
   volume; performance acceptance remains pending.
 
-## Backup, restore, and incident-recovery readiness
+## Recovery information (not a Free-plan development blocker)
 
-**Status: NOT VERIFIED; no hosted row data was exported in this preflight.**
-The successful `audit` run above captured migration history and sanitized
-catalog metadata only. The separate `gate-b-audit` path invokes
-`scripts/audit-hosted-integrations.sh`, which creates both a schema dump and a
-`--data-only` dump of the hosted `public` schema in the protected runner's
-temporary directory. That is a real hosted data export, even though the script
-deletes its temporary files on exit. It was not run because this task does not
-authorize a hosted data export. Do not treat the metadata audit as a backup or
-restore test.
+The metadata audit captured schema and ACL metadata, not row data, and is not
+a database backup. No hosted export or restore was performed. The separate
+`gate-b-audit` operation can create a row-bearing data dump; do not run it just
+to satisfy an obsolete backup gate. Any such export requires its own narrow
+purpose, restricted handling, retention/deletion plan, and authorization.
 
-The checked-in disposable restore helper is only a partial smoke test: it
-restores into a vanilla PostgreSQL container with minimal `auth` stubs, checks
-that public tables exist, and compares row counts for six selected tables
-(`games`, `packages`, `payment_config`, `customer_profiles`, `orders`, and
-`payment_submissions`). It does not verify every table's row contents, fully
-recreate the Supabase extension/Auth/Edge Function environment, or prove
-application-level recovery. The full local Supabase replay was not completed
-because the available Docker host ran out of disk during image pulls. Thus the
-current helper and synthetic SQL tests are not sufficient evidence for
-full-upgrade or restore readiness.
-
-Before a separately authorized hosted apply, the recovery procedure must:
-
-1. Verify the project identity, exact source SHA, migration checksums, and
-   unchanged pre-apply migration ledger in the protected workflow.
-2. Obtain a one-time owner-authorized backup/export or verify the project's
-   actual provider backup/PITR capability and retention. Any row-bearing
-   artifact must remain encrypted, restricted to the minimum named operators,
-   excluded from logs and ordinary CI artifacts, checksum-verified, and given
-   an explicit short retention/deletion deadline. Never place customer data in
-   source control or a general-access artifact.
-3. Restore only into an isolated disposable Supabase-compatible environment
-   with external network calls disabled and no provider credentials. Compare
-   the complete public table inventory and per-table row counts, validate the
-   schema/constraints and representative synthetic or approved integrity
-   checks, then verify cleanup of the disposable environment and its backup.
-   Never restore over the existing development project.
-4. If an apply stops part-way, do not reset, repair the migration ledger, or
-   blindly rerun. Preserve sanitized logs, re-read the hosted ledger, identify
-   exactly which files committed, and prepare a reviewed forward-fix while
-   funding/spending remain locked. A rollback that drops wallet objects is
-   prohibited once dependent or ledger data exists; any pre-data rollback
-   requires a separate impact review and verified recovery point.
-5. The owner remains responsible for authorizing the row-data export and the
-   eventual apply, confirming the recovery point/retention, and deciding any
-   incident response that could affect existing customer or order records.
-
-These are future prerequisites, not actions performed here. No hosted export,
-restore, migration, row change, payment, supplier action, or Worker activation
-occurred in this preflight.
+For this unreleased development project, an isolated PostgreSQL 17 upgrade
+rehearsal, exact migration checksums, a clean hosted-ledger precheck, preserved
+existing identities/orders, transaction-safe forward-only SQL, and disabled
+financial release locks are proportionate safeguards. A manual snapshot is
+recommended if readily available. A paid backup plan, PITR, or full
+production-style restore rehearsal is not mandatory. If a migration fails,
+do not reset or repair history; retain sanitized logs, re-read the ledger, and
+prepare a reviewed forward fix. Never drop wallet objects or existing customer
+data as a rollback shortcut.
 
 ## Recommendation and owner boundary
 
-**Current recommendation: NO-GO for hosted migration.** Before a future
-decision, the protected audit must expose sanitized exact metadata for
+**Current recommendation: NO-GO for hosted apply, not because of backup/PITR.**
+Before a future decision, the protected workflow must verify the exact trusted
+main migration source and hosted ledger, confirm execution authority over each
+audited default-ACL owner, and review any newly detected schema mismatch. The
+existing audit already captured sanitized metadata for
 `payment_transactions` columns/nullability/defaults/constraints/indexes and
-effective grants/policy expressions; inventory extension names/versions,
-actual scheduler jobs, deployed Edge Functions and relevant secret-presence
-flags without values; confirm the hosted `public` schema ACL; and complete the
-full current-schema disposable rehearsal plus protected backup/restore check.
-Do not resolve these gaps by assuming the migration matches or by running
-`plan`/`apply` against the hosted project.
+effective grants/policy expressions; it also recorded the extension inventory,
+scheduler catalog availability, function metadata, and the hosted `public`
+ACL. The exact PR-head disposable PostgreSQL 17 rehearsal passed. Do not
+resolve the remaining source/authority gates by assuming they match.
 
-After those independent checks pass and the exact source SHA/checksums are
-reviewed, the next decision may be `READY_FOR_OWNER_MIGRATION_REVIEW`. That is
-not migration approval. Any hosted apply remains a separate, explicit owner
-decision through the protected workflow; funding, spending, provider calls,
+After those checks pass and the exact source SHA/checksums are reviewed, a
+protected `plan` may be run on the exact trusted main SHA. A plan is read-only
+and does not authorize apply. The protected `apply` operation remains a
+separate, explicitly scoped development action; funding, spending, provider calls,
 supplier fulfillment, cron scheduling, and public release remain separately
 disabled and gated.
 
@@ -491,36 +490,29 @@ and restricted privileged RPC ACLs. This rehearsal is synthetic and is not
 proof of hosted schema compatibility or compatibility with existing hosted
 rows.
 
-### Extension and fulfillment function
+### Extension inventory and deferred fulfillment processing
 
-Owner-provided extension inventory says `pg_stat_statements`, `pgcrypto`,
-`plpgsql`, `supabase_vault`, and `uuid-ossp` are installed; `cron` and `net`
-schemas are absent. The pending schema migration neither installs extensions
-nor schedules a job nor inserts a secret. PostgreSQL PL/pgSQL defers resolving
-the body’s `net.http_post` reference until that statement is executed, so
-creating the function does not require `pg_net`. Its early return when the
-secret is absent is covered by the disposable SQL test. A synthetic secret
-with `net` absent fails before any network request can occur. The function is
-`SECURITY DEFINER`, pins `search_path` to `pg_catalog, public, pg_temp`, uses
-the fixed development Edge Function URL, and EXECUTE is revoked from
-`PUBLIC`, `anon`, and `authenticated`, then granted to `postgres` only.
+The ACL metadata artifact records the extension inventory and reports no
+`cron` or `net` schema. The pending schema migration installs no extension,
+HTTP dispatcher, or scheduled job. It creates the durable handoff queue plus
+an empty, RLS-protected `_cron_secrets` store with browser and service-role
+table privileges revoked. The migration aborts if that table unexpectedly
+already exists, preserving any existing credentials and policies for separate
+review. No secret is inserted.
 
-Future activation needs both a scheduler (`pg_cron`) and HTTP transport
-(`pg_net`/`net.http_post`), plus a separately provisioned secret and deployed
-authenticated Edge Function. None is needed for the currently disabled wallet
-schema. Keep the function unscheduled and the secret absent; if the hosted
-environment should never gain those extensions, move fulfillment-specific
-activation into a later separately reviewed migration. Extension absence on
-the hosted project and future extension installation remain owner-provided
-metadata, not independently verified in this session.
+Queue processing and supplier/network dispatch are intentionally deferred to
+a separately reviewed integration change after supplier isolation and
+financial gates pass. Applying this schema cannot invoke `net.http_post`,
+create a job, or contact a provider. Funding and spending release locks remain
+literal false.
 
 ### Rehearsal, CI, and recovery evidence
 
 The new source tests cover the reported payment-table shape, the RLS/TRUNCATE
-semantic distinction, absence of `cron`/`net`, no-secret handoff no-op, and
-failure-before-network when a synthetic handoff secret is used without
-`pg_net`. The legacy-upgrade script has been extended to apply the exact three
-candidate migrations after all canonical migrations and run the current-schema
+semantic distinction, absence of `cron`/`net`, absence of an outbound
+dispatcher, and the empty inaccessible secret store. The legacy-upgrade script
+applies the three RF Coins schema/function/admin migrations after all
+canonical migrations and runs the current-schema
 assertion file. That assertion requires all eight wallet tables with RLS, the
 preserved payment order FK and administrator-only SELECT policy, all three
 existing payment indexes plus the new top-up index, the nullable top-up FK,
@@ -551,16 +543,12 @@ was corrected on `0a5ccfc` and the exact-head rerun passed. This synthetic
 rehearsal is not a restored copy of the hosted database and cannot prove live
 ACL provenance or hosted-row compatibility.
 
-Recovery remains **UNVERIFIED**. No provider backup/PITR retention or restore
-capability metadata was available in the sanitized audit, and no hosted
-row-data export was authorized or made. Path A requires an authenticated
-metadata-only confirmation of the plan, latest recovery point, retention, and
-approved restore method, with an actual controlled recovery demonstration if
-the provider supports it. Path B requires separate owner authorization for a
-protected encrypted export, restricted short-lived artifact storage, checksum
-verification, isolated restore, integrity comparison, and cleanup. Neither
-path has been completed. The migration recommendation therefore remains
-**NO-GO** even if the isolated CI rehearsal passes.
+No provider backup/PITR metadata or row-data export was collected. This is
+recorded as recovery metadata **UNVERIFIED**, not as a blocker under the current
+Supabase-Free development policy. Paid backup/PITR and a full restore rehearsal
+are not prerequisites for routine reversible development migrations. Prefer
+transaction-safe forward-only SQL; a manual snapshot is recommended when
+practical. No hosted migration has been applied.
 
 ### PostgreSQL 17 ACL rehearsal update (2026-10-28)
 
@@ -597,10 +585,10 @@ reviewed operation; do not infer an application/API exploit from the ACL
 metadata alone.
 
 The migration script also requires the disposable PostgreSQL 17 rehearsal to
-pass on exact PR HEAD. This is not a substitute for a live hosted audit. The
-provider backup/PITR and restore evidence remains **UNVERIFIED**, no export or
-restore was performed, and the hosted RF Coins migrations remain pending.
-Accordingly the hosted migration recommendation remains **NO-GO**.
+pass on exact PR HEAD. This is not a substitute for a live hosted audit. No
+export or restore was performed, and the hosted RF Coins migrations remain
+pending. Under the current Free-plan policy, the lack of paid recovery features
+does not determine the migration recommendation.
 
 ## Separate release prerequisites
 
@@ -687,27 +675,15 @@ RPC regressions. Do not generate blanket revokes or execute this plan before
 the artifact and compatibility review. **No hosted ACL remediation has been
 applied.**
 
-### Provider backup/PITR and recovery gate
+### Provider recovery metadata (not a Free-plan gate)
 
-Provider backup/PITR state remains **UNVERIFIED**. The existing hosted
-`audit` run did not capture backup-plan metadata, and this session did not
-request a backup, export rows, or restore anything. No backup type/status,
-latest recovery point, retention, point-in-time setting, compatible PostgreSQL
-restore version, destination options, or restore limitation is claimed.
-
-Owner evidence still required from Supabase Dashboard under **Database →
-Backups / Point in time recovery** (or Supabase Support if the project plan
-does not expose these controls): provide sanitized plan/backup type and status,
-latest available recovery point with timezone, retention window, PITR status,
-compatible restore versions, destination choices, and any billing/region/plan
-constraints. Do not send credentials, customer rows, or backup contents.
-
-Before any later destructive or hosted migration operation, use an
-owner-authorized provider recovery point or separately approved encrypted
-export, restore only into a disposable isolated destination, disable outbound
-payment/supplier/email/webhook effects there, and compare schema plus
-non-sensitive integrity checks. Never restore over the current project. No
-isolated restore evidence exists yet.
+The metadata audit did not collect provider backup/PITR settings, and no
+row-data export or restore was performed. This remains **UNVERIFIED** and is
+not a requirement to purchase a plan or perform a production-style restore
+rehearsal for this unreleased Free-plan development database. A manual snapshot
+is recommended when readily available. Before an irreversible change, inspect
+the exact affected data and choose a proportionate recovery method; do not
+reset or overwrite this project.
 
 ### Owner acceptance history and release decision
 
@@ -719,10 +695,11 @@ candidate-bound acceptance: 13/13 authentication/account checks on
 source SHA `220de8744e069f0670a42aebfab3a807e8421a42` or of a hosted wallet
 schema.
 
-**Decision: NO-GO.** The trusted ACL artifact and provider backup/recovery
-evidence are still missing. Hosted schema/ACL changes, wallet funding and
-spending remain unapplied/disabled. No hosted data export, backup, restore,
-payment, supplier activity, or Worker activation occurred.
+**Decision at this historical checkpoint: NO-GO.** The hosted schema/ACL
+changes had not been applied, and wallet funding/spending remained
+unapplied/disabled. Backup/PITR evidence was not collected, but is not required
+by the current Free-plan development policy. No hosted data export, backup,
+restore, payment, supplier activity, or Worker activation occurred.
 
 ## Supplemental trusted-audit and main-line status (2026-10-28)
 
@@ -791,39 +768,23 @@ must use the fixed project reference, produce its bounded metadata-only
 artifact, and be checked for successful completion and unchanged migration
 history. This does not authorize `plan`, `apply`, migration, or ACL writes.
 
-### Provider recovery evidence remains unverified
+### Provider recovery metadata (historical; not a Free-plan blocker)
 
-No authorized backup-management metadata or restore evidence was obtained.
-Backup type/status, most recent recovery point and timezone, retention, PITR
-status, PostgreSQL compatibility, restore destinations, plan constraints, and
-isolated restore verification are all **UNVERIFIED**. No backup/export was
-created and no restore was attempted.
-
-Owner evidence required: in Supabase Dashboard, open **Database → Backups**
-and **Database → Point in time recovery** and provide sanitized screenshots
-or copied metadata for backup type/status, latest recovery point with
-timezone, retention window, PITR status, compatible restore version, available
-restore destination, and any plan/region/billing constraints. If the project
-does not expose the information, ask Supabase Support for those metadata only.
-Do not provide credentials, customer rows, or backup contents.
-
-Before any later destructive schema operation, the safe recovery plan is to
-confirm an available provider recovery point (or separately authorize an
-encrypted export), restore only to a disposable isolated project/branch,
-disable payment/supplier/email/webhook egress there, compare schema and
-non-sensitive integrity checks, and clean up the disposable destination. Do
-not restore over this project. No such restore verification exists yet.
+No provider backup/PITR metadata was obtained, and no export or restore was
+attempted. This is not a mandatory gate for this unreleased Free-plan
+development project. A manual recovery snapshot is recommended when practical;
+before an irreversible operation, choose a proportionate method based on the
+specific affected data. Never restore over the existing project.
 
 ### Current decision
 
-The PostgreSQL 17 rehearsal and exact-main CI are verified PASS, but neither
-proves live ACL provenance or provider recovery. Owner-reported ACL findings
-remain unverified because the merged workflow has not been run; backup/PITR
-and isolated restore remain unverified; PR #82 also has the unresolved
-harness conflict.
-The migration recommendation remains **NO-GO**. Hosted data export,
-migrations, ACL changes, wallet funding/spending, payment/supplier activity,
-and Worker activation remain **NONE / DISABLED**.
+At that historical checkpoint, the PostgreSQL 17 rehearsal and exact-main CI
+were verified PASS, while ACL provenance still needed a trusted hosted audit.
+Backup/PITR and isolated restore metadata were not collected; they are not
+mandatory Free-plan development gates. The migration recommendation was
+**NO-GO** because hosted compatibility/authority remained unresolved. Hosted
+data export, migrations, ACL changes, wallet funding/spending,
+payment/supplier activity, and Worker activation remained **NONE / DISABLED**.
 
 ## Authorized hosted ACL metadata audit result (2026-10-28)
 
@@ -924,13 +885,12 @@ checkout, customer isolation, admin, payment/order, and privileged-RPC
 behavioral regressions before a separate review and explicit apply
 authorization. This proposal has **not** been applied to the hosted project.
 
-### Recovery and current gate
+### Recovery and historical gate
 
 The ACL artifact does not include provider backup/PITR metadata and provides
-no restore evidence. Backup type/status, latest recovery point, retention,
-PITR, compatible restore version/destination, and isolated restore remain
-**UNVERIFIED**. The hosted migration recommendation remains **NO-GO**. The
-test-harness conflict with current main was resolved at merge commit
+no restore evidence. This is **UNVERIFIED**, not a Free-plan blocker. The
+hosted migration recommendation remained **NO-GO** pending source/ledger and
+execution-authority checks. The test-harness conflict with current main was resolved at merge commit
 `67c5a5ae155708c400e228835f65904252d52d9b`, preserving both the hosted ACL
 metadata audit tests and RF Coins PostgreSQL 17 fixtures. PR #82 remains
 OPEN/DRAFT and unmerged.
@@ -956,5 +916,94 @@ OPEN/DRAFT and unmerged.
   Supabase run returned SQLSTATE `42501` for that operation, so hosted role
   authority still must be verified before any separately authorized apply.
 - Provider backup/PITR metadata and isolated restore evidence remain
-  **UNVERIFIED**. Accordingly `MIGRATION_RECOMMENDATION=NO-GO`; no hosted
-  export, restore, ACL change, or migration has been performed.
+  **UNVERIFIED**, but are not prerequisites under the current Supabase Free
+  development policy. `MIGRATION_RECOMMENDATION=NO-GO` remains for source and
+  hosted execution-authority reasons; no hosted export, restore, ACL change,
+  or migration has been performed.
+
+## Current Supabase Free development status (2026-10-28)
+
+This entry is the current policy/status summary and supersedes any older
+checklist in this historical evidence file that demanded paid backup/PITR or a
+production-style restore rehearsal. Runfazone is unreleased and the existing
+Supabase project is on Free. A manual snapshot is recommended when practical,
+but is not a gate for these reviewed development migrations. Migration
+history is schema-version evidence, not a backup of database rows.
+
+### Verified current baseline
+
+- Target project: `ketdhcmwowzztcdlmris`.
+- Trusted main at the last metadata audit: `b726746dfd42b0976188cb8e0c731e46cd97f092`.
+- Read-only hosted ACL audit: workflow `40639888077`, terminal SUCCESS, exact
+  main SHA above. It verified 100 hosted migration versions matched 100
+  repository versions, PostgreSQL 17.11, 36 public tables with RLS enabled,
+  and the recorded ACL metadata. No hosted migration or ACL change occurred.
+- No `rf_coin_%` hosted tables/functions appeared in that audit. Its bounded
+  metadata does not constitute a current row-data backup or full function-body
+  review. `cron.job` was absent; no job inventory was inferred from a zero
+  count when the catalog relation was absent.
+- The audit recorded the four excess browser-role table privileges and five
+  specific default-ACL contexts. The proposed ACL migration intentionally
+  fails closed unless the expected owner roles and execution authority are
+  present. A disposable run previously returned SQLSTATE `42501` when the
+  standard `postgres` role attempted to alter `supabase_admin` defaults. That
+  hosted execution authority remains **UNVERIFIED** and must be resolved by a
+  protected plan before apply.
+
+### Prepared migration set — not applied
+
+The exact reviewed order is:
+
+1. `20261028113000_revoke_browser_table_ddl_privileges.sql` — revoke only the
+   audited `TRUNCATE`, `REFERENCES`, `TRIGGER`, and `MAINTAIN` grants/defaults;
+   preserve SELECT/DML, RLS, PUBLIC, and `service_role`.
+2. `20261028120000_rf_coins_schema.sql` — additive wallet/ledger/config tables,
+   RLS/grants, disabled payment-config row, nullable payment compatibility
+   column, and durable handoff queue. No outbound dispatcher or schedule.
+3. `20261028120100_rf_coins_functions.sql` — identity-checked and
+   role-restricted wallet/order/admin RPCs; literal funding and spending
+   release locks remain false.
+4. `20261028120200_rf_coin_admin_center_read.sql` — bounded Super-Admin report
+   and audit RPCs.
+
+Current SHA-256 values (recompute against the final selected source before any
+plan/apply):
+
+| File | SHA-256 |
+|---|---|
+| `20261028113000_revoke_browser_table_ddl_privileges.sql` | `596add41d9fbded5dd4370c0952d751506d2267cedaf7b17f93337c0d23b5d5f` |
+| `20261028120000_rf_coins_schema.sql` | `cc84905de9578f550131532256d12d28812af5182fa49c9ece76a7d09e207b37` |
+| `20261028120100_rf_coins_functions.sql` | `8dbc11a82062f0cd1ebdd77ba5500ebae7fca89fa75f2450b0eaec26635efcb8` |
+| `20261028120200_rf_coin_admin_center_read.sql` | `1bef2626e079781180336a13990088db6ab7d07af09b144b77508a9a2563d924` |
+
+The pending schema now defaults top-up provider metadata to `disabled` and
+permits only the future direct owner e-wallet/crypto provider identifiers;
+PayMongo is excluded from RF Coins funding and remains reserved for direct
+product checkout. The legacy PayMongo wallet-funding Edge Function is still
+source-locked off. Funding and spending remain unavailable even if settings
+are manipulated, because the RPC release guards are literal false. The
+regression test rejects a PayMongo-tagged RF Coins top-up row. No top-up
+endpoint can create a provider transaction while the source release lock is
+false.
+
+The database-security runner now scans all four pending SQL files before its
+disposable upgrade checks. It fails closed if `grep` is missing, if a scanner
+execution fails, or if any pending SQL contains the guarded outbound HTTP or
+scheduler patterns. The current run of the scanner-only entry point emitted
+`PENDING_MIGRATION_SAFETY_PASS count=4`.
+
+### Decision and controlled next step
+
+No hosted changes were made: no migration, ACL update, row write, export,
+payment, supplier fulfillment, email, cron schedule, or Worker activation.
+No paid backup feature or full restore rehearsal is required. The migration
+set is prepared but **NOT READY FOR APPLY** because these files remain pending
+on draft PR #82 rather than in the protected main workflow's source, and the
+hosted executor's ability to alter `supabase_admin` default ACLs has not been
+verified. Keep the set pending until those checks are resolved. Once the exact
+reviewed files are present on trusted main, run the protected `plan` operation
+against the expected project, inspect the exact migration list and SQL hashes,
+and stop on any ledger/schema/authority mismatch. Any later `apply` requires
+its separately scoped authorization; do not run `db reset` or migration
+repair. Wallet funding/spending, PayMongo wallet top-ups, supplier fulfillment,
+live payment, public access, and normal Worker activation remain disabled.

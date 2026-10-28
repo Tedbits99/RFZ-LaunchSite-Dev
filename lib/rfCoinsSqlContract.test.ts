@@ -67,6 +67,13 @@ describe('RF Coins funding release lock', () => {
   const fn = extractFunction(functionsSql, 'rf_coin_create_topup');
   const creditFn = extractFunction(functionsSql, 'rf_coin_credit_paid_topup');
 
+  it('does not configure PayMongo as an RF Coins funding provider', () => {
+    expect(schemaSql).toContain("provider text NOT NULL DEFAULT 'disabled'");
+    expect(schemaSql).toMatch(/CHECK \(provider IN \('disabled','owner_ewallet','owner_crypto'\)\)/);
+    expect(schemaSql).not.toMatch(/Coins are purchased with PayMongo/i);
+    expect(schemaSql).not.toMatch(/provider text NOT NULL DEFAULT 'paymongo'/i);
+  });
+
   it('cannot be enabled by database settings or client input', () => {
     expect(fn).toContain('v_funding_release_enabled CONSTANT boolean := false');
     expect(fn).toContain("'RF_COIN_FUNDING_RELEASE_LOCKED'");
@@ -279,9 +286,9 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
   const claim = extractFunction(functionsSql, 'rf_coin_claim_fulfillment_handoffs');
   const ack = extractFunction(functionsSql, 'rf_coin_ack_fulfillment_handoff');
 
-  it('targets the explicitly approved Supabase project and never the stale project ref', () => {
-    expect(schemaSql).toContain('v_url := \'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/fulfillment-handoff\'');
-    expect(schemaSql).not.toContain('ftbvxkxxzotwkdcdgaot');
+  it('does not install an outbound fulfillment dispatcher or scheduler', () => {
+    expect(schemaSql).not.toMatch(/net\.http_post\(|https?:\/\/|cron\.schedule|trigger_fulfillment_handoff/);
+    expect(schemaSql).not.toMatch(/(?:^\s*CREATE EXTENSION|^\s*SELECT\s+cron\.)/im);
   });
 
   it('enqueue is idempotent per order and only accepts verified wallet-paid orders', () => {
@@ -327,38 +334,15 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
     expect(schemaSql).not.toMatch(/POLICY .* ON rf_coin_fulfillment_handoffs/);
   });
 
-  it('cron activation is explicit: no hardcoded secret, no automatic schedule', () => {
-    // Only executable (non-comment) SQL counts: the migration must NOT embed
-    // a secret or auto-schedule the worker. Activation is a separate operator
-    // step with a generated secret, documented in the migration comments.
+  it('keeps the shared cron secret store inert and inaccessible', () => {
     const executable = schemaSql
       .split('\n')
       .filter((line) => !/^\s*--/.test(line))
       .join('\n');
     expect(executable).not.toMatch(/INSERT INTO public\._cron_secrets/);
     expect(executable).not.toMatch(/cron\.schedule/);
-    expect(executable).not.toMatch(/rfz_fhnd_/);
-    // The trigger function exists; the operator activation steps are documented.
-    expect(schemaSql).toMatch(/trigger_fulfillment_handoff\(\)/);
-    expect(schemaSql).toMatch(/ACTIVATION \(EXPLICIT OPERATOR STEP/);
-  });
-
-  it('pins the SECURITY DEFINER handoff search path and remains installable without pg_net', () => {
-    const start = schemaSql.indexOf('CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()');
-    const end = schemaSql.indexOf('$function$;', start);
-    const handoff = schemaSql.slice(start, end > start ? end : undefined);
-    expect(handoff).toMatch(/SECURITY DEFINER\s+SET search_path TO 'pg_catalog', 'public', 'pg_temp'/);
-    expect(handoff).toContain("IF v_secret IS NULL THEN");
-    expect(handoff).toContain("v_url := 'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/fulfillment-handoff'");
-    // This SQL must be a function body only: the migration cannot require
-    // pg_net/pg_cron or perform/schedule the outbound call during installation.
-    expect(handoff).toContain('net.http_post(');
-    expect(schemaSql).not.toMatch(/^\s*(CREATE EXTENSION|SELECT\s+cron\.schedule|INSERT INTO public\._cron_secrets)/m);
-  });
-
-  it('cron trigger is executable by postgres only (Codex fix 2)', () => {
-    expect(schemaSql).toMatch(/REVOKE EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\)\s*\n\s*FROM PUBLIC, anon, authenticated/);
-    expect(schemaSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO postgres/);
-    expect(schemaSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO (?!postgres)/);
+    expect(executable).toMatch(/CREATE TABLE public\._cron_secrets/);
+    expect(executable).toMatch(/REVOKE ALL PRIVILEGES ON TABLE public\._cron_secrets\s+FROM PUBLIC, anon, authenticated, service_role/);
+    expect(schemaSql).toMatch(/RF_COINS_CRON_SECRET_TABLE_ALREADY_EXISTS_REQUIRES_REVIEW/);
   });
 });

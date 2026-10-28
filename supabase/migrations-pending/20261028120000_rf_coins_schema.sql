@@ -5,9 +5,11 @@
 
 1. Purpose
    Closed-loop virtual currency ("RF Coins") for signed-in, verified, active
-   customers. Coins are purchased with PayMongo QRPh, held in a per-customer
-   wallet, spent on product orders, and managed by Super Admins through an
-   append-only ledger. NOT cashback points; a dedicated purchasable currency.
+   customers. Future funding is intended for direct owner e-wallet and crypto
+   deposits after independent verification; PayMongo is reserved for product
+   checkout and is not an RF Coins funding rail. Funding/spending remain
+   disabled until their separate implementation and release gates pass.
+   Balances are held per customer and managed through an append-only ledger.
 
 2. New Tables
    - rf_coin_settings (singleton row id=1)
@@ -55,7 +57,7 @@
      - credited_total / reversed_total: exact original credit and cumulative
        reversal amounts, so partial refunds never double-debit and the
        outstanding debt stays explicit for controlled manual handling
-     - provider text DEFAULT 'paymongo', provider_reference text NULL,
+     - provider text DEFAULT 'disabled', provider_reference text NULL,
        idempotency_key text UNIQUE, credited_at timestamptz NULL
      - Unique partial index on provider_reference WHERE NOT NULL.
 
@@ -208,7 +210,10 @@ CREATE TABLE IF NOT EXISTS rf_coin_topups (
   price_cents integer NOT NULL CHECK (price_cents > 0),
   status text NOT NULL DEFAULT 'PENDING' CHECK (status IN (
     'PENDING','PAID','FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED')),
-  provider text NOT NULL DEFAULT 'paymongo',
+  -- No provider is enabled by this schema. PayMongo is not an RF Coins
+  -- funding rail; future verified direct deposits get explicit provider tags.
+  provider text NOT NULL DEFAULT 'disabled'
+    CHECK (provider IN ('disabled','owner_ewallet','owner_crypto')),
   provider_reference text,
   idempotency_key text NOT NULL UNIQUE,
   payment_verified_at timestamptz,
@@ -404,90 +409,27 @@ ALTER TABLE rf_coin_fulfillment_handoffs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE rf_coin_fulfillment_handoffs
   FROM PUBLIC, anon, authenticated, service_role;
 
--- ============ FULFILLMENT HANDOFF CRON SCHEDULING ============
--- Same pg_cron pattern as the canonical auto-reconciliation schedule
--- (20261008142813): the cron trigger reads its secret from _cron_secrets
--- (RLS deny-by-default) and posts to the fulfillment-handoff Edge Function,
--- which validates the X-Cron-Secret header with a constant-time comparison.
-CREATE TABLE IF NOT EXISTS public._cron_secrets (
+-- ============ SHARED CRON SECRET STORE (INERT) ============
+-- The current schema migration creates no outbound HTTP function, schedule,
+-- or supplier side effect. The table is retained for existing trusted worker
+-- contracts, but remains empty and inaccessible to browser/service roles.
+-- Queue processing and any scheduler require a separately reviewed change.
+DO $$
+BEGIN
+  IF to_regclass('public._cron_secrets') IS NOT NULL THEN
+    RAISE EXCEPTION 'RF_COINS_CRON_SECRET_TABLE_ALREADY_EXISTS_REQUIRES_REVIEW';
+  END IF;
+END;
+$$;
+
+CREATE TABLE public._cron_secrets (
   key text PRIMARY KEY,
   value text NOT NULL
 );
 
 ALTER TABLE public._cron_secrets ENABLE ROW LEVEL SECURITY;
 
--- This secret has no browser or service-role table access. The definer-owned
--- handoff trigger reads it only after an explicit operator inserts a secret.
+-- No secret is inserted by this migration. No handoff trigger or job is
+-- installed; do not add a secret as part of this disabled-wallet schema.
 REVOKE ALL PRIVILEGES ON TABLE public._cron_secrets
   FROM PUBLIC, anon, authenticated, service_role;
-
-DROP POLICY IF EXISTS "_cron_secrets_select" ON public._cron_secrets;
-DROP POLICY IF EXISTS "_cron_secrets_insert" ON public._cron_secrets;
-DROP POLICY IF EXISTS "_cron_secrets_update" ON public._cron_secrets;
-DROP POLICY IF EXISTS "_cron_secrets_delete" ON public._cron_secrets;
-
--- No secret is inserted here. The operator must insert a separately generated
--- secret (see ACTIVATION below) before the cron trigger can authenticate.
-
-CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'pg_catalog', 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_url text;
-  v_secret text;
-  v_request_id bigint;
-BEGIN
-  -- This is the explicitly approved existing development project. The cron
-  -- remains unscheduled and has no secret until a separate release approval.
-  v_url := 'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/fulfillment-handoff';
-
-  SELECT value INTO v_secret FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret';
-  IF v_secret IS NULL THEN
-    RAISE NOTICE 'No fulfillment_handoff_secret found in _cron_secrets';
-    RETURN;
-  END IF;
-
-  v_request_id := net.http_post(
-    url := v_url,
-    body := '{}'::jsonb,
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'X-Cron-Secret', v_secret
-    ),
-    timeout_milliseconds := 30000
-  );
-
-  RAISE NOTICE 'Fulfillment handoff request sent (id=%)', v_request_id;
-END;
-$function$;
-
--- Cron trigger lockdown (Codex review): SECURITY DEFINER functions default
--- to EXECUTE for PUBLIC, so revoke every client role explicitly. Only the
--- postgres role (which pg_cron jobs run as) may execute it. Scheduling stays
--- DISABLED until the documented operator activation steps are run.
-REVOKE EXECUTE ON FUNCTION public.trigger_fulfillment_handoff()
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.trigger_fulfillment_handoff() TO postgres;
-
--- ============ ACTIVATION (EXPLICIT OPERATOR STEP — NOT AUTOMATIC) ============
--- Do NOT schedule the cron automatically when migrations are applied. Fulfillment
--- activation is a production decision requiring a separately generated secret.
--- After applying this migration, an operator with database access must run BOTH:
---
---   1. Insert a securely generated secret (e.g. openssl rand -hex 32):
---      INSERT INTO public._cron_secrets (key, value)
---      VALUES ('fulfillment_handoff_secret', '<generated-secret>');
---
---   2. Schedule the trigger:
---      SELECT cron.schedule(
---        'fulfillment-handoff',
---        '*/3 * * * *',
---        $$SELECT public.trigger_fulfillment_handoff()$$
---      );
---
--- Until both steps are done, no cron trigger exists and the worker endpoint
--- rejects every request (the Edge Function 503s when no secret row is found).
--- To deactivate later: SELECT cron.unschedule('fulfillment-handoff');

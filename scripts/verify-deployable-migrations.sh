@@ -15,7 +15,7 @@ scan_external_operations() {
   fi
 
   local scan_status=0
-  grep -R -n -E -i -- '(cron\.schedule|net\.http|http_post|http_get|https://[^[:space:]]+/functions/)' "$path" \
+  grep -R -n -E -i -- '(cron\.schedule|net\.http|(extensions\.)?http_(post|get|put|delete|head|patch)|https?://)' "$path" \
     || scan_status=$?
   case "$scan_status" in
     0)
@@ -84,6 +84,12 @@ count="$(wc -l < "$tmp_root/actual" | tr -d ' ')"
 
 if ! scan_external_operations "$migrations"; then
   echo 'ERROR: executable migration sequence did not pass its external-operation safety scan.' >&2
+  exit 1
+fi
+
+pending_migrations="$project_root/supabase/migrations-pending"
+if [ -d "$pending_migrations" ] && ! scan_external_operations "$pending_migrations"; then
+  echo 'ERROR: pending migration set did not pass its external-operation safety scan.' >&2
   exit 1
 fi
 

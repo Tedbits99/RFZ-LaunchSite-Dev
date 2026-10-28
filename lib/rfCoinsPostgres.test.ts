@@ -335,6 +335,11 @@ describe('rf coins real SQL behavior', () => {
       `INSERT INTO rf_coin_topups (user_id, package_id, coins, bonus_coins, price_cents, provider_reference, idempotency_key)
        VALUES ($1, $2, 100, 10, 10000, 'release-lock-provider-reference', 'release-lock-topup') RETURNING id`,
       [CUSTOMER, activePackage[0].id]);
+    await expect(sql(
+      `INSERT INTO rf_coin_topups (user_id, coins, price_cents, provider, idempotency_key)
+       VALUES ($1, 100, 10000, 'paymongo', 'disallowed-paymongo-wallet-funding')`,
+      [CUSTOMER],
+    )).rejects.toThrow(/rf_coin_topups_provider_check/);
     await asRole('service_role');
     const creditAttempt = await sql<{ out_credited: boolean; out_error: string }>(
       `SELECT * FROM rf_coin_credit_paid_topup($1, 'release-lock-provider-reference')`, [pending.id]);
@@ -344,11 +349,11 @@ describe('rf coins real SQL behavior', () => {
 
     const order = await sql<{ status: string }>(`SELECT status FROM orders WHERE id = $1`, [orderId]);
     const wallet = await sql<{ balance_coins: string }>(`SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
-    const topupState = await sql<{ status: string; credited_at: string | null }>(
-      `SELECT status, credited_at FROM rf_coin_topups WHERE id = $1`, [pending.id]);
+    const topupState = await sql<{ status: string; credited_at: string | null; provider: string }>(
+      `SELECT status, credited_at, provider FROM rf_coin_topups WHERE id = $1`, [pending.id]);
     expect(order[0].status).toBe('WAITING_PAYMENT');
     expect(Number(wallet[0].balance_coins)).toBe(1000);
-    expect(topupState[0]).toEqual({ status: 'PENDING', credited_at: null });
+    expect(topupState[0]).toEqual({ status: 'PENDING', credited_at: null, provider: 'disabled' });
     await createWallet(CUSTOMER, 0);
 
     // Remaining accounting tests intentionally unlock only the disposable
@@ -895,42 +900,23 @@ describe('rf coins real SQL behavior', () => {
     expect(Number(handoffs[0].n)).toBe(1);
   });
 
-  it('cron trigger is executable by postgres only (Codex fix 2)', async () => {
-    await asRole('authenticated', CUSTOMER);
-    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
-      .rejects.toThrow(/permission denied/i);
-    await resetRole();
-
-    await asRole('anon');
-    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
-      .rejects.toThrow(/permission denied/i);
-    await resetRole();
-
-    // postgres retains execution; it performs no HTTP call because no secret
-    // row exists (the trigger returns early with a NOTICE).
-    await db.exec(`SET ROLE postgres`);
-    await sql(`SELECT public.trigger_fulfillment_handoff()`);
-    await db.exec(`RESET ROLE`);
-  });
-
-  it('applies without pg_cron or pg_net and fails closed if handoff is forced without pg_net', async () => {
-    const extensions = await sql<{ cron_schema: string | null; net_schema: string | null }>(
-      `SELECT to_regnamespace('cron')::text AS cron_schema, to_regnamespace('net')::text AS net_schema`);
-    expect(extensions[0]).toEqual({ cron_schema: null, net_schema: null });
-
-    // No secret is installed by the migration; even postgres gets a no-op
-    // until a separate operator activation step is taken.
-    await db.exec('SET ROLE postgres');
-    await sql(`SELECT public.trigger_fulfillment_handoff()`);
-
-    // A synthetic secret is safe test input. Without pg_net, an accidental
-    // attempted dispatch errors before any external request can occur.
-    await sql(`INSERT INTO public._cron_secrets (key, value)
-      VALUES ('fulfillment_handoff_secret', 'synthetic-never-valid-secret')`);
-    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
-      .rejects.toThrow(/schema "net" does not exist|function net\.http_post/i);
-    await db.exec('RESET ROLE');
-    await sql(`DELETE FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret'`);
+  it('installs no outbound dispatcher or scheduled fulfillment job', async () => {
+    const installed = await sql<{
+      cron_schema: string | null;
+      net_schema: string | null;
+      handoff_dispatcher: string | null;
+      handoff_secret_count: string;
+    }>(`SELECT to_regnamespace('cron')::text AS cron_schema,
+               to_regnamespace('net')::text AS net_schema,
+               to_regprocedure('public.trigger_fulfillment_handoff()')::text AS handoff_dispatcher,
+               (SELECT count(*)::text FROM public._cron_secrets
+                WHERE key = 'fulfillment_handoff_secret') AS handoff_secret_count`);
+    expect(installed[0]).toEqual({
+      cron_schema: null,
+      net_schema: null,
+      handoff_dispatcher: null,
+      handoff_secret_count: '0',
+    });
   });
 
   it('preserves existing order-payment constraints and supports only the new nullable top-up link', async () => {
