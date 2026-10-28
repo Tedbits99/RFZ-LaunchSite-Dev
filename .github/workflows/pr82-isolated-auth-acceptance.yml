@@ -151,6 +151,30 @@ jobs:
             exit 1
           fi
 
+      - name: Verify GoTrue uses the disposable email catcher's container SMTP port
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t auth_containers < <(docker ps --format '{{.Names}}' | awk '/^supabase_auth_.*runfazone-pr82-isolated-auth$/')
+          mapfile -t inbox_containers < <(docker ps --format '{{.Names}}' | awk '/^supabase_inbucket_.*runfazone-pr82-isolated-auth$/')
+          [[ "${#auth_containers[@]}" == 1 && "${#inbox_containers[@]}" == 1 ]] || {
+            echo 'BLOCKED: isolated Auth and email-catcher containers were not uniquely identified.' >&2
+            exit 1
+          }
+          auth_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${auth_containers[0]}")"
+          smtp_host="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_HOST=//p')"
+          smtp_port="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_PORT=//p')"
+          inbox_ports="$(docker inspect --format '{{json .NetworkSettings.Ports}}' "${inbox_containers[0]}")"
+          SMTP_HOST="$smtp_host" SMTP_PORT="$smtp_port" INBOX_PORTS="$inbox_ports" node <<'NODE'
+          const ports = JSON.parse(process.env.INBOX_PORTS || '{}');
+          const smtpBindings = ports['2500/tcp'];
+          if (process.env.SMTP_HOST !== 'inbucket' || process.env.SMTP_PORT !== '2500'
+            || !Array.isArray(smtpBindings) || !smtpBindings.some((binding) => binding.HostPort === '54325')) {
+            throw new Error('Isolated SMTP binding mismatch: expected GoTrue inbucket:2500 and host-captured port 54325.');
+          }
+          console.log('LOCAL_AUTH_SMTP_BINDING_PASS host=inbucket container_port=2500 captured_host_port=54325');
+          NODE
+
       - name: Bind application only to validated loopback Supabase and mask local keys
         shell: bash
         run: |

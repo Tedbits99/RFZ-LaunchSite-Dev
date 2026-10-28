@@ -50,7 +50,7 @@ otp_expiry = 3600
 [auth.email.smtp]
 enabled = true
 host = "inbucket"
-port = 54325
+port = 2500
 user = "supabase_auth_admin"
 pass = "local-only-e2e-smtp-password"
 admin_email = "admin@runfazone.test"
