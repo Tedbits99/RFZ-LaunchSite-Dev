@@ -1,6 +1,6 @@
 # RF Coins Admin Center — hosted migration review package
 
-Status: **HOLD — READ-ONLY PREFLIGHT FOUND A RELEASE-LOCK DEFECT; FIXED IN THE PR, BUT HOSTED CONTRACT/UPGRADED-REHEARSAL EVIDENCE IS INCOMPLETE. DO NOT APPLY.**
+Status: **HOLD — source ACL remediation passed disposable PostgreSQL 17 rehearsal, but hosted execution authority, hosted compatibility, and recovery evidence remain incomplete. DO NOT APPLY.**
 
 ## 2026-10-28 hosted ACL follow-up — source-only, still NO-GO
 
@@ -39,8 +39,11 @@ unchanged. It must run in a dedicated disposable PostgreSQL 17 superuser
 fixture, never against the hosted project; the transaction rolls back. This is
 source/test preparation only:
 the migration has **not** been applied to the hosted project, no ACL has been
-changed, and the migration recommendation remains **NO-GO** pending successful
-disposable PostgreSQL 17 rehearsal and separate release authorization.
+changed, and the migration recommendation remains **NO-GO** pending verified
+hosted execution authority for all audited default-ACL owners, recovery
+evidence, and separate release authorization. The disposable PostgreSQL 17
+rehearsal passed as recorded below; that isolated superuser result does not
+prove the hosted migration role has authority over `supabase_admin` defaults.
 
 The RF Coins wallet tables and reporting RPCs were absent in fresh read-only
 audit run `40623744044` against development project `ketdhcmwowzztcdlmris`.
@@ -926,7 +929,32 @@ authorization. This proposal has **not** been applied to the hosted project.
 The ACL artifact does not include provider backup/PITR metadata and provides
 no restore evidence. Backup type/status, latest recovery point, retention,
 PITR, compatible restore version/destination, and isolated restore remain
-**UNVERIFIED**. The hosted migration recommendation remains **NO-GO**. PR #82
-was still OPEN/DRAFT at `089377cbcfd21bbe26b56fe08121b1c6407ddfb6` at audit
-time and remains unmerged; its test-harness conflict with current main is
-unresolved.
+**UNVERIFIED**. The hosted migration recommendation remains **NO-GO**. The
+test-harness conflict with current main was resolved at merge commit
+`67c5a5ae155708c400e228835f65904252d52d9b`, preserving both the hosted ACL
+metadata audit tests and RF Coins PostgreSQL 17 fixtures. PR #82 remains
+OPEN/DRAFT and unmerged.
+
+### Latest source-only verification (2026-10-28)
+
+- Exact PR #82 source head `f99763e26599bd0672efe0ab95f24d52c9bdb746` passed
+  Frontend run `40645458108` and Development run `40645458010`. The latter
+  emitted `HOSTED_ACL_REMEDIATION_POSTGRES17_REHEARSAL_PASS` and
+  `RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS`; it used disposable databases
+  only. No hosted migrations or ACL changes were made.
+- The migration safety job previously printed `rg: command not found` while
+  returning success. The verifier now uses an explicit fail-closed grep scan
+  and self-tests clean SQL, detected external operations, a missing scanner,
+  and scanner execution failure. The exact-head release-safety check emitted
+  `DEPLOYABLE_MIGRATION_SAFETY_SCANNER_SELF_TEST_PASS` and
+  `DEPLOYABLE_MIGRATION_MANIFEST_PASS count=100`.
+- The ACL candidate remains only at
+  `supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql`;
+  it is excluded from the active migration sequence and normal `db reset`.
+  The disposable PG17 superuser rehearsal does not prove that the hosted
+  migration role can alter `supabase_admin` defaults. A prior standard local
+  Supabase run returned SQLSTATE `42501` for that operation, so hosted role
+  authority still must be verified before any separately authorized apply.
+- Provider backup/PITR metadata and isolated restore evidence remain
+  **UNVERIFIED**. Accordingly `MIGRATION_RECOMMENDATION=NO-GO`; no hosted
+  export, restore, ACL change, or migration has been performed.
