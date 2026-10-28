@@ -28,7 +28,7 @@ separate owner decisions. It does not change PR #82's DRAFT hold.
 
 | Operation | File | SHA-256 | Executor scope |
 |---|---|---|---|
-| Supported ACL migration | `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql` | `f6cb81a1d8f7f91551c1d91f678624ff7023b74e7be6b55e61fa8b78844701a9` | Hosted `postgres`; exact audited relation grants and its own two default contexts |
+| Supported ACL migration | `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql` | `a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d` | Hosted `postgres`; exact audited relation grants and its own two default contexts |
 
 The migration-only PR contains no RF Coins SQL. The ACL migration does not
 alter SELECT/DML grants, RLS, policies, table contents, `PUBLIC`, or
@@ -36,7 +36,10 @@ alter SELECT/DML grants, RLS, policies, table contents, `PUBLIC`, or
 RLS, grant count/provenance, default-ACL counts, or PostgreSQL version no longer
 match. It is retry-safe for the exact all-present or all-removed direct-ACL
 states and rejects partial drift. Tests snapshot all provider-owned defaults
-before and after execution and require the same 24 entries.
+before and after execution. The hosted audit baseline is 24 entries in the
+three documented schemas; the disposable local Supabase stack also provisions
+eight managed defaults in `supabase_functions`, which the rehearsal verifies
+remain unchanged. That local fixture detail is not evidence of hosted entries.
 
 ## Application order and preconditions
 
@@ -61,7 +64,7 @@ No operation is authorized by this package alone. Before any future application:
    supported migration. It must not include RF Coins pending SQL.
 5. Apply only the supported `postgres`-owned ACL migration and verify its
    migration-ledger entry plus read-only ACL metadata after application.
-6. The 24 `supabase_admin` defaults remain unresolved. Ask Supabase through
+6. The 24 hosted `supabase_admin` defaults remain unresolved. Ask Supabase through
    its supported support channel or documented managed-database process for
    an authorized remediation path. Do not `SET ROLE`, add role membership, or
    attempt to change provider-owned ACLs from `postgres`.

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-expected_migration_sha256='f6cb81a1d8f7f91551c1d91f678624ff7023b74e7be6b55e61fa8b78844701a9'
+expected_migration_sha256='a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d'
 migration_file="$project_root/supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql"
 
 actual_migration_sha256="$(sha256sum "$migration_file" | awk '{print $1}')"
@@ -67,4 +67,4 @@ psql_in_container postgres "$migration_file"
 psql_in_container postgres "$migration_file"
 psql_in_container bootstrap "$project_root/supabase/tests/database/hosted-acl-remediation-final-state.sql"
 
-echo "HOSTED_ACL_REMEDIATION_POSTGRES17_SUPPORTED_SCOPE_PASS migration_sha256=$actual_migration_sha256 provider_defaults_preserved=24"
+echo "HOSTED_ACL_REMEDIATION_POSTGRES17_SUPPORTED_SCOPE_PASS migration_sha256=$actual_migration_sha256 provider_audited_defaults_preserved=24 managed_supabase_functions_defaults_preserved=8"

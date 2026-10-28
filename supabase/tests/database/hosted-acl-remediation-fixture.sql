@@ -22,6 +22,7 @@ CREATE ROLE supabase_admin LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 CREATE SCHEMA storage AUTHORIZATION postgres;
 CREATE SCHEMA graphql AUTHORIZATION supabase_admin;
 CREATE SCHEMA graphql_public AUTHORIZATION supabase_admin;
+CREATE SCHEMA supabase_functions AUTHORIZATION supabase_admin;
 GRANT USAGE, CREATE ON SCHEMA public TO postgres, supabase_admin;
 
 SET ROLE postgres;
@@ -83,6 +84,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA graphql
   GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA graphql_public
+  GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
+-- The local Supabase stack also owns defaults in this managed schema; the
+-- migration must preserve them without attempting to act as supabase_admin.
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA supabase_functions
   GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
 RESET ROLE;
 

@@ -56,6 +56,7 @@ FROM (VALUES
   ('supabase_admin', 'public'),
   ('supabase_admin', 'graphql'),
   ('supabase_admin', 'graphql_public'),
+  ('supabase_admin', 'supabase_functions'),
   ('postgres', 'storage')
 ) AS context(creator_name, schema_name)
 CROSS JOIN (VALUES ('anon'), ('authenticated')) AS roles(role_name)
@@ -297,6 +298,15 @@ BEGIN
   ) <> 24 THEN
     RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_PROVIDER_DEFAULTS_CHANGED';
   END IF;
+  IF (
+    SELECT count(*) FROM after_default_acl
+    WHERE creator_name = 'supabase_admin'
+      AND schema_name = 'supabase_functions'
+      AND grantee_name IN ('anon', 'authenticated')
+      AND privilege_name IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
+  ) <> 8 THEN
+    RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_SUPABASE_FUNCTIONS_DEFAULTS_CHANGED';
+  END IF;
   IF EXISTS (SELECT * FROM before_other_role_acl EXCEPT SELECT * FROM after_other_role_acl)
      OR EXISTS (SELECT * FROM after_other_role_acl EXCEPT SELECT * FROM before_other_role_acl) THEN
     RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_PUBLIC_OR_SERVICE_ROLE_ACL_CHANGED';
@@ -325,5 +335,5 @@ END;
 $$;
 
 DO $$ BEGIN
-  RAISE NOTICE 'HOSTED_ACL_POSTGRES17_NON_SUPERUSER_REHEARSAL_PASS provider_defaults_preserved=24';
+  RAISE NOTICE 'HOSTED_ACL_POSTGRES17_NON_SUPERUSER_REHEARSAL_PASS provider_audited_defaults_preserved=24 managed_supabase_functions_defaults_preserved=8';
 END $$;

@@ -173,8 +173,9 @@ BEGIN
 
   -- The audit recorded exactly 16 postgres-owned defaults in public/storage
   -- and 24 supabase_admin-owned defaults in public/graphql/graphql_public.
-  -- Global browser defaults and PUBLIC defaults were absent. This migration
-  -- changes only the postgres-owned contexts; the provider-owned 24 remain.
+  -- Global browser defaults and PUBLIC defaults were absent. The migration
+  -- changes only postgres-owned contexts; all supabase_admin defaults remain
+  -- untouched, including managed schemas outside the hosted 24-entry scope.
   SELECT count(*) INTO v_postgres_default_count
   FROM pg_default_acl AS d
   JOIN pg_roles AS creator ON creator.oid = d.defaclrole
@@ -222,10 +223,8 @@ BEGIN
       AND (
         acl.grantee = 0
         OR acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
-           AND NOT (
-             creator.rolname = 'postgres' AND n.nspname IN ('public', 'storage')
-             OR creator.rolname = 'supabase_admin' AND n.nspname IN ('public', 'graphql', 'graphql_public')
-           )
+           AND creator.rolname <> 'supabase_admin'
+           AND NOT (creator.rolname = 'postgres' AND n.nspname IN ('public', 'storage'))
       )
     ORDER BY creator.rolname, n.nspname, acl.grantee, acl.privilege_type
     LIMIT 10
@@ -256,7 +255,6 @@ BEGIN
     JOIN pg_roles AS creator ON creator.oid = d.defaclrole
     CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl
     WHERE d.defaclnamespace = 0
-      AND creator.rolname IN ('postgres', 'supabase_admin')
       AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
       AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
   ) THEN
