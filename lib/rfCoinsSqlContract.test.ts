@@ -237,6 +237,18 @@ describe('grants and schema', () => {
     expect(schemaSql).not.toMatch(/POLICY .* ON rf_coin_admin_audit/);
   });
 
+  it('does not let the Super Admin settings RPC override financial release locks', () => {
+    const setSettings = extractFunction(functionsSql, 'rf_coin_set_settings');
+    expect(setSettings).toMatch(/IF p_enabled IS TRUE OR p_topups_enabled IS TRUE OR p_spending_enabled IS TRUE THEN\s*RAISE EXCEPTION 'RF_COIN_RELEASE_LOCKED'/);
+  });
+
+  it('pins every SECURITY DEFINER function to a catalog-first path with temp last', () => {
+    const definitions = Array.from(functionsSql.matchAll(/SECURITY DEFINER SET search_path = ([^$]+) AS/g));
+    expect(definitions.length).toBeGreaterThan(0);
+    expect(definitions.every(([, path]) => path.trim() === 'pg_catalog, public, pg_temp')).toBe(true);
+    expect(adminCenterSql.match(/SECURITY DEFINER\s+SET search_path = pg_catalog, public, pg_temp/g)).toHaveLength(2);
+  });
+
   it('marks both files as pending and feature disabled', () => {
     expect(schemaSql).toMatch(/STATUS: PENDING/);
     expect(functionsSql).toMatch(/STATUS: PENDING/);

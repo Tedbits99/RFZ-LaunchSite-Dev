@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION public.rf_coin_admin_center_read(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_page integer := greatest(coalesce(p_page, 1), 1);
@@ -355,7 +355,7 @@ CREATE OR REPLACE FUNCTION public.rf_coin_record_admin_export(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   v_admin_email text;

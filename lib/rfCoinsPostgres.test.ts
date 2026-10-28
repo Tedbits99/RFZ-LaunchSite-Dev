@@ -271,6 +271,38 @@ beforeAll(async () => {
 afterAll(async () => { await db.close(); });
 
 describe('rf coins real SQL behavior', () => {
+  it('does not let a Super Admin override disabled financial release settings through RPC', async () => {
+    await sql(`UPDATE rf_coin_settings
+      SET enabled = false, topups_enabled = false, spending_enabled = false
+      WHERE id = 1`);
+
+    try {
+      await asRole('authenticated', SUPER_ADMIN);
+      await expect(sql(`SELECT rf_coin_set_settings(true, true, true, null, null, null)`))
+        .rejects.toThrow(/RF_COIN_RELEASE_LOCKED/);
+
+      const adjustmentKey = `locked-adjustment-${crypto.randomUUID()}`;
+      await expect(sql(`SELECT * FROM rf_coin_request_adjustment(
+        $1, 'credit', 5, 'release-lock regression', 'promotion', $2
+      )`, [CUSTOMER, adjustmentKey]))
+        .rejects.toThrow(/RF_COIN_DISABLED/);
+
+      await resetRole();
+      const settings = await sql<{ enabled: boolean; topups_enabled: boolean; spending_enabled: boolean }>(
+        `SELECT enabled, topups_enabled, spending_enabled FROM rf_coin_settings WHERE id = 1`);
+      expect(settings[0]).toEqual({ enabled: false, topups_enabled: false, spending_enabled: false });
+
+      const adjustment = await sql<{ count: string }>(
+        `SELECT count(*) AS count FROM rf_coin_adjustment_requests WHERE idempotency_key = $1`, [adjustmentKey]);
+      expect(Number(adjustment[0].count)).toBe(0);
+    } finally {
+      await resetRole();
+      await sql(`UPDATE rf_coin_settings
+        SET enabled = true, topups_enabled = true, spending_enabled = true
+        WHERE id = 1`);
+    }
+  });
+
   it('keeps funding and spending locked even when database settings are switched on', async () => {
     const orderId = 'aaaaaaaa-0000-0000-0000-0000000000f1';
     await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });

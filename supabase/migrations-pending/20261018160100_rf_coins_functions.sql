@@ -83,7 +83,7 @@
 
 -- ============ INTERNAL HELPERS ============
 CREATE OR REPLACE FUNCTION rf_coin_assert_super_admin()
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
   IF auth.uid() IS NULL OR NOT EXISTS (
     SELECT 1 FROM admins
@@ -97,7 +97,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION rf_coin_get_settings()
-RETURNS rf_coin_settings LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS rf_coin_settings LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   s rf_coin_settings;
 BEGIN
@@ -110,7 +110,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION rf_coin_get_or_create_wallet(p_user_id uuid)
-RETURNS rf_coin_wallets LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS rf_coin_wallets LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   w rf_coin_wallets;
 BEGIN
@@ -134,7 +134,7 @@ CREATE OR REPLACE FUNCTION rf_coin_create_topup(
 )
 RETURNS TABLE (out_topup_id uuid, out_coins integer, out_bonus_coins integer,
                out_price_cents integer, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   -- Release lock: enabling database settings alone must never enable funding.
   v_funding_release_enabled CONSTANT boolean := false;
@@ -206,7 +206,7 @@ CREATE OR REPLACE FUNCTION rf_coin_credit_paid_topup(
   p_provider_reference text
 )
 RETURNS TABLE (out_credited boolean, out_balance bigint, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   -- The service-role webhook is also locked from issuing wallet value until
   -- financial release. Already-settled duplicate events remain idempotent.
@@ -288,7 +288,7 @@ CREATE OR REPLACE FUNCTION rf_coin_mark_topup_status(
   p_provider_reference text DEFAULT NULL
 )
 RETURNS TABLE (out_ok boolean, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   t rf_coin_topups;
   v_wallet rf_coin_wallets;
@@ -392,7 +392,7 @@ CREATE OR REPLACE FUNCTION rf_coin_settle_order_payment(
   p_user_id uuid
 )
 RETURNS TABLE (out_coins integer, out_balance_after bigint, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   -- Separate release lock: database flags cannot activate wallet spending.
   v_spending_release_enabled CONSTANT boolean := false;
@@ -511,7 +511,7 @@ CREATE OR REPLACE FUNCTION rf_coin_release_order_payment(
   p_reason text DEFAULT NULL
 )
 RETURNS TABLE (out_released boolean, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_ledger rf_coin_ledger;
   v_wallet rf_coin_wallets;
@@ -586,7 +586,7 @@ CREATE OR REPLACE FUNCTION rf_coin_request_adjustment(
   p_idempotency_key text
 )
 RETURNS TABLE (out_request_id uuid, out_status text, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   s rf_coin_settings;
   v_admin_id uuid := auth.uid();
@@ -729,7 +729,7 @@ CREATE OR REPLACE FUNCTION rf_coin_decide_adjustment(
   p_note text DEFAULT NULL
 )
 RETURNS TABLE (out_status text, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_admin_id uuid := auth.uid();
   v_admin_email text;
@@ -842,11 +842,16 @@ CREATE OR REPLACE FUNCTION rf_coin_set_settings(
   p_high_value_adjustment_coins integer DEFAULT NULL,
   p_max_daily_admin_adjustments integer DEFAULT NULL
 )
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_old rf_coin_settings;
 BEGIN
   PERFORM rf_coin_assert_super_admin();
+  -- A privileged RPC call must not turn database switches into a release.
+  -- Financial enablement requires a separate reviewed code/schema release.
+  IF p_enabled IS TRUE OR p_topups_enabled IS TRUE OR p_spending_enabled IS TRUE THEN
+    RAISE EXCEPTION 'RF_COIN_RELEASE_LOCKED';
+  END IF;
   SELECT * INTO v_old FROM rf_coin_settings WHERE id = 1 FOR UPDATE;
 
   UPDATE rf_coin_settings SET
@@ -881,7 +886,7 @@ CREATE OR REPLACE FUNCTION rf_coin_upsert_package(
   p_is_active boolean DEFAULT NULL,
   p_sort_order integer DEFAULT NULL
 )
-RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_id uuid;
 BEGIN
@@ -940,7 +945,7 @@ CREATE OR REPLACE FUNCTION rf_coin_enqueue_fulfillment(
   p_order_id uuid
 )
 RETURNS TABLE (out_handoff_id uuid, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_id uuid;
   v_order_status text;
@@ -982,7 +987,7 @@ CREATE OR REPLACE FUNCTION rf_coin_claim_fulfillment_handoffs(
 )
 RETURNS TABLE (out_id uuid, out_order_id uuid, out_attempt_count integer,
                out_lease_token uuid, out_lease_until timestamptz)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1), 100);
   v_lease_seconds integer := LEAST(GREATEST(COALESCE(p_lease_seconds, 300), 30), 900);
@@ -1041,7 +1046,7 @@ CREATE OR REPLACE FUNCTION rf_coin_ack_fulfillment_handoff(
   p_error text DEFAULT NULL
 )
 RETURNS TABLE (out_status text, out_next_attempt_at timestamptz)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_row rf_coin_fulfillment_handoffs;
   v_next timestamptz;
@@ -1098,7 +1103,7 @@ CREATE OR REPLACE FUNCTION rf_coin_settle_order_payment_and_enqueue(
   p_user_id uuid
 )
 RETURNS TABLE (out_coins integer, out_balance_after bigint, out_handoff_id uuid, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $atomic$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $atomic$
 DECLARE
   v_settle RECORD;
   v_enqueue RECORD;
