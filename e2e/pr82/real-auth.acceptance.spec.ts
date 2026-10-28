@@ -424,7 +424,7 @@ async function seedWalletFixtures(client: SupabaseClient, customerA: string, cus
       p_amount_coins: 321,
       p_reason: 'Disposable isolated acceptance fixture',
       p_category: 'correction',
-      p_idempotency_key: `pr82-e2e-${process.env.E2E_RUN_TAG}-customer-b`,
+      p_idempotency_key: `pr82-e2e-${process.env.E2E_RUN_TAG}-${customerB}`,
     });
     if (adjustment.error) {
       const code = typeof adjustment.error.code === 'string' && /^[0-9A-Z]{5}$/.test(adjustment.error.code) ? adjustment.error.code : 'unknown';
@@ -831,7 +831,9 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         assert(response.status === 200 && response.payload?.walletStatus === 'not_deployed' && response.payload?.wallet === null, 'missing wallet schema is honestly unavailable, not a fabricated zero');
       } else {
         await expect(page.getByText('RF Coins Balance')).toBeVisible();
-        await expect(page.getByText('0 RF', { exact: true })).toBeVisible();
+        const balanceValue = page.locator('p').filter({ hasText: 'RF Coins Balance' })
+          .locator('xpath=following-sibling::p[1]');
+        await expect(balanceValue).toHaveText('0');
         await expect(page.getByText(/funding is release-locked/i)).toBeVisible();
         const response = await sameOriginJson(page, '/api/account/wallet');
         assert(response.status === 200 && response.payload?.walletStatus === 'ready' && Number(response.payload?.wallet?.balance_coins) === 0, 'initialized Customer A wallet displays the actual synthetic zero row');
