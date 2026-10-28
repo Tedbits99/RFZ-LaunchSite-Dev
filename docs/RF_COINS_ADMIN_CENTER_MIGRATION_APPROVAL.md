@@ -271,6 +271,59 @@ payment/webhook and scheduled side-effect isolation remain **UNVERIFIED**.
   index plans have not been benchmarked against production-scale synthetic
   volume; performance acceptance remains pending.
 
+## Backup, restore, and incident-recovery readiness
+
+**Status: NOT VERIFIED; no hosted row data was exported in this preflight.**
+The successful `audit` run above captured migration history and sanitized
+catalog metadata only. The separate `gate-b-audit` path invokes
+`scripts/audit-hosted-integrations.sh`, which creates both a schema dump and a
+`--data-only` dump of the hosted `public` schema in the protected runner's
+temporary directory. That is a real hosted data export, even though the script
+deletes its temporary files on exit. It was not run because this task does not
+authorize a hosted data export. Do not treat the metadata audit as a backup or
+restore test.
+
+The checked-in disposable restore helper is only a partial smoke test: it
+restores into a vanilla PostgreSQL container with minimal `auth` stubs, checks
+that public tables exist, and compares row counts for six selected tables
+(`games`, `packages`, `payment_config`, `customer_profiles`, `orders`, and
+`payment_submissions`). It does not verify every table's row contents, fully
+recreate the Supabase extension/Auth/Edge Function environment, or prove
+application-level recovery. The full local Supabase replay was not completed
+because the available Docker host ran out of disk during image pulls. Thus the
+current helper and synthetic SQL tests are not sufficient evidence for
+full-upgrade or restore readiness.
+
+Before a separately authorized hosted apply, the recovery procedure must:
+
+1. Verify the project identity, exact source SHA, migration checksums, and
+   unchanged pre-apply migration ledger in the protected workflow.
+2. Obtain a one-time owner-authorized backup/export or verify the project's
+   actual provider backup/PITR capability and retention. Any row-bearing
+   artifact must remain encrypted, restricted to the minimum named operators,
+   excluded from logs and ordinary CI artifacts, checksum-verified, and given
+   an explicit short retention/deletion deadline. Never place customer data in
+   source control or a general-access artifact.
+3. Restore only into an isolated disposable Supabase-compatible environment
+   with external network calls disabled and no provider credentials. Compare
+   the complete public table inventory and per-table row counts, validate the
+   schema/constraints and representative synthetic or approved integrity
+   checks, then verify cleanup of the disposable environment and its backup.
+   Never restore over the existing development project.
+4. If an apply stops part-way, do not reset, repair the migration ledger, or
+   blindly rerun. Preserve sanitized logs, re-read the hosted ledger, identify
+   exactly which files committed, and prepare a reviewed forward-fix while
+   funding/spending remain locked. A rollback that drops wallet objects is
+   prohibited once dependent or ledger data exists; any pre-data rollback
+   requires a separate impact review and verified recovery point.
+5. The owner remains responsible for authorizing the row-data export and the
+   eventual apply, confirming the recovery point/retention, and deciding any
+   incident response that could affect existing customer or order records.
+
+These are future prerequisites, not actions performed here. No hosted export,
+restore, migration, row change, payment, supplier action, or Worker activation
+occurred in this preflight.
+
 ## Recommendation and owner boundary
 
 **Current recommendation: NO-GO for hosted migration.** Before a future
