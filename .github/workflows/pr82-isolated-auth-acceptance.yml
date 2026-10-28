@@ -208,19 +208,65 @@ jobs:
         run: |
           set -euo pipefail
           supabase --workdir "$RFZ_STACK_ROOT" migration list --local >/dev/null
-          node --input-type=module <<'NODE'
+          status_file="$RUNNER_TEMP/rfz-pr82-db-status-${MODE}.env"
+          trap 'rm -f "$status_file"' EXIT
+          env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_PASSWORD -u SUPABASE_PROJECT_ID \
+            supabase --workdir "$RFZ_STACK_ROOT" status --output env > "$status_file"
+          chmod 600 "$status_file"
+          node --input-type=module - "$status_file" <<'NODE'
+          import fs from 'node:fs';
+          import postgres from 'postgres';
           import { createClient } from '@supabase/supabase-js';
-          const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+          import { URL } from 'node:url';
+          const statusPath = process.argv[2];
+          const values = Object.fromEntries(fs.readFileSync(statusPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
+            const separator = line.indexOf('=');
+            if (separator < 1) throw new Error('Unexpected local Supabase status format.');
+            let value = line.slice(separator + 1).trim();
+            if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+            return [line.slice(0, separator), value];
+          }));
+          const dbUrl = values.DB_URL || values.DATABASE_URL;
+          if (!dbUrl) throw new Error('Disposable Supabase did not report a database URL.');
+          const database = new URL(dbUrl);
+          if (!['postgres:', 'postgresql:'].includes(database.protocol) || database.hostname !== '127.0.0.1' || database.port !== '54322' || database.pathname !== '/postgres') {
+            throw new Error('Refusing database catalog inspection outside the disposable loopback PostgreSQL endpoint.');
+          }
+          const tableNames = ['rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger'];
+          const sql = postgres(dbUrl, { max: 1, connect_timeout: 10, ssl: false });
+          let catalogTables;
+          try {
+            catalogTables = await sql`select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' and table_name = any(${sql.array(tableNames)})`;
+          } finally {
+            await sql.end({ timeout: 5 });
+          }
           const expected = process.env.MODE === 'installed-locked';
-          const tables = ['rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger'];
-          const results = await Promise.all(tables.map((table) => client.from(table).select('*', { head: true, count: 'exact' }).limit(0)));
-          const present = results.every((result) => !result.error);
-          if (present !== expected) throw new Error('RF Coins schema does not match requested isolated test mode.');
+          const catalogPresent = new Set(catalogTables.map((row) => row.table_name));
+          const catalogComplete = tableNames.every((table) => catalogPresent.has(table));
+          if (catalogComplete !== expected || catalogPresent.size !== (expected ? tableNames.length : 0)) {
+            throw new Error(`Disposable PostgreSQL catalog schema mismatch: mode=${process.env.MODE} expected_tables=${expected ? tableNames.length : 0} actual_tables=${catalogPresent.size}.`);
+          }
+          console.log(`LOCAL_POSTGRES_CATALOG_PASS mode=${process.env.MODE} wallet_tables=${catalogPresent.size}`);
+
+          const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+          const restResults = await Promise.all(tableNames.map(async (table) => {
+            const { error } = await client.from(table).select('*', { head: true, count: 'exact' }).limit(0);
+            return { table, code: error?.code ?? null };
+          }));
+          if (expected && restResults.some((result) => result.code !== null)) {
+            throw new Error(`Installed RF Coins tables are not all available through local PostgREST: ${JSON.stringify(restResults)}.`);
+          }
+          if (!expected && restResults.some((result) => !['PGRST205', '42P01'].includes(result.code ?? ''))) {
+            throw new Error(`Absent RF Coins schema returned an unexpected local PostgREST result: ${JSON.stringify(restResults)}.`);
+          }
+          if (!expected && restResults.some((result) => result.code === null)) {
+            throw new Error('PostgREST exposes an RF Coins table in the absent-schema test mode.');
+          }
           if (expected) {
             const { data, error } = await client.from('rf_coin_settings').select('enabled,topups_enabled,spending_enabled').eq('id', 1).single();
             if (error || data.enabled || data.topups_enabled || data.spending_enabled) throw new Error('RF Coins default release locks are not all off.');
           }
-          console.log(`LOCAL_SCHEMA_STATE_PASS mode=${process.env.MODE} wallets=${expected ? 'installed-locked' : 'absent'}`);
+          console.log(`LOCAL_POSTGREST_SCHEMA_PASS mode=${process.env.MODE} wallet_tables=${expected ? 'installed-locked' : 'absent'} error_codes=${restResults.map((result) => `${result.table}:${result.code ?? 'available'}`).join(',')}`);
           NODE
 
       - name: Install Chromium for Playwright

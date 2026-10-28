@@ -338,6 +338,30 @@ async function sameOriginJson(page: Page, pathname: string, method = 'GET', body
   }, { pathname, method, body });
 }
 
+async function customerSessionExpiresAt(context: BrowserContext): Promise<number> {
+  const cookieName = 'rfz-customer-auth';
+  const chunks = (await context.cookies(baseURL))
+    .filter((cookie) => cookie.name === cookieName || new RegExp(`^${cookieName}\\.\\d+$`).test(cookie.name))
+    .sort((left, right) => {
+      const index = (name: string) => name === cookieName ? -1 : Number(name.slice(cookieName.length + 1));
+      return index(left.name) - index(right.name);
+    });
+  assert(chunks.length > 0, 'customer session cookie exists without exporting its value');
+  const encoded = chunks.map((cookie) => cookie.value).join('');
+  const payload = encoded.startsWith('base64-')
+    ? Buffer.from(encoded.slice('base64-'.length), 'base64url').toString('utf8')
+    : encoded;
+  let session: unknown;
+  try { session = JSON.parse(payload); } catch { throw new Error('PR82 customer session cookie has an unexpected local format.'); }
+  const expiresAt = session && typeof session === 'object' && 'expires_at' in session
+    ? Number((session as { expires_at?: unknown }).expires_at)
+    : Number.NaN;
+  const hasRefreshToken = Boolean(session && typeof session === 'object' && 'refresh_token' in session
+    && typeof (session as { refresh_token?: unknown }).refresh_token === 'string');
+  assert(Number.isFinite(expiresAt) && hasRefreshToken, 'customer session has an expiry and refresh token in memory');
+  return expiresAt;
+}
+
 async function registerCustomer(page: Page, email: string, name: string, testInfo: TestInfo, observations: Observation, screenshot: string) {
   const initialCount = (await mailboxMessages(email)).length;
   await gotoPath(page, '/register', 'customer registration');
@@ -345,7 +369,7 @@ async function registerCustomer(page: Page, email: string, name: string, testInf
   if (screenshot === 'customer-register') await evidence(page, testInfo, observations, screenshot);
   await page.getByLabel('Full name').fill(name);
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(oldPassword);
+  await page.locator('input[autocomplete="new-password"]').fill(oldPassword);
   await page.getByRole('button', { name: 'Create Account' }).click();
   await expect(page.getByRole('heading', { name: 'Almost there' })).toBeVisible();
   const link = await capturedLink(email, initialCount + 1, 'signup');
@@ -358,7 +382,7 @@ async function registerCustomer(page: Page, email: string, name: string, testInf
 async function assertLogin(page: Page, email: string, password: string) {
   await gotoPath(page, '/login', 'customer login');
   await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
+  await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
   assert(safePath(page) === '/account', 'valid customer credentials open account dashboard');
@@ -420,7 +444,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await gotoPath(customerBPage, '/register', 'customer B registration');
       await customerBPage.getByLabel('Full name').fill('Synthetic Customer B');
       await customerBPage.getByLabel('Email').fill(customerBEmail);
-      await customerBPage.getByLabel('Password').fill(oldPassword);
+      await customerBPage.locator('input[autocomplete="new-password"]').fill(oldPassword);
       await customerBPage.getByRole('button', { name: 'Create Account' }).click();
       await expect(customerBPage.getByRole('heading', { name: 'Almost there' })).toBeVisible();
       await expect.poll(async () => (await mailboxMessages(customerBEmail)).length, { timeout: 30_000 }).toBeGreaterThan(startingCount);
@@ -491,6 +515,20 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
     await test.step('verify customer session persistence, invalid password, logout, and login', async () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
+      const expiresBeforeRefresh = await customerSessionExpiresAt(page.context());
+      const expiryBoundary = expiresBeforeRefresh * 1000 + 1_000;
+      const waitTimeout = Math.max(10_000, expiryBoundary - Date.now() + 10_000);
+      await expect.poll(() => Date.now(), { timeout: waitTimeout, intervals: [250] }).toBeGreaterThanOrEqual(expiryBoundary);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
+      const expiresAfterRefresh = await customerSessionExpiresAt(page.context());
+      assert(expiresAfterRefresh > expiresBeforeRefresh + 30, 'expired access token was refreshed into a new customer session');
+      observations.sanitizedBrowserTrace.push({
+        timestamp: new Date().toISOString(),
+        event: 'customer_session_refresh_verified',
+        service: 'app',
+        path: '/account',
+      });
       await gotoPath(page, '/account/profile', 'customer profile');
       await expect(page.getByRole('heading', { name: 'Profile Settings' })).toBeVisible();
       await page.getByRole('button', { name: /Account menu for/ }).click();
@@ -499,11 +537,11 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       assert(safePath(page) === '/login', 'customer logout clears the customer session');
       await evidence(page, testInfo, observations, 'customer-login');
       await page.getByLabel('Email').fill(customerAEmail);
-      await page.getByLabel('Password').fill('Disposable-Wrong-77!xyz');
+      await page.locator('input[autocomplete="current-password"]').fill('Disposable-Wrong-77!xyz');
       await page.getByRole('button', { name: 'Sign In' }).click();
       await expect(page.getByRole('alert')).toContainText('Unable to sign in with those credentials');
       assert(safePath(page) === '/login', 'incorrect customer password is rejected');
-      await page.getByLabel('Password').fill(oldPassword);
+      await page.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await page.getByRole('button', { name: 'Sign In' }).click();
       await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
       assert(safePath(page) === '/account', 'existing confirmed customer can sign in');
@@ -530,7 +568,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await gotoMailLink(page, resetLink, 'password recovery callback');
       assert(safePath(page) === '/auth/reset-password', 'recovery email reaches trusted reset page');
       await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
-      await page.getByLabel('New password').fill(newPassword);
+      await page.locator('input[autocomplete="new-password"]').fill(newPassword);
       await page.getByRole('button', { name: 'Update password' }).click();
       await expect(page.getByRole('heading', { name: 'Password set' })).toBeVisible();
       await evidence(page, testInfo, observations, 'password-reset-success');
@@ -538,11 +576,11 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await page.getByRole('link', { name: 'Sign in' }).click();
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
       await page.getByLabel('Email').fill(customerAEmail);
-      await page.getByLabel('Password').fill(oldPassword);
+      await page.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await page.getByRole('button', { name: 'Sign In' }).click();
       await expect(page.getByRole('alert')).toContainText('Unable to sign in with those credentials');
       assert(safePath(page) === '/login', 'old password is rejected after recovery');
-      await page.getByLabel('Password').fill(newPassword);
+      await page.locator('input[autocomplete="current-password"]').fill(newPassword);
       await page.getByRole('button', { name: 'Sign In' }).click();
       await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
       assert(safePath(page) === '/account', 'new password is accepted after recovery');
@@ -552,7 +590,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
       await gotoMailLink(page, resetLink, 'one-time recovery link reuse');
       assert(safePath(page) === '/auth/reset-password', 'reused recovery link stays at reset boundary');
-      await page.getByLabel('New password').fill(rejectedReusePassword);
+      await page.locator('input[autocomplete="new-password"]').fill(rejectedReusePassword);
       await page.getByRole('button', { name: 'Update password' }).click();
       await expect(page.getByRole('alert')).toContainText('invalid or has expired');
       await assertLogin(page, customerAEmail, newPassword);
@@ -601,7 +639,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
       await gotoPath(adminPage, '/secure-admin-login', 'Super Admin login');
       await adminPage.getByLabel('Email').fill(superEmail);
-      await adminPage.getByLabel('Password').fill(oldPassword);
+      await adminPage.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await adminPage.getByRole('button', { name: 'Sign In' }).click();
       await expect(adminPage.getByRole('heading', { name: 'Overview' })).toBeVisible();
       assert(safePath(adminPage) === '/admin', 'active Super Admin reaches the real dashboard');
@@ -649,7 +687,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
       await gotoPath(adminPage, '/secure-admin-login', 'ordinary staff authentication');
       await adminPage.getByLabel('Email').fill(staffEmail);
-      await adminPage.getByLabel('Password').fill(oldPassword);
+      await adminPage.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await adminPage.getByRole('button', { name: 'Sign In' }).click();
       await expect(adminPage.getByRole('heading', { name: 'Overview' })).toBeVisible();
       const staffApi = await sameOriginJson(adminPage, '/api/admin/rf-coins');
@@ -661,13 +699,13 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
       await gotoPath(adminPage, '/secure-admin-login', 'revoked administrator denial');
       await adminPage.getByLabel('Email').fill(revokedEmail);
-      await adminPage.getByLabel('Password').fill(oldPassword);
+      await adminPage.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await adminPage.getByRole('button', { name: 'Sign In' }).click();
       await expect(adminPage.getByText('Invalid email or password.')).toBeVisible();
       assert(safePath(adminPage) === '/secure-admin-login', 'inactive admin mapping is denied after valid Auth credentials');
 
       await adminPage.getByLabel('Email').fill(unknownEmail);
-      await adminPage.getByLabel('Password').fill(oldPassword);
+      await adminPage.locator('input[autocomplete="current-password"]').fill(oldPassword);
       await adminPage.getByRole('button', { name: 'Sign In' }).click();
       await expect(adminPage.getByText('Invalid email or password.')).toBeVisible();
       assert(safePath(adminPage) === '/secure-admin-login', 'valid Auth user without admin mapping is denied');
