@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /*
@@ -203,6 +203,8 @@ describe('grants and schema', () => {
       '20261028120200_rf_coin_admin_center_read.sql',
     ];
     const manifest = readFileSync('docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md', 'utf8');
+    const pendingDirectory = 'supabase/migrations-pending';
+    const pendingNames = existsSync(pendingDirectory) ? readdirSync(pendingDirectory) : [];
     const walletVersions = walletNames.map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
     const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version));
     const latestNonWalletVersion = Math.max(...nonWalletVersions);
@@ -211,7 +213,7 @@ describe('grants and schema', () => {
     for (const name of walletNames) {
       expect(currentVersions).toContain(Number(name.slice(0, 14)));
       expect(manifest).toContain(`| INCLUDE | \`${name}\` |`);
-      expect(readdirSync('supabase/migrations-pending')).not.toContain(name);
+      expect(pendingNames).not.toContain(name);
     }
   });
 
