@@ -773,11 +773,41 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
       await page.getByLabel('Email').fill(customerAEmail);
       await page.locator('input[autocomplete="current-password"]').fill(oldPassword);
+      const oldPasswordLogin = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === baseURL && url.pathname === '/api/auth/login' && response.request().method() === 'POST';
+      });
       await page.getByRole('button', { name: 'Sign In' }).click();
+      const oldPasswordResponse = await oldPasswordLogin;
+      const oldPasswordPayload = await oldPasswordResponse.json().catch(() => null) as unknown;
+      const oldPasswordError = oldPasswordPayload && typeof oldPasswordPayload === 'object'
+        && 'error' in oldPasswordPayload && typeof oldPasswordPayload.error === 'string'
+        ? oldPasswordPayload.error
+        : '';
+      const oldPasswordCategory = oldPasswordResponse.status() === 401
+        && oldPasswordError === 'Unable to sign in with those credentials.'
+        ? 'generic_credentials_denied'
+        : 'unexpected_auth_result';
+      recordTrace(observations, 'recovery_old_password_login', oldPasswordResponse.url(), {
+        method: 'POST', status: oldPasswordResponse.status(),
+      });
+      await evidence(page, testInfo, observations, 'password-reset-old-password-rejected');
+      assert(oldPasswordCategory === 'generic_credentials_denied',
+        `old password after recovery: http_status=${oldPasswordResponse.status()} category=${oldPasswordCategory}`);
       await expect(page.getByText('Unable to sign in with those credentials.', { exact: true })).toBeVisible();
       assert(safePath(page) === '/login', 'old password is rejected after recovery');
       await page.locator('input[autocomplete="current-password"]').fill(newPassword);
+      const newPasswordLogin = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === baseURL && url.pathname === '/api/auth/login' && response.request().method() === 'POST';
+      });
       await page.getByRole('button', { name: 'Sign In' }).click();
+      const newPasswordResponse = await newPasswordLogin;
+      recordTrace(observations, 'recovery_new_password_login', newPasswordResponse.url(), {
+        method: 'POST', status: newPasswordResponse.status(),
+      });
+      assert(newPasswordResponse.status() === 200,
+        `new password after recovery: http_status=${newPasswordResponse.status()} category=${newPasswordResponse.status() === 401 ? 'credentials_denied' : 'unexpected_auth_result'}`);
       await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
       assert(safePath(page) === '/account', 'new password is accepted after recovery');
 
