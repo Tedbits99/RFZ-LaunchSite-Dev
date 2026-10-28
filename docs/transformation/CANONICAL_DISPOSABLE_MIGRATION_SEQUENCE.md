@@ -137,7 +137,7 @@
 | 98 | INCLUDE | `20261026120000_admins_select_privilege.sql` | `dce788c276dc804f337ff0f8259bc56c0c477c707d31ab4dd6cee6dc4da667f9` | 97. 20261026053026_fazercards_signed_webhook_inbox.sql | minimum API-role SELECT grant for existing admin RLS; no anonymous access or outbound target |
 | 99 | INCLUDE | `20261026130000_lock_first_admin_bootstrap.sql` | `405e1e03115c394a1ef3c7d496952aa020d8edbc4443039dc67b970330820991` | 98. 20261026120000_admins_select_privilege.sql | revoke client-role execution from legacy first-admin bootstrap; no outbound target |
 | 100 | INCLUDE | `20261027110000_grant_public_catalog_columns.sql` | `ed297e3c69578a0dbf6268e06213e055a200cbc291bccea095fdee1466db852b` | 99. 20261026130000_lock_first_admin_bootstrap.sql | minimum public catalog column grants; RLS still restricts inactive rows; supplier cost/offer/markup columns remain private |
-| 101 | INCLUDE | `20261028130000_revoke_browser_table_ddl_privileges.sql` | `6f1aec3220b88cfd58cad7d9df63cdf07e7a6a05a70a2cb592623648bac530db` | 100. 20261027110000_grant_public_catalog_columns.sql | removes only audited browser-role TRUNCATE/REFERENCES/TRIGGER/MAINTAIN grants and five scoped defaults; fails closed on global/PUBLIC drift; PG17 rehearsal required; source-only, not hosted-applied |
+| 101 | INCLUDE | `20261028113000_revoke_browser_table_ddl_privileges.sql` | `6f1aec3220b88cfd58cad7d9df63cdf07e7a6a05a70a2cb592623648bac530db` | 100. 20261027110000_grant_public_catalog_columns.sql | removes only audited browser-role TRUNCATE/REFERENCES/TRIGGER/MAINTAIN grants and five scoped defaults; fails closed on global/PUBLIC drift; PG17 rehearsal required; source-only, not hosted-applied |
 
 ## Execution gates
 

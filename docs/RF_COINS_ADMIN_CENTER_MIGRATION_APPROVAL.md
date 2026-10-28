@@ -18,7 +18,7 @@ not proof that the grants were exploitable through PostgREST; the migration is
 limited to reducing the recorded ACL surface without changing RLS, policies,
 or ordinary data privileges.
 
-Source migration `supabase/migrations/20261028130000_revoke_browser_table_ddl_privileges.sql`
+Source migration `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql`
 now fails closed on an unexpected PUBLIC grant, missing audited object/role,
 disabled RLS, wrong PostgreSQL major version, unexpected PUBLIC defaults, or
 global browser-role defaults that a schema-scoped revoke could not cancel. It

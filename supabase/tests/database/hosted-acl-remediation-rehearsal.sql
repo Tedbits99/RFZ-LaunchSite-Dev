@@ -179,7 +179,7 @@ WHERE n.nspname = 'public'
   AND (acl.grantee = 0 OR acl.grantee = to_regrole('service_role')::oid);
 
 -- The include path resolves from this SQL file to supabase/migrations.
-\ir ../../migrations/20261028130000_revoke_browser_table_ddl_privileges.sql
+\ir ../../migrations/20261028113000_revoke_browser_table_ddl_privileges.sql
 
 CREATE TEMP TABLE after_ddl_privileges ON COMMIT DROP AS
 SELECT r.role_name, c.relname AS table_name, p.privilege_name,
