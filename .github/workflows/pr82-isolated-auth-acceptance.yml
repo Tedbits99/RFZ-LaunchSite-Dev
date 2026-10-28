@@ -236,7 +236,10 @@ jobs:
           const sql = postgres(dbUrl, { max: 1, connect_timeout: 10, ssl: false });
           let catalogTables;
           try {
-            catalogTables = await sql`select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' and table_name = any(${sql.array(tableNames)})`;
+            catalogTables = await sql`select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' and table_name in ('rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger')`;
+          } catch (error) {
+            const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'unknown';
+            throw new Error(`Disposable PostgreSQL catalog query failed with SQLSTATE ${code}.`);
           } finally {
             await sql.end({ timeout: 5 });
           }
