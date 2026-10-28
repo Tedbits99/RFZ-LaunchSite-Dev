@@ -80,7 +80,10 @@ export async function POST(request: NextRequest) {
     }
 
     stage = 'verified_user_lookup';
-    const { data: userData, error: userError } = await recovery.auth.getUser();
+    // Bind identity verification to the same token used for proof validation.
+    // A session-less getUser() may reload/refresh cookie storage and rotate
+    // the access token after it was captured above.
+    const { data: userData, error: userError } = await recovery.auth.getUser(accessToken);
     const user = userData?.user;
     if (userError || !user?.id || user.id !== session.user.id) {
       logAuthFlowFailure('password_recovery', stage, userError);

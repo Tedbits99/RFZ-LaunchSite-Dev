@@ -111,7 +111,11 @@ export async function GET(request: NextRequest) {
         return redirectToResetPassword(origin);
       }
 
-      const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser();
+      // Verify the exact access token returned by the exchange. Calling
+      // getUser() without a JWT makes the SDK reload/refresh its stored
+      // session; if that rotates the access token, the proof would be bound
+      // to the pre-refresh token while the browser stores the refreshed one.
+      const { data: recoveryUser, error: recoveryUserError } = await recovery.auth.getUser(accessToken);
       if (recoveryUserError || !recoveryUser.user || recoveryUser.user.id !== session.user.id) {
         logAuthFlowFailure('password_recovery', 'verified_user_lookup', recoveryUserError);
         await clearRecoverySession(recovery);

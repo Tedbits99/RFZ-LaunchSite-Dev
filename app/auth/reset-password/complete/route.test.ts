@@ -113,6 +113,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(mocks.updateUser).toHaveBeenCalledOnce();
     expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-1' });
+    expect(mocks.getUser).toHaveBeenCalledWith(ACCESS_TOKEN);
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
 
     const cleared = setCookies(response).find((c) => c.startsWith('rfz-recovery-proof='));

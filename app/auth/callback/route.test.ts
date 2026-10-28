@@ -232,6 +232,7 @@ describe('password recovery callback (recovery namespace isolation)', () => {
     expect(location(response)).toBe('https://example.test/auth/reset-password');
     expect(mocks.recoveryExchangeCodeForSession).toHaveBeenCalledWith('recovery-code', undefined);
     expect(mocks.recoveryGetUser).toHaveBeenCalledOnce();
+    expect(mocks.recoveryGetUser).toHaveBeenCalledWith(ACCESS_TOKEN);
     expect(mocks.customerExchangeCodeForSession).not.toHaveBeenCalled();
     expect(mocks.customerRpc).not.toHaveBeenCalled();
     expect(location(response)).not.toContain('recovery-code');

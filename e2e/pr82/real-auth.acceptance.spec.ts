@@ -383,27 +383,42 @@ async function createOrderFixture(localAdmin: SupabaseClient, email: string, pas
   return { client, userId: signedIn.data.user.id, orderId, reference: row.out_reference as string };
 }
 
-async function seedWalletFixtures(client: SupabaseClient, customerA: string, customerB: string) {
+async function seedWalletFixtures(client: SupabaseClient, customerA: string, customerB: string, superAdminEmail: string) {
   const walletTables = await client.from('rf_coin_settings').select('enabled,topups_enabled,spending_enabled').eq('id', 1).single();
   assert(!walletTables.error && !walletTables.data.enabled && !walletTables.data.topups_enabled && !walletTables.data.spending_enabled, 'wallet feature and financial settings remain disabled');
   const walletRows = await client.from('rf_coin_wallets').upsert([
     { user_id: customerA, balance_coins: 0 },
-    { user_id: customerB, balance_coins: 321 },
+    { user_id: customerB, balance_coins: 0 },
   ], { onConflict: 'user_id' });
   assert(!walletRows.error, 'synthetic customer wallet rows are seeded only in disposable database');
-  const ledgerRow = await client.from('rf_coin_ledger').insert({
-    wallet_user_id: customerB,
-    direction: 'credit',
-    amount_coins: 321,
-    kind: 'manual_credit',
-    balance_after: 321,
-    reason: 'Disposable isolated acceptance fixture',
-    reference_type: 'e2e_fixture',
-    reference_id: 'pr82-customer-b',
-    actor_type: 'system',
-    idempotency_key: `pr82-e2e-${process.env.E2E_RUN_TAG}-customer-b`,
+  // Seed Customer B through the real, role-checked accounting RPC rather than
+  // inserting directly into the immutable ledger. This exercises the same
+  // atomic wallet+ledger path while the disposable environment has no live
+  // payment, supplier, or email credentials.
+  const admin = createClient(supabaseUrl!, anonKey!, { auth: { persistSession: false, autoRefreshToken: false } });
+  const signedIn = await admin.auth.signInWithPassword({ email: superAdminEmail, password: oldPassword });
+  if (signedIn.error) {
+    const code = typeof signedIn.error.code === 'string' && /^[0-9A-Z]{5}$/.test(signedIn.error.code) ? signedIn.error.code : 'unknown';
+    const status = 'status' in signedIn.error && typeof signedIn.error.status === 'number' ? signedIn.error.status : null;
+    console.error('ISOLATED_WALLET_FIXTURE_ADMIN_AUTH_FAILURE', { step: 'super_admin_sign_in', http_status: status, code });
+  }
+  assert(!signedIn.error && signedIn.data.user, 'synthetic Super Admin has a real Auth session for wallet fixture RPC');
+  const adjustment = await admin.rpc('rf_coin_request_adjustment', {
+    p_target_user_id: customerB,
+    p_direction: 'credit',
+    p_amount_coins: 321,
+    p_reason: 'Disposable isolated acceptance fixture',
+    p_category: 'correction',
+    p_idempotency_key: `pr82-e2e-${process.env.E2E_RUN_TAG}-customer-b`,
   });
-  assert(!ledgerRow.error, 'synthetic immutable wallet ledger fixture is inserted');
+  if (adjustment.error) {
+    const code = typeof adjustment.error.code === 'string' && /^[0-9A-Z]{5}$/.test(adjustment.error.code) ? adjustment.error.code : 'unknown';
+    const status = 'status' in adjustment.error && typeof adjustment.error.status === 'number' ? adjustment.error.status : null;
+    console.error('ISOLATED_WALLET_FIXTURE_RPC_FAILURE', { step: 'super_admin_adjustment', http_status: status, code });
+  }
+  const result = Array.isArray(adjustment.data) ? adjustment.data[0] as { out_status?: string; out_error?: string | null } | undefined : undefined;
+  assert(!adjustment.error && result?.out_status === 'APPLIED' && result.out_error === null, `synthetic Super Admin adjustment creates the immutable ledger through its authorized RPC (result=${result?.out_error ?? result?.out_status ?? 'missing'})`);
+  await admin.auth.signOut();
 }
 
 async function sameOriginJson(page: Page, pathname: string, method = 'GET', body?: unknown) {
@@ -582,7 +597,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       const anonymousOrders = await anonClient.from('orders').select('id').eq('id', customerAFixture.orderId);
       assert(anonymousOrders.error?.code === '42501' || (!anonymousOrders.error && anonymousOrders.data.length === 0), 'anonymous role is denied or returns no customer order through public-key PostgREST');
       if (schemaMode === 'installed-locked') {
-        await seedWalletFixtures(localAdmin, customerAFixture.userId, customerBFixture.userId);
+        await seedWalletFixtures(localAdmin, customerAFixture.userId, customerBFixture.userId, superEmail);
         const aWalletRows = await customerAFixture.client.from('rf_coin_wallets').select('user_id,balance_coins');
         const bWalletRows = await customerBFixture.client.from('rf_coin_wallets').select('user_id,balance_coins');
         assert(!aWalletRows.error && aWalletRows.data.length === 1 && Number(aWalletRows.data[0].balance_coins) === 0, 'Customer A RLS returns only its real synthetic zero wallet');
@@ -714,7 +729,18 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         `recovery callback must persist its path-scoped proof cookie (present=${Boolean(recoveryProofCookie)} path=${recoveryProofCookie?.path ?? 'absent'} secure=${recoveryProofCookie?.secure ?? 'absent'})`,
       );
       await page.locator('input[autocomplete="new-password"]').fill(newPassword);
+      const passwordCompletion = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === baseURL && url.pathname === '/auth/reset-password/complete' && response.request().method() === 'POST';
+      });
       await page.getByRole('button', { name: 'Update password' }).click();
+      const passwordCompletionResponse = await passwordCompletion;
+      recordTrace(observations, 'password_reset_completion', passwordCompletionResponse.url(), {
+        method: passwordCompletionResponse.request().method(),
+        status: passwordCompletionResponse.status(),
+      });
+      await evidence(page, testInfo, observations, 'password-reset-completion-response');
+      assert(passwordCompletionResponse.status() === 200, `isolated password reset completion returns HTTP ${passwordCompletionResponse.status()}`);
       await expect(page.getByRole('heading', { name: 'Password set' })).toBeVisible();
       await evidence(page, testInfo, observations, 'password-reset-success');
 
