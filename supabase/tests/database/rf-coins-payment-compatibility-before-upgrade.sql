@@ -25,7 +25,8 @@ BEGIN
     'RFZ-DISPOSABLE-COINS-UPGRADE',
     'rfz-upgrade-fixture@example.invalid',
     'Disposable migration fixture', v_game_id, v_package_id,
-    '{}'::jsonb, v_amount_cents, v_amount_cents, 'paymongo_qrph'
+    jsonb_build_object('__rfz_order_access_hash', repeat('c', 64)),
+    v_amount_cents, v_amount_cents, 'paymongo_qrph'
   );
 
   INSERT INTO public.payment_transactions (
