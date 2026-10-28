@@ -571,7 +571,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       assert(!profiles.error && profiles.data.status === 'active', 'customer B profile is active after confirmation');
     });
 
-    const { customerAFixture } = await test.step('verify actual PostgREST customer ownership and wallet behavior', async () => {
+    const { customerAFixture, customerBFixture } = await test.step('verify actual PostgREST customer ownership and wallet behavior', async () => {
       const customerAFixture = await createOrderFixture(localAdmin, customerAEmail, oldPassword);
       const customerBFixture = await createOrderFixture(localAdmin, customerBEmail, oldPassword);
       const own = await customerAFixture.client.from('orders').select('id').eq('id', customerAFixture.orderId);
@@ -612,7 +612,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       const bOrderList = await sameOriginJson(customerBPage, '/api/account/profile');
       assert(bOrderList.status === 200, 'Customer B account session is accepted');
       await gotoPath(customerBPage, '/account/orders', 'Customer B order history');
-      await expect(customerBPage.getByText('No orders found for this email.')).toBeVisible();
+      await expect(customerBPage.getByText(customerBFixture.reference, { exact: true })).toBeVisible();
       await expect(customerBPage.getByText(customerAFixture.reference, { exact: true })).toHaveCount(0);
       const detailResponse = await customerBPage.goto(`${baseURL}/account/orders/${customerAFixture.orderId}`, { waitUntil: 'domcontentloaded' });
       assert(detailResponse?.status() === 404, 'Customer B cannot open Customer A order details');
