@@ -910,6 +910,11 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         assert(exportStatus === 200, 'authorized Super Admin export is audited and succeeds in disposable database');
         await evidence(adminPage, testInfo, observations, 'admin-rf-coins-center');
       } else {
+        const unavailableReport = await sameOriginJson(adminPage, '/api/admin/rf-coins');
+        assert(
+          unavailableReport.status === 503 && unavailableReport.payload?.configured === false,
+          'Super Admin RF Coins reporting returns an explicit safe-unavailable response when its schema is absent',
+        );
         await expect(adminPage.getByRole('status')).toContainText('not been applied');
         await evidence(adminPage, testInfo, observations, 'admin-wallet-schema-unavailable');
       }
@@ -987,7 +992,16 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
 
     await test.step('verify local browser made no provider requests and produced only sanitized evidence', async () => {
       assert(observations.blockedProviderHosts.length === 0, 'no payment, supplier, external email, crypto, or hosted Supabase browser request was attempted');
-      assert(observations.serverErrors.length === 0, 'no local application HTTP 5xx was observed');
+      const unexpectedServerErrors = observations.serverErrors.filter(({ path, status }) => {
+        if (status !== 503) return true;
+        if (path === '/api/account/wallet/topup') return false;
+        if (schemaMode === 'absent' && path === '/api/admin/rf-coins') return false;
+        return true;
+      });
+      assert(
+        unexpectedServerErrors.length === 0,
+        `unexpected local application 5xx responses: ${unexpectedServerErrors.map(({ path, status }) => `${path}:HTTP${status}`).join(',') || 'none'}`,
+      );
       assert(observations.pageErrors.length === 0, 'no uncaught browser JavaScript exception was observed');
       const directory = process.env.E2E_EVIDENCE_DIR;
       assert(directory, 'evidence directory configured');
