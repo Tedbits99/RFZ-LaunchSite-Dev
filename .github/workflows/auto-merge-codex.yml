@@ -38,7 +38,8 @@ jobs:
           [[ "$pr" =~ ^[0-9]+$ ]] || { echo "BLOCKED: discovery returned non-numeric PR number: $pr" >&2; exit 1; }
           echo "Discovered eligible candidate PR #$pr for exact head $HEAD_SHA"
           echo "number=$pr" >> "$GITHUB_OUTPUT"
-      - if: steps.pr.outputs.number != ''
+      - id: verify
+        if: steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -50,12 +51,23 @@ jobs:
           # cannot replace the privileged merge policy.
           gh api "repos/$GITHUB_REPOSITORY/contents/scripts/verify-auto-merge-gates.sh?ref=main" --jq .content | base64 --decode > "$RUNNER_TEMP/verify.sh"
           bash "$RUNNER_TEMP/verify.sh"
-          # Use GitHub CLI's supported native auto-merge path. This never
-          # bypasses rules, and match-head-commit pins the request to the
-          # exact verified PR head.
+
+      - if: steps.verify.outputs.auto_merge == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # The trusted verifier requires exact-head CI and independent
+          # approval; only public raster-asset-only PRs reach this step.
+          # Merge immediately instead of leaving native auto-merge pending.
           gh pr merge "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --auto \
             --squash \
             --match-head-commit "$EXPECTED_SHA"
-          echo "NATIVE_AUTO_MERGE_REQUESTED sha=$EXPECTED_SHA"
+          echo "REVIEWED_NON_SENSITIVE_MERGE_COMPLETED sha=$EXPECTED_SHA"
+
+      - if: steps.verify.outputs.auto_merge == 'false'
+        run: echo 'Automatic merge was not requested; code, configuration, documentation, and security changes require manual merge.'
