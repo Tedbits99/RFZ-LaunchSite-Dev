@@ -612,7 +612,9 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       const bOrderList = await sameOriginJson(customerBPage, '/api/account/profile');
       assert(bOrderList.status === 200, 'Customer B account session is accepted');
       await gotoPath(customerBPage, '/account/orders', 'Customer B order history');
-      await expect(customerBPage.getByText(customerBFixture.reference, { exact: true })).toBeVisible();
+      const customerBOrderLink = customerBPage.locator(`a[href="/account/orders/${customerBFixture.orderId}"]:visible`);
+      await expect(customerBOrderLink).toHaveCount(1);
+      await expect(customerBOrderLink).toContainText(customerBFixture.reference);
       await expect(customerBPage.getByText(customerAFixture.reference, { exact: true })).toHaveCount(0);
       const detailResponse = await customerBPage.goto(`${baseURL}/account/orders/${customerAFixture.orderId}`, { waitUntil: 'domcontentloaded' });
       assert(detailResponse?.status() === 404, 'Customer B cannot open Customer A order details');
@@ -661,7 +663,9 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await evidence(page, testInfo, observations, 'customer-account-session');
 
       await gotoPath(page, '/account/orders', 'Customer A order history');
-      await expect(page.getByText(customerAFixture.reference, { exact: true })).toBeVisible();
+      const customerAOrderLink = page.locator(`a[href="/account/orders/${customerAFixture.orderId}"]:visible`);
+      await expect(customerAOrderLink).toHaveCount(1);
+      await expect(customerAOrderLink).toContainText(customerAFixture.reference);
       await evidence(page, testInfo, observations, 'customer-order-history');
       await gotoPath(page, `/account/orders/${customerAFixture.orderId}`, 'Customer A order detail');
       await expect(page.getByText(customerAFixture.reference, { exact: true })).toBeVisible();
