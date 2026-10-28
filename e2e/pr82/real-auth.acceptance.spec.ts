@@ -899,15 +899,43 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
           await expect(locator).toHaveAttribute('aria-selected', 'true');
         }
         await adminPage.getByRole('tab', { name: 'Customer Wallets' }).click();
-        await expect(adminPage.getByRole('link', { name: 'Export CSV' })).toBeVisible();
-        let exportStatus = 0;
-        const exportResponse = adminPage.waitForResponse((response) => {
-          const responseUrl = new URL(response.url());
-          return responseUrl.origin === baseURL && responseUrl.pathname === '/api/admin/rf-coins' && responseUrl.searchParams.has('export');
-        });
-        await adminPage.getByRole('link', { name: 'Export CSV' }).click();
-        exportStatus = (await exportResponse).status();
-        assert(exportStatus === 200, 'authorized Super Admin export is audited and succeeds in disposable database');
+        const exportLink = adminPage.getByRole('link', { name: 'Export CSV' });
+        await expect(exportLink).toBeVisible();
+        const exportHref = await exportLink.getAttribute('href');
+        assert(exportHref, 'authorized Super Admin export link has a destination');
+        const exportUrl = new URL(exportHref, baseURL);
+        assert(
+          exportUrl.origin === baseURL && exportUrl.pathname === '/api/admin/rf-coins' && exportUrl.searchParams.get('export') === 'wallets',
+          'wallet CSV export link stays on the authenticated same-origin report endpoint',
+        );
+
+        // Download navigations are surfaced as Playwright download events, not
+        // reliably as page response events. Check the real authenticated API
+        // response through this browser context first, then verify the UI link
+        // itself starts the expected download.
+        const apiExportResponse = await adminContext.request.get(exportUrl.toString());
+        const exportContentType = apiExportResponse.headers()['content-type'] || '';
+        assert(
+          apiExportResponse.status() === 200 && /^text\/csv(?:;|$)/i.test(exportContentType),
+          `authorized Super Admin CSV endpoint returns HTTP ${apiExportResponse.status()} with CSV content`,
+        );
+        const csv = await apiExportResponse.text();
+        assert(csv.startsWith('"Customer user ID","Balance (RF)"'), 'wallet CSV contains the expected safe report header');
+
+        const downloadPromise = adminPage.waitForEvent('download');
+        await exportLink.click();
+        const download = await downloadPromise;
+        assert(download.suggestedFilename().startsWith('rf-coins-wallets-'), 'Export CSV link downloads the wallet report');
+        assert((await download.failure()) === null, 'wallet report download completes without a browser failure');
+
+        const superAdmin = await localAdmin.from('admins').select('id').eq('email', superEmail).single();
+        assert(!superAdmin.error && superAdmin.data?.id, 'synthetic Super Admin role identity remains present for export audit verification');
+        const exportAudit = await localAdmin.from('rf_coin_admin_audit')
+          .select('id')
+          .eq('actor_admin_id', superAdmin.data.id)
+          .eq('action', 'report_export')
+          .eq('entity_id', 'wallets');
+        assert(!exportAudit.error && (exportAudit.data?.length ?? 0) >= 1, 'authorized report export creates its audit record');
         await evidence(adminPage, testInfo, observations, 'admin-rf-coins-center');
       } else {
         const unavailableReport = await sameOriginJson(adminPage, '/api/admin/rf-coins');
