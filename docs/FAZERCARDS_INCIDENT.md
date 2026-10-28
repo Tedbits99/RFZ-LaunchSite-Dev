@@ -12,7 +12,7 @@ Incoming FazerCards webhook attempts for these references were recorded from 202
 
 ## Separate diagnostic traffic
 
-Seven requests reached the deployed Supabase functions from `172.234.82.46` (Linode, Osaka) between 2026-10-28 22:42:43 and 22:43:01 UTC, with user agent `curl/8.22.0`. They received only 401, 405, or 503 responses. The function endpoint logs show no request to the FazerCards test-order route and no evidence that the requests placed an order. The client operator is unknown.
+Seven requests reached the deployed Supabase functions from `172.234.82.46` (Linode, Osaka) between 2026-10-28 22:42:43 and 22:43:01 UTC, with user agent `curl/8.22.0`. They received only 401, 405, or 503 responses. A separate request from the same client at 22:43:45 UTC queried `/rest/v1/` and received 401. The function endpoint logs show no request to the FazerCards test-order route and no evidence that these requests placed an order. The client operator is unknown.
 
 ## Confirmed webhook failure
 
