@@ -151,7 +151,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify GoTrue uses the disposable email catcher's container SMTP port
+      - name: Verify GoTrue uses the disposable Mailpit container SMTP port
         shell: bash
         run: |
           set -euo pipefail
@@ -164,10 +164,10 @@ jobs:
           smtp_host="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_HOST=//p')"
           smtp_port="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_PORT=//p')"
           SMTP_HOST="$smtp_host" SMTP_PORT="$smtp_port" node <<'NODE'
-          if (process.env.SMTP_HOST !== 'inbucket' || process.env.SMTP_PORT !== '2500') {
-            throw new Error(`Isolated SMTP binding mismatch: observed host=${process.env.SMTP_HOST || 'missing'} port=${process.env.SMTP_PORT || 'missing'}, expected host=inbucket port=2500.`);
+          if (process.env.SMTP_HOST !== 'inbucket' || process.env.SMTP_PORT !== '1025') {
+            throw new Error(`Isolated SMTP binding mismatch: observed host=${process.env.SMTP_HOST || 'missing'} port=${process.env.SMTP_PORT || 'missing'}, expected host=inbucket port=1025.`);
           }
-          console.log('LOCAL_AUTH_SMTP_BINDING_PASS host=inbucket container_port=2500');
+          console.log('LOCAL_AUTH_SMTP_BINDING_PASS host=inbucket container_port=1025');
           NODE
 
       - name: Bind application only to validated loopback Supabase and mask local keys
@@ -212,7 +212,7 @@ jobs:
             `SUPABASE_SERVICE_ROLE_KEY=${service}`,
             `RFZ_RECOVERY_PROOF_HMAC_SECRET=${hmac}`,
             `RFZ_CUSTOMER_CONFIRMATION_RESEND_HMAC_SECRET=${hmac}`,
-            `E2E_INBUCKET_URL=http://127.0.0.1:54324`,
+            `E2E_MAILPIT_URL=http://127.0.0.1:54324`,
           ];
           for (const secret of [anon, service, hmac]) process.stdout.write(`::add-mask::${secret}\n`);
           fs.appendFileSync(githubEnvPath, `${lines.join('\n')}\n`);

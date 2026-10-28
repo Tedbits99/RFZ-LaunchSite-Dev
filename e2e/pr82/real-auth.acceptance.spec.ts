@@ -25,7 +25,7 @@ const baseURL = 'http://127.0.0.1:3000';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const inboxURL = process.env.E2E_INBUCKET_URL;
+const mailpitURL = process.env.E2E_MAILPIT_URL;
 const schemaMode = process.env.E2E_WALLET_SCHEMA_MODE;
 const candidateSha = process.env.E2E_CANDIDATE_SHA;
 const oldPassword = 'Disposable-Old-42!abc';
@@ -37,14 +37,14 @@ function assert(condition: unknown, label: string): asserts condition {
 }
 
 function requireLocalConfiguration() {
-  assert(supabaseUrl && anonKey && serviceKey && inboxURL, 'local Auth services are configured');
+  assert(supabaseUrl && anonKey && serviceKey && mailpitURL, 'local Auth services are configured');
   assert(schemaMode === 'absent' || schemaMode === 'installed-locked', 'wallet schema test mode is explicit');
   assert(candidateSha && /^[0-9a-f]{40}$/.test(candidateSha), 'candidate SHA is exact');
   const url = new URL(supabaseUrl);
   assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === '54321', 'Supabase URL is loopback only');
   assert(url.hostname === '127.0.0.1', 'browser Supabase origin uses the exact permitted loopback host');
-  const inbox = new URL(inboxURL);
-  assert(inbox.protocol === 'http:' && inbox.hostname === '127.0.0.1' && inbox.port === '54324', 'Mailpit uses the exact permitted loopback origin');
+  const mailpit = new URL(mailpitURL);
+  assert(mailpit.protocol === 'http:' && mailpit.hostname === '127.0.0.1' && mailpit.port === '54324', 'Mailpit uses the exact permitted loopback origin');
   for (const key of [
     'PAYMONGO_SECRET_KEY', 'PAYMENT_PAYMONGO_SECRET_KEY', 'FAZERCARDS_API_KEY',
     'SUPPLIER_FAZERCARDS_API_KEY', 'SMTP_PASSWORD', 'CRYPTO_PROVIDER_SECRET',
@@ -106,7 +106,7 @@ function localService(urlValue: string): { service: 'app' | 'auth' | 'mail-catch
   try { url = new URL(urlValue); } catch { return null; }
   if (url.origin === baseURL) return { service: 'app', path: url.pathname };
   if (supabaseUrl && url.origin === new URL(supabaseUrl).origin) return { service: 'auth', path: url.pathname };
-  if (inboxURL && url.origin === new URL(inboxURL).origin) return { service: 'mail-catcher', path: url.pathname };
+  if (mailpitURL && url.origin === new URL(mailpitURL).origin) return { service: 'mail-catcher', path: url.pathname };
   return null;
 }
 
@@ -220,16 +220,19 @@ function parseEmailBody(value: unknown, found: string[] = []): string[] {
 
 async function mailboxMessages(email: string): Promise<MailSummary[]> {
   let response: Response;
-  try { response = await fetch(`${inboxURL}/api/v1/mailbox/${encodeURIComponent(email)}`); }
+  const query = new URLSearchParams({ query: `to:${email}`, limit: '100' });
+  try { response = await fetch(`${mailpitURL}/api/v1/search?${query.toString()}`); }
   catch { throw new Error('PR82 local email catcher is unreachable.'); }
-  if (!response.ok) throw new Error(`PR82 local Inbucket mailbox returned HTTP ${response.status}.`);
+  if (!response.ok) throw new Error(`PR82 local Mailpit search returned HTTP ${response.status}.`);
   const body = await response.json().catch(() => null) as unknown;
-  const list = Array.isArray(body) ? body : null;
-  assert(list, 'local Inbucket mailbox response has a recognized structure');
+  const list = body && typeof body === 'object' && Array.isArray((body as { messages?: unknown }).messages)
+    ? (body as { messages: unknown[] }).messages
+    : null;
+  assert(list, 'local Mailpit search response has a recognized structure');
   return list.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
     .map((item) => ({
-      id: String(item.id ?? ''),
-      date: typeof item.date === 'string' ? item.date : undefined,
+      id: String(item.ID ?? item.id ?? ''),
+      date: typeof item.Created === 'string' ? item.Created : typeof item.date === 'string' ? item.date : undefined,
     }))
     .filter((item) => item.id.length > 0);
 }
@@ -243,9 +246,9 @@ async function capturedLink(email: string, minMessageCount: number, kind: 'signu
       for (const message of ordered) {
         let response: Response;
         try {
-          response = await fetch(`${inboxURL}/api/v1/mailbox/${encodeURIComponent(email)}/${encodeURIComponent(message.id)}`);
+          response = await fetch(`${mailpitURL}/api/v1/message/${encodeURIComponent(message.id)}`);
         } catch {
-          throw new Error('PR82 local Inbucket message lookup failed.');
+          throw new Error('PR82 local Mailpit message lookup failed.');
         }
         if (!response.ok) continue;
         const detail = await response.json().catch(() => null) as unknown;
@@ -268,7 +271,7 @@ async function capturedLink(email: string, minMessageCount: number, kind: 'signu
     }
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
-  throw new Error(`PR82 local ${kind} email was not captured by Inbucket.`);
+  throw new Error(`PR82 local ${kind} email was not captured by Mailpit.`);
 }
 
 function serviceClient(): SupabaseClient {
