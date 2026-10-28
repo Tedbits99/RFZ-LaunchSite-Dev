@@ -781,3 +781,112 @@ harness conflict.
 The migration recommendation remains **NO-GO**. Hosted data export,
 migrations, ACL changes, wallet funding/spending, payment/supplier activity,
 and Worker activation remain **NONE / DISABLED**.
+
+## Authorized hosted ACL metadata audit result (2026-10-28)
+
+This is the terminal result of the explicitly authorized read-only audit. It
+supersedes the owner-provided ACL counts above, but does not authorize a
+remediation or migration.
+
+- Workflow run `40639888077` completed **SUCCESS** on exact trusted main SHA
+  `b726746dfd42b0976188cb8e0c731e46cd97f092`, project
+  `ketdhcmwowzztcdlmris`, captured at `2026-10-28T05:46:39Z`. PostgreSQL
+  authentication (`SELECT 1`), project identity, exact-head CI, source scan,
+  metadata query, and before/after migration-history comparison passed.
+- Sanitized artifact: `runfazone-development-db-40639888077`,
+  `hosted-acl-metadata.json` (210,907 bytes, SHA-256
+  `1c53092074c39e8330dd3287b61452678ae3c70fc1f8b58aa5f8482de10ee321`).
+  [Run and artifact](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/40639888077).
+  Artifact declares `data_rows_exported: false`; no customer or transaction
+  rows were exported. Migration history before/after is byte-identical: 100
+  hosted migration records; source scan found 100 files matching the reviewed
+  manifest. No migrations were applied. All non-selected workflow operations,
+  including plan/apply, were skipped.
+- Database metadata: PostgreSQL 17.11, 36 public tables, all 36 with RLS
+  enabled; `customer_confirmation_resend_reservations` is the only table with
+  FORCE RLS. Required Supabase roles were present. Direct browser-role
+  membership paths were empty.
+
+### Verified excess table privileges
+
+The audit confirms effective `TRUNCATE`, `TRIGGER`, `REFERENCES`, and
+`MAINTAIN` on every table listed below. Each listed role/table has all four
+privileges; the corresponding direct ACL entries are granted by `postgres`
+and are not grantable onward.
+
+- `anon` (24 tables): `announcements`, `app_settings`, `email_sent_log`,
+  `game_input_fields`, `games`, `global_announcement`, `notifications`,
+  `order_notes`, `packages`, `payment_config`, `payment_submissions`,
+  `payment_transactions`, `player_cache`, `promotions`, `refunds`,
+  `supplier_package_mappings`, `supplier_test_runs`, `suppliers`,
+  `support_messages`, `support_tickets`, `verification_attempts`,
+  `verified_users`, `voucher_usages`, `vouchers`.
+- `authenticated` (27 tables): all 24 above, plus `admins`, `order_timeline`,
+  and `orders`.
+- No direct `PUBLIC` grant for those four privileges was found. These are
+  SQL-level grants; this artifact alone does **not** establish that a public
+  PostgREST route can invoke them or that data was exposed/deleted.
+
+### Future default ACL provenance
+
+The audit found the same four default table privileges for `anon` and
+`authenticated` in these creator/schema contexts:
+
+| Creator | Schema | Direct creator/grantor |
+|---|---|---|
+| `postgres` | `public` | `postgres` |
+| `supabase_admin` | `public` | `supabase_admin` |
+| `supabase_admin` | `graphql` | `supabase_admin` |
+| `supabase_admin` | `graphql_public` | `supabase_admin` |
+| `postgres` | `storage` | `postgres` |
+
+Other captured defaults in `auth`, `extensions`, and `realtime` target
+`postgres`/`dashboard_user`, not the browser roles for these four privileges;
+those entries are outside the proposed browser-role cleanup and must not be
+changed by it. `service_role` defaults are likewise preserved. The precise
+default ACL inventory is in the artifact.
+
+### Payment, function, and wallet metadata
+
+- `payment_transactions` is owned by `postgres`, has RLS enabled but not
+  forced, and has the `admin_select_payment_transactions` SELECT policy for
+  `authenticated`. The captured effective table privileges show neither
+  `anon` nor `authenticated` has table-level SELECT/DML; both have the four
+  excess privileges above. A policy does not itself grant SELECT. Do not add a
+  grant blindly: verify the intended admin read path (for example, a guarded
+  server API) and preserve payment/order behavior before any separate ACL
+  migration. Captured constraints include primary key, unique idempotency key,
+  `order_id` FK with `ON DELETE CASCADE`, and the payment-status check.
+- The report contains 40 public function signatures; 39 are `SECURITY
+  DEFINER`. It omits function bodies. `claim_first_admin()` has EXECUTE false
+  for `anon`, `authenticated`, and `service_role`. `create_order()` and one
+  `submit_payment()` overload have anonymous EXECUTE. These metadata facts do
+  not substitute for behavioral RPC authorization tests; no exploitability
+  conclusion is made here.
+- No RF Coins tables/functions were deployed. The `cron.job` relation was
+  absent, so this audit found no `pg_cron` scheduled-job inventory to report.
+
+### Separately reviewable remediation proposal — NOT EXECUTED
+
+Prepare a transaction-scoped migration that revokes only
+`TRUNCATE, TRIGGER, REFERENCES, MAINTAIN` from `anon` and `authenticated` on
+the exact 27 affected tables above, and revokes only those four default table
+privileges from those two browser roles for the five creator/schema pairs in
+the table above. Do not revoke SELECT/INSERT/UPDATE/DELETE, alter RLS, touch
+`PUBLIC`, `service_role`, or the internal `auth`/`extensions`/`realtime`
+defaults. Capture before/after privilege and policy metadata and assert that
+SELECT/DML grants and RLS configuration remain unchanged. Test the migration
+on disposable PostgreSQL 17 with the captured default-ACL fixtures, then run
+checkout, customer isolation, admin, payment/order, and privileged-RPC
+behavioral regressions before a separate review and explicit apply
+authorization. This proposal has **not** been applied to the hosted project.
+
+### Recovery and current gate
+
+The ACL artifact does not include provider backup/PITR metadata and provides
+no restore evidence. Backup type/status, latest recovery point, retention,
+PITR, compatible restore version/destination, and isolated restore remain
+**UNVERIFIED**. The hosted migration recommendation remains **NO-GO**. PR #82
+was still OPEN/DRAFT at `089377cbcfd21bbe26b56fe08121b1c6407ddfb6` at audit
+time and remains unmerged; its test-harness conflict with current main is
+unresolved.
