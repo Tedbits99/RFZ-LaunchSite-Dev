@@ -491,9 +491,22 @@ after a serial rerun, including wallet initialization (20), top-up
 creation/credit (16 each), order settlement (12), refund credit/reversal
 (8/12), and adjustment approval (12). Its initial attempt during parallel
 test startup failed to connect to a not-yet-ready PostgreSQL socket; the serial
-rerun reached terminal PASS. The new full canonical-migration-plus-pending
-rehearsal and Next/OpenNext builds still require terminal exact-head CI. This
-synthetic rehearsal is not a restored copy of the hosted database.
+rerun reached terminal PASS. Exact-candidate CI for source SHA
+`0a5ccfc083b300405742b4f50b93bdd331cb6260` completed successfully:
+Frontend run `40630894509` passed unit tests, TypeScript, lint, Next.js,
+OpenNext, and compiled Tailwind checks; Development run `40630894561` passed
+application tests, PostgreSQL concurrency, isolated database/RLS security,
+the 89-file canonical migration selection and application, the three pending
+RF Coins migrations, and the current-schema assertions. The rehearsal seeded a
+synthetic product order/payment before the pending migrations and emitted
+`RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS`, including preservation of that
+payment, the original order FK, RLS/admin policy and indexes, disabled release
+locks, and absent handoff job/secret. Production-release-safety run
+`40630894561` also passed. An earlier run on `e00efbfc` failed because that
+synthetic order omitted the required guest-order capability hash; the fixture
+was corrected on `0a5ccfc` and the exact-head rerun passed. This synthetic
+rehearsal is not a restored copy of the hosted database and cannot prove live
+ACL provenance or hosted-row compatibility.
 
 Recovery remains **UNVERIFIED**. No provider backup/PITR retention or restore
 capability metadata was available in the sanitized audit, and no hosted
