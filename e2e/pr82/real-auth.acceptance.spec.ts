@@ -966,6 +966,8 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         (staffCenterStatus === 404 || staffCenterStreamedNotFound) && !protectedWalletCenterVisible,
         `ordinary staff RF Coins Center denial: http_status=${staffCenterStatus ?? 'no_response'} streamed_not_found=${staffCenterStreamedNotFound} protected_content_visible=${protectedWalletCenterVisible}`,
       );
+      await gotoPath(adminPage, '/admin', 'ordinary staff dashboard after privileged route denial');
+      await expect(adminPage.getByRole('heading', { name: 'Overview' })).toBeVisible();
       await adminPage.getByRole('button', { name: 'Log out of admin dashboard' }).click();
       await expect(adminPage.getByRole('heading', { name: 'Admin sign in' })).toBeVisible();
 
