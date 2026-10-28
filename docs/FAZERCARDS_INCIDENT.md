@@ -29,3 +29,24 @@ The separate auto-reconciliation and handoff 503s occurred because the deployed 
 - Request FazerCards' order-creation audit trail for each reference: timestamp/timezone, API key fingerprint, source IP, user agent/client metadata, authenticated account/API principal, and request/idempotency ID. Never request or share the secret itself.
 
 Do not mark the incident resolved until provider-side key revocation and order attribution have independent evidence.
+
+## Ready-to-send FazerCards support request
+
+> Subject: Urgent audit and credential-revocation confirmation for three reseller orders
+>
+> Hello FazerCards Support,
+>
+> Please investigate the original creation of these orders in reseller account [account ID / reseller email]:
+>
+> - `ord-2539708` — Jawaker 4250 Tokens — 0.8513 USD
+> - `ord-2539753` — Google Play India 10 INR — 0.1047 USD
+> - `ord-2539758` — IMO 5 USD — 3.7781 USD
+>
+> Our records show supplier-side webhook references beginning 2026-10-28 21:06 UTC (2026-10-29 05:06 Philippine time). For each order, please preserve and provide the original order-creation audit record: precise timestamp and timezone; API key identifier/fingerprint (not the secret); reseller/API principal; source IP; user agent or client metadata; request, correlation, and idempotency IDs; request route and product fields; and whether your logs identify a dashboard user, integration, or API client that submitted it.
+>
+> A credential used by this integration was previously exposed in a public GitHub commit. Please confirm whether the corresponding API key is still active, when it was revoked if revoked, and whether you can immediately disable that specific key without affecting other credentials. Please do not include any full API secret in your reply. Preserve relevant access and order logs while this investigation is open.
+>
+> We did not knowingly authorize these purchases. Please also confirm whether any additional orders were submitted using the same credential or source during 2026-10-28 20:30–23:30 UTC, and whether your audit data can distinguish successful orders from rejected or idempotently deduplicated requests.
+>
+> Thank you,
+> [Name / reseller account contact]
