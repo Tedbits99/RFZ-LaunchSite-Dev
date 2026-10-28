@@ -7,6 +7,8 @@ DECLARE
   v_order_fk_preserved boolean;
   v_topup_fk_present boolean;
   v_payment_rls boolean;
+  v_payment_policy boolean;
+  v_payment_indexes integer;
   v_release_locked boolean;
   v_feature_table_count integer;
   v_bad_rls_tables integer;
@@ -61,6 +63,31 @@ BEGIN
   WHERE c.oid = 'public.payment_transactions'::regclass;
   IF v_payment_rls IS DISTINCT FROM true THEN
     RAISE EXCEPTION 'RF_COINS_PAYMENT_RLS_DISABLED';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies p
+    WHERE p.schemaname = 'public'
+      AND p.tablename = 'payment_transactions'
+      AND p.policyname = 'admin_select_payment_transactions'
+      AND p.cmd = 'SELECT'
+      AND 'authenticated' = ANY(p.roles)
+      AND p.qual ILIKE '%is_admin%'
+  ) INTO v_payment_policy;
+  IF NOT v_payment_policy THEN
+    RAISE EXCEPTION 'RF_COINS_PAYMENT_ADMIN_SELECT_POLICY_NOT_PRESERVED';
+  END IF;
+
+  SELECT count(*) INTO v_payment_indexes
+  FROM pg_catalog.pg_class i
+  WHERE i.relnamespace = 'public'::regnamespace
+    AND i.relkind = 'i'
+    AND i.relname IN (
+      'idx_payment_tx_order_id', 'idx_payment_tx_provider_ref',
+      'idx_payment_tx_idempotency', 'idx_payment_tx_rf_coin_topup'
+    );
+  IF v_payment_indexes <> 4 THEN
+    RAISE EXCEPTION 'RF_COINS_PAYMENT_INDEX_COMPATIBILITY_FAILURE';
   END IF;
 
   SELECT count(*) INTO v_feature_table_count
@@ -125,6 +152,6 @@ BEGIN
     RAISE EXCEPTION 'RF_COINS_PRIVILEGED_RPC_GRANTS_TOO_BROAD';
   END IF;
 
-  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS order_fk=preserved topup_fk=present payment_rls=enabled release_locks=off handoff_job=absent handoff_secret=absent';
+  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS order_fk=preserved topup_fk=present payment_rls=enabled admin_policy=preserved indexes=4 release_locks=off handoff_job=absent handoff_secret=absent';
 END;
 $$;

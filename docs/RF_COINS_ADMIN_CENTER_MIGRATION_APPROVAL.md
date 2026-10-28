@@ -478,7 +478,11 @@ semantic distinction, absence of `cron`/`net`, no-secret handoff no-op, and
 failure-before-network when a synthetic handoff secret is used without
 `pg_net`. The legacy-upgrade script has been extended to apply the exact three
 candidate migrations after all canonical migrations and run the current-schema
-assertion file. After these edits, local unit tests completed with 1,035
+assertion file. That assertion requires all eight wallet tables with RLS, the
+preserved payment order FK and administrator-only SELECT policy, all three
+existing payment indexes plus the new top-up index, the nullable top-up FK,
+disabled release flags, no wallet payment method, no handoff job/secret, and
+restricted privileged RPC ACLs. After these edits, local unit tests completed with 1,035
 passed and 1 skipped; TypeScript and lint completed with no errors (existing
 lint warnings remain). The isolated PostgreSQL 16 concurrency harness passed
 after a serial rerun, including wallet initialization (20), top-up
