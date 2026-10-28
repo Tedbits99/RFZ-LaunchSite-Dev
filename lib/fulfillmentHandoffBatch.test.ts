@@ -49,10 +49,28 @@ const handoffRow: HandoffRow = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE = 'enabled';
   delete process.env.SUPPLIER_FAZERCARDS_API_KEY;
 });
 
 describe('dispatch authentication (constant-time comparator reuse)', () => {
+  it('does not claim handoffs while supplier fulfillment is locked', async () => {
+    delete process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE;
+    const db = makeDb();
+    await expect(processFulfillmentHandoffBatch(db)).resolves.toEqual({
+      claimed: 0, fulfilled: 0, failed: 0, rejected: 0,
+    });
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it('does not send the direct supplier-order helper while the release is locked', async () => {
+    delete process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE;
+    const fetchImpl = vi.fn();
+    await expect(fazercardsCreateOrder('synthetic-only', 'cat', 'offer', {}, 'offline', fetchImpl))
+      .resolves.toMatchObject({ kind: 'confirmed-failure', error: 'Supplier fulfillment is disabled' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('accepts only the exact configured handoff secret', () => {
     expect(isAuthorizedFulfillmentHandoffRequest(HANDOFF, HANDOFF)).toBe(true);
   });

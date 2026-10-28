@@ -29,13 +29,18 @@ function mockResponse(body: unknown, init: { status?: number; headers?: Record<s
 }
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
+let previousSupplierRelease: string | undefined;
 
 beforeEach(() => {
+  previousSupplierRelease = process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE;
+  process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE = 'enabled';
   fetchSpy = vi.spyOn(globalThis, 'fetch');
 });
 
 afterEach(() => {
   fetchSpy.mockRestore();
+  if (previousSupplierRelease === undefined) delete process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE;
+  else process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE = previousSupplierRelease;
 });
 
 // ─── Adapter resolution ──────────────────────────────────────────────────────
@@ -199,6 +204,22 @@ describe('FazerCardsAdapter.validateAccount', () => {
 });
 
 describe('FazerCardsAdapter.createOrder', () => {
+  it('fails closed without calling the supplier while release is locked', async () => {
+    delete process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE;
+    const adapter = new FazerCardsAdapter();
+    const result = await adapter.createOrder(makeConfig(), {
+      idempotencyKey: 'offline-test-only',
+      supplierProductId: 'offer-1',
+      playerId: 'synthetic-player',
+      quantity: 1,
+      metadata: { category_id: 'synthetic-category', offer_id: 'offer-1', fields: {} },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Supplier fulfillment is disabled');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('sends correct body with category_id, offer_id, fields', async () => {
     fetchSpy.mockResolvedValue(mockResponse({
       ok: true,

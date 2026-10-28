@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { hasValidReconciliationSecret } from '@/lib/reconciliationSecurity';
+import { isSupplierFulfillmentReleased } from '@/lib/supplierFulfillmentRelease';
 
 /*
   Node.js-compatible fulfillment handoff batch worker, ported from
@@ -111,6 +112,9 @@ export async function fazercardsCreateOrder(
   idempotencyKey: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SupplierOutcome> {
+  if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled') {
+    return { kind: 'confirmed-failure', error: 'Supplier fulfillment is disabled', rawResponse: null };
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FAZERCARDS_TIMEOUT_MS);
   try {
@@ -172,6 +176,9 @@ export async function runFulfillmentForOrder(
   orderId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ success: boolean; error: string | null; ambiguous: boolean }> {
+  if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled') {
+    return { success: false, error: 'Supplier fulfillment is disabled', ambiguous: false };
+  }
   try {
     const { data: order } = await supabase
       .from('orders')
@@ -411,6 +418,9 @@ export async function processFulfillmentHandoffBatch(
   db: SupabaseClient,
   fetchImpl: typeof fetch = fetch,
 ): Promise<BatchResult> {
+  if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled') {
+    return { claimed: 0, fulfilled: 0, failed: 0, rejected: 0 };
+  }
   const { data: claimed, error: claimError } = await db.rpc('rf_coin_claim_fulfillment_handoffs', {
     p_limit: CLAIM_BATCH_LIMIT,
     p_lease_seconds: LEASE_SECONDS,

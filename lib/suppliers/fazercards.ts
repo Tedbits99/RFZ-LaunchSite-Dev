@@ -16,6 +16,7 @@ import type {
   TransactionStatusResult,
   RefundResult,
 } from './adapter';
+import { isSupplierFulfillmentReleased } from '@/lib/supplierFulfillmentRelease';
 
 const FAZERCARDS_BASE = 'https://api.fzr.cards/api/v2';
 
@@ -172,6 +173,15 @@ export class FazerCardsAdapter implements SupplierAdapter {
   }
 
   async createOrder(config: SupplierConfig, request: FulfillmentRequest): Promise<FulfillmentResult> {
+    if (!isSupplierFulfillmentReleased(process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE)) {
+      return {
+        success: false,
+        supplierReference: null,
+        status: 'failed',
+        error: 'Supplier fulfillment is disabled',
+        rawResponse: null,
+      };
+    }
     const metadata = request.metadata || {};
     const categoryId = (metadata.category_id as string) || '';
     const offerId = (metadata.offer_id as string) || request.supplierProductId;

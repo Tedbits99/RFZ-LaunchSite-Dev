@@ -220,6 +220,7 @@ validate_psql_invocation() {
           supabase/tests/customer-auth-foundation.sql|\
           supabase/tests/customer-confirmation-resend-rate-limit.sql|\
           supabase/tests/fulfillment-completion-guard.sql|\
+          supabase/tests/supplier_transactions_service_role_grants.sql|\
           supabase/tests/reconciliation-atomicity.sql|\
           supabase/tests/completion-receipt-outbox.sql|\
           supabase/tests/completion-receipt-data-contract.sql|\
@@ -494,6 +495,8 @@ cp "$project_root/supabase/tests/customer-confirmation-resend-concurrency-assert
   "$test_root/supabase/tests/customer-confirmation-resend-concurrency-assertion.sql"
 cp "$project_root/supabase/tests/fulfillment-completion-guard.sql" \
   "$test_root/supabase/tests/fulfillment-completion-guard.sql"
+cp "$project_root/supabase/tests/supplier_transactions_service_role_grants.sql" \
+  "$test_root/supabase/tests/supplier_transactions_service_role_grants.sql"
 cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
   "$test_root/supabase/tests/reconciliation-atomicity.sql"
 cp "$project_root/supabase/tests/completion-receipt-outbox.sql" \
@@ -701,6 +704,11 @@ echo "Executing direct fulfillment completion guard assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/fulfillment-completion-guard.sql
+
+echo "Executing narrow supplier transaction grant assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/supplier_transactions_service_role_grants.sql
 
 echo "Executing reconciliation atomicity assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \

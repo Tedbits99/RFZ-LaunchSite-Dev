@@ -5,6 +5,7 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { hasValidReconciliationSecret } from "./reconciliationSecurity.ts";
+import { isSupplierFulfillmentReleased } from "./supplierFulfillmentRelease.ts";
 
 // Keep the shared worker compatible with the untyped service-role clients
 // created by Edge Functions. The default generic parameters in recent
@@ -287,6 +288,9 @@ export async function processFulfillmentHandoffBatch(
 ): Promise<Response> {
   if (!RF_COINS_SPENDING_RELEASE_ENABLED) {
     return json({ claimed: 0, fulfilled: 0, failed: 0, rejected: 0, releaseLocked: true });
+  }
+  if (!isSupplierFulfillmentReleased(Deno.env.get("RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE"))) {
+    return json({ error: "Supplier fulfillment is disabled.", claimed: 0 }, 503);
   }
   const { data: claimed, error: claimError } = await db.rpc("rf_coin_claim_fulfillment_handoffs", {
     p_limit: CLAIM_BATCH_LIMIT,

@@ -276,6 +276,8 @@ async function fazercardsCreateOrder(
 // Returns quietly — fulfillment failure must not undo payment verification.
 async function triggerFulfillment(supabase: WebhookSupabaseClient, orderId: string): Promise<void> {
   try {
+    // Fail closed until an operator explicitly releases supplier purchasing.
+    if (Deno.env.get("RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE") !== "enabled") return;
     // 1. Load order and check the gate (payment VERIFIED, not already fulfilled).
     const { data: order } = await supabase
       .from("orders")

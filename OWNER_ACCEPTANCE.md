@@ -4,7 +4,10 @@ Updated 2026-10-28. This report distinguishes automated evidence from owner acce
 
 ## Candidate and evidence
 
-- PR #82 is **OPEN/DRAFT**, unmerged. Candidate at audit time: `55fa5c647ae6461246b64497c6413eed26475edb`.
+- PR #82 is **OPEN/DRAFT**, unmerged. The previous candidate `55fa5c647ae6461246b64497c6413eed26475edb` is historical and does not represent the recovery candidate. The recovery candidate is the PR branch head after the recovery changes are pushed; verify its exact SHA and Actions status in GitHub before considering any further gate.
+- Recovery source changes add a fail-closed supplier fulfillment release gate, disable live FazerCards diagnostic/test-order endpoints, and add the scoped `service_role` read grant needed by signed webhook lookups. These source changes are not deployed and do not establish hosted containment or apply the migration.
+- Local verification on the recovery source: `npm test` passed (89 files; 1,086 passed, 1 skipped), `npx tsc --noEmit` passed, `npm run lint` exited 0 (165 existing warnings), `npm run cloudflare:build` passed, `git diff --check` passed, and the disposable migration manifest passed with 105 entries. A temporary isolated PostgreSQL 17 ACL rehearsal passed the new grant assertions. The full database-security harness could not complete because the environment lacks host `psql`; the Supabase CLI was supplied ephemerally and no hosted database was changed.
+- The recovery candidate has not yet passed exact-head GitHub Actions. Wait for and inspect checks tied to the pushed SHA; do not rely on older runs listed below.
 - Exact-head Frontend validation: [run 40694965402](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/40694965402) — PASS.
 - Exact-head Development/security validation: [run 40694965405](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/40694965405) — PASS, including isolated RPC/RLS/security and production-release-safety jobs. The Supabase Preview check is skipped by design.
 - Read-only hosted schema/migration audit on verified `main` `0fde4cf946c85150fc0a607657e4a9e18f8c4afe`: [run 40697179241 and sanitized artifacts](https://github.com/Tedbits99/RFZ-LaunchSite-Dev/actions/runs/40697179241#artifacts) — PASS. Migration history was identical before and after; no data rows were exported and no migrations were applied.
@@ -15,7 +18,7 @@ Updated 2026-10-28. This report distinguishes automated evidence from owner acce
 
 | Gate | Status | Evidence / gap |
 | --- | --- | --- |
-| A — technical and isolated authenticated acceptance | **BLOCKED** | Exact-head CI is green, including isolated security and database compatibility checks. No isolated browser journey has exercised real Supabase Auth, customer sessions, or admin sessions. Existing route tests/mocks do not prove those flows. |
+| A — technical and isolated authenticated acceptance | **BLOCKED** | Historical CI below is green for an older candidate. Recovery-source local checks pass, but exact-head CI and the full database-security harness remain pending. No isolated browser journey has exercised real Supabase Auth, customer sessions, or admin sessions. Existing route tests/mocks do not prove those flows. |
 | B — owner experience acceptance | **BLOCKED** | No reviewable exact-candidate authenticated browser session or screenshot artifact was produced, and the owner has not accepted this exact candidate. Historical acceptance on older SHAs does not transfer. |
 | C — post-merge hosted verification | **NOT STARTED** | No merge, hosted migration, or post-merge verification was performed. |
 
