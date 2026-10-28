@@ -16,7 +16,17 @@ DECLARE
   v_existing_payment_preserved boolean;
   v_handoff_job boolean := false;
   v_handoff_secret_count bigint;
+  v_table text;
+  v_role text;
+  v_privilege text;
+  v_relation text;
+  v_select_expected boolean;
 BEGIN
+  IF current_setting('server_version_num')::integer < 170000
+     OR current_setting('server_version_num')::integer >= 180000 THEN
+    RAISE EXCEPTION 'RF_COINS_POSTGRESQL_17_REQUIRED';
+  END IF;
+
   IF to_regclass('public.payment_transactions') IS NULL
      OR to_regclass('public.rf_coin_wallets') IS NULL
      OR to_regclass('public.rf_coin_ledger') IS NULL
@@ -130,6 +140,46 @@ BEGIN
     RAISE EXCEPTION 'RF_COINS_RLS_NOT_ENABLED_ON_ALL_FEATURE_TABLES';
   END IF;
 
+  -- Validate effective ACLs after the representative postgres-owned default
+  -- ACL fixture. SELECT stays available only on the seven intended read
+  -- surfaces; all browser writes and PostgreSQL 17 schema-maintenance rights
+  -- are denied. The internal queue and cron secret have no client grants.
+  FOREACH v_table IN ARRAY ARRAY[
+    'rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger',
+    'rf_coin_packages', 'rf_coin_topups', 'rf_coin_adjustment_requests',
+    'rf_coin_admin_audit', 'rf_coin_fulfillment_handoffs', '_cron_secrets'
+  ] LOOP
+    v_relation := format('public.%I', v_table);
+    v_select_expected := v_table NOT IN ('rf_coin_fulfillment_handoffs', '_cron_secrets');
+    FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+      IF has_table_privilege(v_role, v_relation, 'SELECT') IS DISTINCT FROM v_select_expected THEN
+        RAISE EXCEPTION 'RF_COINS_BROWSER_SELECT_CONTRACT_FAILED role=% table=%',
+          v_role, v_table;
+      END IF;
+      FOREACH v_privilege IN ARRAY ARRAY[
+        'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'
+      ] LOOP
+        IF has_table_privilege(v_role, v_relation, v_privilege) THEN
+          RAISE EXCEPTION 'RF_COINS_BROWSER_PRIVILEGE_NOT_REVOKED role=% table=% privilege=%',
+            v_role, v_table, v_privilege;
+        END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+
+  FOREACH v_table IN ARRAY ARRAY['rf_coin_fulfillment_handoffs', '_cron_secrets'] LOOP
+    v_relation := format('public.%I', v_table);
+    FOREACH v_privilege IN ARRAY ARRAY[
+      'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+      'REFERENCES', 'TRIGGER', 'MAINTAIN'
+    ] LOOP
+      IF has_table_privilege('service_role', v_relation, v_privilege) THEN
+        RAISE EXCEPTION 'RF_COINS_INTERNAL_TABLE_SERVICE_GRANT_PRESENT table=% privilege=%',
+          v_table, v_privilege;
+      END IF;
+    END LOOP;
+  END LOOP;
+
   SELECT NOT enabled AND NOT topups_enabled AND NOT spending_enabled
   INTO v_release_locked
   FROM public.rf_coin_settings WHERE id = 1;
@@ -165,6 +215,6 @@ BEGIN
     RAISE EXCEPTION 'RF_COINS_PRIVILEGED_RPC_GRANTS_TOO_BROAD';
   END IF;
 
-  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS order_fk=preserved topup_fk=present existing_payment=preserved payment_rls=enabled admin_policy=preserved indexes=4 release_locks=off handoff_job=absent handoff_secret=absent';
+  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS pg=17 acl_default_fixture=removed browser_select=controlled browser_write=denied trigger=denied references=denied maintain=denied order_fk=preserved topup_fk=present existing_payment=preserved payment_rls=enabled admin_policy=preserved indexes=4 release_locks=off handoff_job=absent handoff_secret=absent';
 END;
 $$;

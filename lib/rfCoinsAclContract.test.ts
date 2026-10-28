@@ -49,6 +49,27 @@ describe('canonical RF Coins ACL contract', () => {
     expect(schemaSql).toMatch(/REVOKE EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\)\s+FROM PUBLIC, anon, authenticated;/);
   });
 
+  it('removes inherited table defaults and restores only the intended RF Coins read grants', () => {
+    expect(schemaSql).toMatch(/REVOKE ALL PRIVILEGES ON TABLE rf_coin_settings, rf_coin_wallets, rf_coin_ledger,[\s\S]*?FROM PUBLIC, anon, authenticated;/);
+    expect(schemaSql).toMatch(/GRANT SELECT ON rf_coin_settings, rf_coin_wallets, rf_coin_ledger,[\s\S]*?TO anon, authenticated;/);
+    expect(schemaSql).toMatch(/REVOKE ALL PRIVILEGES ON TABLE public\._cron_secrets\s+FROM PUBLIC, anon, authenticated, service_role;/);
+    expect(schemaSql).toMatch(/REVOKE ALL ON TABLE rf_coin_fulfillment_handoffs\s+FROM PUBLIC, anon, authenticated, service_role;/);
+  });
+
+  it('rehearses inherited PostgreSQL 17 MAINTAIN and other default ACLs before asserting effective denial', () => {
+    const fixture = readFileSync('supabase/tests/database/rf-coins-default-acl-fixture.sql', 'utf8');
+    const upgradeAssertions = readFileSync('supabase/tests/database/rf-coins-current-schema-upgrade.sql', 'utf8');
+    const harness = readFileSync('scripts/test-github-actions-database-security.sh', 'utf8');
+    expect(fixture).toContain('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public');
+    expect(fixture).toContain('GRANT ALL PRIVILEGES ON TABLES TO anon, authenticated;');
+    expect(fixture).toContain("'REFERENCES', 'TRIGGER', 'MAINTAIN'");
+    expect(fixture).toContain('RF_COINS_POSTGRES17_DEFAULT_ACL_FIXTURE_PASS');
+    expect(upgradeAssertions).toContain("'REFERENCES', 'TRIGGER', 'MAINTAIN'");
+    expect(upgradeAssertions).toContain('RF_COINS_BROWSER_PRIVILEGE_NOT_REVOKED');
+    expect(harness).toContain('major_version = 17');
+    expect(harness).toContain('--file supabase/tests/database/rf-coins-default-acl-fixture.sql');
+  });
+
   it('grants only the intended authenticated and service-role entry points', () => {
     const grants = [
       ['rf_coin_get_or_create_wallet(uuid)', 'authenticated'],

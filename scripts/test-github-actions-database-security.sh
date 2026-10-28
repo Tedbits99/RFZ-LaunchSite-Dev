@@ -168,6 +168,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
           supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
+          supabase/tests/database/rf-coins-default-acl-fixture.sql|\
           supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
           supabase/tests/customer-confirmation-resend-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-setup.sql|\
@@ -221,6 +222,8 @@ test_psql_invocation_validator() {
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
     --set expected_migration_count=100 --file supabase/tests/database/existing-schema-upgrade.sql || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-default-acl-fixture.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --command "SELECT 1;" || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 || return 1
 
@@ -357,6 +360,7 @@ port = $local_api_port
 
 [db]
 port = $local_db_port
+major_version = 17
 
 [studio]
 enabled = false
@@ -427,6 +431,8 @@ cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
 cp "$project_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql" \
   "$test_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql"
+cp "$project_root/supabase/tests/database/rf-coins-default-acl-fixture.sql" \
+  "$test_root/supabase/tests/database/rf-coins-default-acl-fixture.sql"
 cp "$project_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
@@ -564,6 +570,9 @@ if [ "$upgrade_mode" = true ]; then
   supabase_local migration up
 
   echo "LEGACY_UPGRADE_PHASE=rf-coins-current-schema-rehearsal"
+  echo "LEGACY_UPGRADE_PHASE=postgres17-default-acl-fixture"
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-default-acl-fixture.sql
   pending_dir="$project_root/supabase/migrations-pending"
   for migration_name in \
     20261028120000_rf_coins_schema.sql \

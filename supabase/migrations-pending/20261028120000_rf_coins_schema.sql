@@ -353,19 +353,20 @@ CREATE POLICY "rf_coin_adjust_select_own" ON rf_coin_adjustment_requests
 -- return no rows). The Super Admin console uses narrowly scoped caller-JWT
 -- SECURITY DEFINER reporting/mutation RPCs, not a service-role table scan.
 
--- Deterministic client read surface: SELECT is granted to browser roles the
--- same way the platform's default privileges do on the live project; row
--- visibility is decided solely by the policies above. Settings and audit
--- have no policies, so any client SELECT there returns zero rows.
+-- Default ACLs on the hosted project grant more than the application needs
+-- when postgres creates a public table. Remove those inherited direct grants
+-- (including privileges added in PostgreSQL 17) from browser roles, then
+-- re-grant only the intended SELECT surface. RLS remains responsible for row
+-- visibility; settings and audit deliberately have no client policies.
+REVOKE ALL PRIVILEGES ON TABLE rf_coin_settings, rf_coin_wallets, rf_coin_ledger,
+  rf_coin_packages, rf_coin_topups, rf_coin_adjustment_requests,
+  rf_coin_admin_audit
+  FROM PUBLIC, anon, authenticated;
+
 GRANT SELECT ON rf_coin_settings, rf_coin_wallets, rf_coin_ledger,
   rf_coin_packages, rf_coin_topups, rf_coin_adjustment_requests,
   rf_coin_admin_audit
   TO anon, authenticated;
-
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON rf_coin_settings,
-  rf_coin_wallets, rf_coin_ledger, rf_coin_packages, rf_coin_topups,
-  rf_coin_adjustment_requests, rf_coin_admin_audit
-  FROM anon, authenticated;
 
 -- ============ FULFILLMENT HANDOFF QUEUE (durable, worker-claimed) ============
 -- Durable handoff for coin-paid orders: the checkout enqueues exactly one row
@@ -414,6 +415,11 @@ CREATE TABLE IF NOT EXISTS public._cron_secrets (
 );
 
 ALTER TABLE public._cron_secrets ENABLE ROW LEVEL SECURITY;
+
+-- This secret has no browser or service-role table access. The definer-owned
+-- handoff trigger reads it only after an explicit operator inserts a secret.
+REVOKE ALL PRIVILEGES ON TABLE public._cron_secrets
+  FROM PUBLIC, anon, authenticated, service_role;
 
 DROP POLICY IF EXISTS "_cron_secrets_select" ON public._cron_secrets;
 DROP POLICY IF EXISTS "_cron_secrets_insert" ON public._cron_secrets;

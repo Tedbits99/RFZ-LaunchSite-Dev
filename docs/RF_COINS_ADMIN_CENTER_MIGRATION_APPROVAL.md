@@ -519,6 +519,46 @@ verification, isolated restore, integrity comparison, and cleanup. Neither
 path has been completed. The migration recommendation therefore remains
 **NO-GO** even if the isolated CI rehearsal passes.
 
+### PostgreSQL 17 ACL rehearsal update (2026-10-28)
+
+The pending RF Coins schema now explicitly revokes all table privileges from
+`PUBLIC`, `anon`, and `authenticated` on the seven intended read surfaces,
+then restores only `SELECT`. The internal fulfillment queue remains fully
+revoked from browser and service roles. The newly created `_cron_secrets`
+table now explicitly revokes all privileges from `PUBLIC`, both browser roles,
+and `service_role`, so project default ACLs cannot silently expose it. These
+are changes to the pending source migration only; **nothing was applied to the
+hosted project**.
+
+The disposable security harness pins its local Supabase database to
+PostgreSQL 17. Its existing-schema rehearsal installs a temporary,
+postgres-owned default ACL granting all table privileges to `anon` and
+`authenticated`, confirms the fixture probe receives `MAINTAIN` and the other
+PostgreSQL 17 table privileges, removes the probe, applies the exact pending
+RF Coins migrations, then checks effective privileges on all eight feature
+tables and `_cron_secrets`. Expected read grants remain limited to the seven
+documented SELECT surfaces. Browser INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/
+TRIGGER/MAINTAIN are denied; the handoff queue and cron-secret table have no
+browser SELECT, and neither internal table is directly available to
+`service_role`. This only models the owner-reported default-ACL condition in a
+disposable database; it does not independently reproduce live ACL provenance
+or establish the full scope of hosted excessive grants.
+
+The owner-provided 36-table privilege counts, `postgres` grantor, and
+`pg_default_acl` observations remain provenance-labeled owner evidence. The
+existing trusted GitHub metadata artifact does not contain `relacl`,
+`aclexplode()`, role inheritance, or default-ACL rows, and no authorized live
+connection was available to this session. No hosted grants or defaults were
+changed. The broader exact-table hardening plan therefore remains a separate
+reviewed operation; do not infer an application/API exploit from the ACL
+metadata alone.
+
+The migration script also requires the disposable PostgreSQL 17 rehearsal to
+pass on exact PR HEAD. This is not a substitute for a live hosted audit. The
+provider backup/PITR and restore evidence remains **UNVERIFIED**, no export or
+restore was performed, and the hosted RF Coins migrations remain pending.
+Accordingly the hosted migration recommendation remains **NO-GO**.
+
 ## Separate release prerequisites
 
 Applying schema does not authorize wallet funding, wallet spending, payments,
