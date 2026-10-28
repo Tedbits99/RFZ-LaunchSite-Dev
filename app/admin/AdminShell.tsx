@@ -7,7 +7,7 @@ import AdminNavigation from '@/components/admin/AdminNavigation'
 import ThemeSelector from '@/components/ThemeSelector'
 import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets'
 
-export default function AdminShell({ children }: { children: ReactNode }) {
+export default function AdminShell({ children, role }: { children: ReactNode; role: string }) {
   const [navigationOpen, setNavigationOpen] = useState(false)
 
   return (
@@ -79,7 +79,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
       </header>
 
       <div className="flex min-w-0">
-        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} />
+        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} role={role} />
         <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>

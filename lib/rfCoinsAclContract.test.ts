@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 const functionsSql = readFileSync('supabase/migrations-pending/20261018160100_rf_coins_functions.sql', 'utf8');
 const schemaSql = readFileSync('supabase/migrations-pending/20261018160000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql', 'utf8');
 
 describe('canonical RF Coins ACL contract', () => {
   it('revokes anonymous access from customer and guarded admin RPCs', () => {
@@ -68,6 +69,8 @@ describe('canonical RF Coins ACL contract', () => {
       expect(functionsSql).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role};`);
     }
     expect(functionsSql).not.toMatch(/GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment\(uuid, uuid\) TO authenticated/);
+    expect(adminCenterSql).toContain('REVOKE ALL ON FUNCTION public.rf_coin_admin_center_read(text, integer, integer, uuid, timestamptz, timestamptz, text, text, text)\n  FROM PUBLIC, anon;');
+    expect(adminCenterSql).toContain('GRANT EXECUTE ON FUNCTION public.rf_coin_admin_center_read(text, integer, integer, uuid, timestamptz, timestamptz, text, text, text)\n  TO authenticated;');
   });
 
   it('keeps the pending RPC bodies free of the previously observed runtime defects', () => {

@@ -81,6 +81,9 @@ jobs:
       - name: Run serialized application tests
         run: npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
 
+      - name: Run multi-connection PostgreSQL RF Coins concurrency tests
+        run: bash scripts/test-rf-coins-concurrency.sh
+
       - name: Run TypeScript validation
         run: npx tsc --noEmit
 

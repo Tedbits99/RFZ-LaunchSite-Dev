@@ -336,7 +336,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
           reference: data.reference,
           totalCents: data.totalCents ?? finalCents,
           qrData: null,
-          displayName: `RF Coins Wallet · ${formatCoins(data.coinsCharged ?? 0)} RF abgebucht · Restguthaben: ${formatCoins(data.balanceAfter ?? 0)} RF`,
+          displayName: `RF Coins Wallet · ${formatCoins(data.coinsCharged ?? 0)} RF used · Remaining balance: ${formatCoins(data.balanceAfter ?? 0)} RF`,
         });
         return;
       }

@@ -136,6 +136,8 @@ RETURNS TABLE (out_topup_id uuid, out_coins integer, out_bonus_coins integer,
                out_price_cents integer, out_error text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
+  -- Release lock: enabling database settings alone must never enable funding.
+  v_funding_release_enabled CONSTANT boolean := false;
   s rf_coin_settings;
   pkg rf_coin_packages;
   pending_topup rf_coin_topups;
@@ -143,6 +145,10 @@ DECLARE
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_FORBIDDEN'::text;
+    RETURN;
+  END IF;
+  IF NOT v_funding_release_enabled THEN
+    RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_FUNDING_RELEASE_LOCKED'::text;
     RETURN;
   END IF;
   BEGIN
@@ -202,6 +208,9 @@ CREATE OR REPLACE FUNCTION rf_coin_credit_paid_topup(
 RETURNS TABLE (out_credited boolean, out_balance bigint, out_error text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
+  -- The service-role webhook is also locked from issuing wallet value until
+  -- financial release. Already-settled duplicate events remain idempotent.
+  v_funding_release_enabled CONSTANT boolean := false;
   s rf_coin_settings;
   t rf_coin_topups;
   v_wallet rf_coin_wallets;
@@ -228,6 +237,9 @@ BEGIN
   END IF;
   IF t.status <> 'PENDING' THEN
     RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_TOPUP_NOT_PENDING'::text; RETURN;
+  END IF;
+  IF NOT v_funding_release_enabled THEN
+    RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_FUNDING_RELEASE_LOCKED'::text; RETURN;
   END IF;
   BEGIN
     s := rf_coin_get_settings();
@@ -262,7 +274,7 @@ BEGIN
 
   UPDATE rf_coin_topups
     SET status = 'PAID', provider_reference = COALESCE(p_provider_reference, provider_reference),
-        credited_at = now(), credited_total = v_total, updated_at = now()
+        payment_verified_at = now(), credited_at = now(), credited_total = v_total, updated_at = now()
     WHERE id = t.id;
 
   RETURN QUERY SELECT true, v_balance, NULL::text;
@@ -382,6 +394,8 @@ CREATE OR REPLACE FUNCTION rf_coin_settle_order_payment(
 RETURNS TABLE (out_coins integer, out_balance_after bigint, out_error text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
+  -- Separate release lock: database flags cannot activate wallet spending.
+  v_spending_release_enabled CONSTANT boolean := false;
   s rf_coin_settings;
   ord RECORD;
   v_coins integer;
@@ -393,6 +407,9 @@ DECLARE
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_FORBIDDEN'::text; RETURN;
+  END IF;
+  IF NOT v_spending_release_enabled THEN
+    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_SPENDING_RELEASE_LOCKED'::text; RETURN;
   END IF;
   BEGIN
     s := rf_coin_get_settings();
@@ -579,6 +596,7 @@ DECLARE
   v_daily_count integer;
   v_ledger rf_coin_ledger;
   v_wallet rf_coin_wallets;
+  v_existing rf_coin_adjustment_requests;
   v_balance bigint;
   v_status text;
 BEGIN
@@ -587,28 +605,39 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_FORBIDDEN'::text; RETURN;
   END;
-  IF p_direction NOT IN ('credit','debit') OR p_amount_coins IS NULL OR p_amount_coins <= 0
+  IF p_direction NOT IN ('credit','debit') OR p_amount_coins IS NULL OR p_amount_coins <= 0 OR p_amount_coins > 1000000
      OR p_category NOT IN ('promotion','compensation','correction')
-     OR p_reason IS NULL OR length(trim(p_reason)) < 3 THEN
+     OR p_reason IS NULL OR length(trim(p_reason)) < 3 OR length(trim(p_reason)) > 1000
+     OR p_idempotency_key IS NULL OR length(p_idempotency_key) < 16 OR length(p_idempotency_key) > 200 THEN
     RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_INVALID_REQUEST'::text; RETURN;
   END IF;
 
+  -- Serialize retries using the global idempotency key, then serialize this
+  -- admin's rolling daily limit. A reused key with different request fields
+  -- is a conflict, not permission to replay another adjustment.
+  PERFORM pg_advisory_xact_lock(hashtext('rf-adjustment-idem:' || p_idempotency_key)::bigint);
+
   -- Idempotency: identical retry returns the original request.
-  IF p_idempotency_key IS NOT NULL AND length(p_idempotency_key) <= 200 THEN
-    SELECT id, status INTO v_id, v_status FROM rf_coin_adjustment_requests
-      WHERE idempotency_key = p_idempotency_key;
-    IF FOUND THEN
-      RETURN QUERY SELECT v_id, v_status, NULL::text; RETURN;
+  SELECT * INTO v_existing FROM rf_coin_adjustment_requests
+    WHERE idempotency_key = p_idempotency_key;
+  IF FOUND THEN
+    IF v_existing.requested_by <> v_admin_id
+       OR v_existing.target_user_id <> p_target_user_id
+       OR v_existing.direction <> p_direction
+       OR v_existing.amount_coins <> p_amount_coins
+       OR v_existing.reason <> trim(p_reason)
+       OR v_existing.category <> p_category THEN
+      RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_IDEMPOTENCY_CONFLICT'::text; RETURN;
     END IF;
+    RETURN QUERY SELECT v_existing.id, v_existing.status, NULL::text; RETURN;
   END IF;
 
   s := rf_coin_get_settings();
 
   -- Rate control: per-admin daily adjustment cap.
-  SELECT count(*) INTO v_daily_count FROM rf_coin_admin_audit
-    WHERE actor_admin_id = v_admin_id
-      AND action IN ('adjustment_applied','adjustment_requested')
-      AND created_at > now() - interval '24 hours';
+  PERFORM pg_advisory_xact_lock(hashtext('rf-adjustment-daily:' || v_admin_id::text)::bigint);
+  SELECT count(*) INTO v_daily_count FROM rf_coin_adjustment_requests
+    WHERE requested_by = v_admin_id AND created_at > now() - interval '24 hours';
   IF v_daily_count >= s.max_daily_admin_adjustments THEN
     RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_RATE_LIMITED'::text; RETURN;
   END IF;
@@ -857,14 +886,23 @@ DECLARE
   v_id uuid;
 BEGIN
   PERFORM rf_coin_assert_super_admin();
+  IF (p_name IS NOT NULL AND (length(btrim(p_name)) < 2 OR length(btrim(p_name)) > 80))
+     OR (p_coins IS NOT NULL AND (p_coins <= 0 OR p_coins > 10000000))
+     OR (p_bonus_coins IS NOT NULL AND (p_bonus_coins < 0 OR p_bonus_coins > 10000000))
+     OR (p_price_cents IS NOT NULL AND (p_price_cents <= 0 OR p_price_cents > 100000000))
+     OR (p_sort_order IS NOT NULL AND (p_sort_order < 0 OR p_sort_order > 100000)) THEN
+    RAISE EXCEPTION 'RF_COIN_INVALID_PACKAGE';
+  END IF;
   IF p_package_id IS NULL THEN
     IF p_name IS NULL OR p_coins IS NULL OR p_coins <= 0
        OR p_price_cents IS NULL OR p_price_cents <= 0 THEN
       RAISE EXCEPTION 'RF_COIN_INVALID_PACKAGE';
     END IF;
     INSERT INTO rf_coin_packages (name, coins, bonus_coins, price_cents, is_active, sort_order)
+    -- Configuration never makes a new package purchasable by itself.
+    -- Activation is a separate, explicit operation after financial approval.
     VALUES (p_name, p_coins, COALESCE(p_bonus_coins, 0), p_price_cents,
-            COALESCE(p_is_active, true), COALESCE(p_sort_order, 0))
+            false, COALESCE(p_sort_order, 0))
     RETURNING id INTO v_id;
   ELSE
     UPDATE rf_coin_packages SET
@@ -884,7 +922,7 @@ BEGIN
     actor_admin_id, actor_admin_email, action, entity_type, entity_id, details)
   SELECT auth.uid(), COALESCE(email, 'unknown'), 'package_change', 'rf_coin_packages', v_id::text,
     jsonb_build_object('name', p_name, 'coins', p_coins, 'bonus_coins', p_bonus_coins,
-      'price_cents', p_price_cents, 'is_active', p_is_active)
+      'price_cents', p_price_cents, 'is_active', CASE WHEN p_package_id IS NULL THEN false ELSE p_is_active END)
   FROM admins WHERE id = auth.uid();
   RETURN v_id;
 END;

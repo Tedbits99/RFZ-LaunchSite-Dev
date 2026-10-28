@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 const functionsSql = readFileSync('supabase/migrations-pending/20261018160100_rf_coins_functions.sql', 'utf8');
 const schemaSql = readFileSync('supabase/migrations-pending/20261018160000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations-pending/20261018160200_rf_coin_admin_center_read.sql', 'utf8');
 
 function extractFunction(sql: string, name: string): string {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`);
@@ -54,6 +55,57 @@ describe('rf_coin_settle_order_payment', () => {
 
   it('rejects orders that are not WAITING_PAYMENT', () => {
     expect(fn).toMatch(/ord\.status <> 'WAITING_PAYMENT'/);
+  });
+
+  it('keeps customer wallet spending behind a hard false release constant', () => {
+    expect(fn).toContain('v_spending_release_enabled CONSTANT boolean := false');
+    expect(fn).toContain("'RF_COIN_SPENDING_RELEASE_LOCKED'");
+  });
+});
+
+describe('RF Coins funding release lock', () => {
+  const fn = extractFunction(functionsSql, 'rf_coin_create_topup');
+  const creditFn = extractFunction(functionsSql, 'rf_coin_credit_paid_topup');
+
+  it('cannot be enabled by database settings or client input', () => {
+    expect(fn).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(fn).toContain("'RF_COIN_FUNDING_RELEASE_LOCKED'");
+    expect(fn.indexOf('IF NOT v_funding_release_enabled')).toBeLessThan(fn.indexOf('rf_coin_get_settings()'));
+  });
+
+  it('also blocks service-role coin issuance while preserving settled-event idempotency', () => {
+    expect(creditFn).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(creditFn).toContain("'RF_COIN_FUNDING_RELEASE_LOCKED'");
+    expect(creditFn.indexOf("IF t.status = 'PAID' AND t.credited_at IS NOT NULL")).toBeLessThan(creditFn.indexOf('IF NOT v_funding_release_enabled'));
+  });
+});
+
+describe('RF Coins Admin Center reporting RPC', () => {
+  it('uses an active Super Admin database guard, bounded pages, and precise aggregates', () => {
+    expect(adminCenterSql).toContain('PERFORM public.rf_coin_assert_super_admin()');
+    expect(adminCenterSql).toContain('least(greatest(coalesce(p_page_size, 25), 1), 50)');
+    expect(adminCenterSql).toContain("sum(w.balance_coins)");
+    expect(adminCenterSql).toContain('w.user_id::text ILIKE');
+    expect(adminCenterSql).toContain('u.email ILIKE');
+    expect(adminCenterSql).toContain('t.created_at >= v_from AND t.created_at < v_to');
+    expect(adminCenterSql).toContain('fundingReleaseEnabled\', false');
+    expect(adminCenterSql).toContain('SET search_path = pg_catalog, public');
+    expect(adminCenterSql).toContain('p_provider text DEFAULT NULL');
+    expect(adminCenterSql).toContain('pt.amount_cents IS DISTINCT FROM t.price_cents');
+    expect(adminCenterSql).toContain('CREATE OR REPLACE FUNCTION public.rf_coin_record_admin_export');
+    expect(adminCenterSql).toContain("'paid_not_credited'");
+    expect(adminCenterSql).toContain("'wallet_ledger_mismatch'");
+    expect(adminCenterSql).toContain("'unusual_manual_adjustment'");
+    expect(adminCenterSql).toContain("p_row_count > 1000");
+  });
+
+  it('grants only authenticated execution and explicitly revokes anonymous/public execution', () => {
+    expect(adminCenterSql).toMatch(/REVOKE ALL ON FUNCTION public\.rf_coin_admin_center_read\([^\n]+\)\s+FROM PUBLIC, anon;/);
+    expect(adminCenterSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_admin_center_read\([^\n]+\)\s+TO authenticated;/);
+    expect(adminCenterSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_admin_center_read[^;]+TO service_role/);
+    expect(adminCenterSql).toMatch(/REVOKE ALL ON FUNCTION public\.rf_coin_record_admin_export\(text, integer, timestamptz, timestamptz\)\s+FROM PUBLIC, anon;/);
+    expect(adminCenterSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_record_admin_export\(text, integer, timestamptz, timestamptz\)\s+TO authenticated;/);
+    expect(adminCenterSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_record_admin_export[^;]+TO service_role/);
   });
 });
 
@@ -195,6 +247,11 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
   const enqueue = extractFunction(functionsSql, 'rf_coin_enqueue_fulfillment');
   const claim = extractFunction(functionsSql, 'rf_coin_claim_fulfillment_handoffs');
   const ack = extractFunction(functionsSql, 'rf_coin_ack_fulfillment_handoff');
+
+  it('targets the explicitly approved Supabase project and never the stale project ref', () => {
+    expect(schemaSql).toContain('v_url := \'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/fulfillment-handoff\'');
+    expect(schemaSql).not.toContain('ftbvxkxxzotwkdcdgaot');
+  });
 
   it('enqueue is idempotent per order and only accepts verified wallet-paid orders', () => {
     expect(enqueue).toMatch(/'rf-coin-fulfillment:' \|\| p_order_id::text/);

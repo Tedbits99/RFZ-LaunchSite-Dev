@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS rf_coin_topups (
   provider text NOT NULL DEFAULT 'paymongo',
   provider_reference text,
   idempotency_key text NOT NULL UNIQUE,
+  payment_verified_at timestamptz,
   credited_at timestamptz,
   -- Partial-refund debt tracking: exactly how many coins were originally
   -- credited (coins + bonus) and how many have been reversed so far. The
@@ -260,6 +261,8 @@ CREATE INDEX IF NOT EXISTS rf_coin_adjust_requests_status_idx
   ON rf_coin_adjustment_requests (status, created_at DESC);
 CREATE INDEX IF NOT EXISTS rf_coin_adjust_requests_target_idx
   ON rf_coin_adjustment_requests (target_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS rf_coin_adjust_requests_requester_created_idx
+  ON rf_coin_adjustment_requests (requested_by, created_at DESC);
 
 -- ============ ADMIN AUDIT (insert-only) ============
 CREATE TABLE IF NOT EXISTS rf_coin_admin_audit (
@@ -346,8 +349,9 @@ DROP POLICY IF EXISTS "rf_coin_adjust_select_own" ON rf_coin_adjustment_requests
 CREATE POLICY "rf_coin_adjust_select_own" ON rf_coin_adjustment_requests
   FOR SELECT TO authenticated USING (auth.uid() = requested_by);
 
--- Settings and audit: NO client policies (fail closed; RLS blocks everyone).
--- Admin UI reads these through the existing service-role admin client.
+-- Settings and audit: NO client policies (fail closed; direct RLS table reads
+-- return no rows). The Super Admin console uses narrowly scoped caller-JWT
+-- SECURITY DEFINER reporting/mutation RPCs, not a service-role table scan.
 
 -- Deterministic client read surface: SELECT is granted to browser roles the
 -- same way the platform's default privileges do on the live project; row
@@ -430,7 +434,9 @@ DECLARE
   v_secret text;
   v_request_id bigint;
 BEGIN
-  v_url := 'https://ftbvxkxxzotwkdcdgaot.supabase.co/functions/v1/fulfillment-handoff';
+  -- This is the explicitly approved existing development project. The cron
+  -- remains unscheduled and has no secret until a separate release approval.
+  v_url := 'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/fulfillment-handoff';
 
   SELECT value INTO v_secret FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret';
   IF v_secret IS NULL THEN

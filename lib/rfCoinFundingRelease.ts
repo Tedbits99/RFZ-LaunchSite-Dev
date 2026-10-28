@@ -6,3 +6,5 @@
  * not accidentally enable financial operations.
  */
 export const RF_COINS_FUNDING_RELEASE_ENABLED = false;
+/** RF Coins product spending also requires a separate release decision. */
+export const RF_COINS_SPENDING_RELEASE_ENABLED = false;
