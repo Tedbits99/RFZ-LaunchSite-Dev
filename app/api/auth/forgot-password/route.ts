@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
-import { getAuthCallbackUrl, getConfiguredAppOrigin } from '@/lib/authRedirect';
+import { getConfiguredAppOrigin, getRecoveryCallbackUrl } from '@/lib/authRedirect';
 import { validateEmailInput } from '@/lib/authValidation';
 import { logAuthFlowFailure } from '@/lib/authFlowDiagnostics';
 
@@ -44,10 +44,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Supabase's recovery email template owns the query string and appends
-    // token_hash/type to this exact, trusted callback URL. Keep RedirectTo
-    // query-free so the rendered href can never depend on ? versus & state.
-    const redirectTo = getAuthCallbackUrl();
+    // The trusted recovery marker selects the recovery cookie namespace that
+    // initiated the PKCE flow. Supabase adds its code/token hash to this
+    // allow-listed callback; it must not fall back to the customer session.
+    const redirectTo = getRecoveryCallbackUrl();
     if (!redirectTo) return json({ error: GENERIC_503 }, 503);
     const { error } = await client.auth.resetPasswordForEmail(validation.value, { redirectTo });
     if (error) {

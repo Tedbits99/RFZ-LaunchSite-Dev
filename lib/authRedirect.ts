@@ -36,6 +36,12 @@ export function getAuthCallbackUrl(): string | null {
   return origin ? `${origin}${callbackPath}` : null;
 }
 
+/** Pin password-recovery callbacks to the recovery cookie namespace. */
+export function getRecoveryCallbackUrl(): string | null {
+  const callbackUrl = getAuthCallbackUrl();
+  return callbackUrl ? `${callbackUrl}?type=recovery` : null;
+}
+
 export function getConfirmationUrl(status: 'success' | 'pending' | 'restricted' | 'invalid' | 'error'): string | null {
   const origin = getConfiguredAppOrigin();
   return origin ? `${origin}/auth/confirmation?status=${status}` : null;

@@ -54,7 +54,7 @@ describe('POST /api/auth/forgot-password', () => {
     expect(mocks.createRecoveryServerClient).toHaveBeenCalledOnce();
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
       'customer@example.com',
-      { redirectTo: `${origin}/auth/callback` },
+      { redirectTo: `${origin}/auth/callback?type=recovery` },
     );
   });
 
@@ -119,7 +119,7 @@ describe('POST /api/auth/forgot-password', () => {
     await POST(request({ email: '  MiXeD@Case.COM ' }));
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
       'mixed@case.com',
-      { redirectTo: `${origin}/auth/callback` },
+      { redirectTo: `${origin}/auth/callback?type=recovery` },
     );
   });
 
