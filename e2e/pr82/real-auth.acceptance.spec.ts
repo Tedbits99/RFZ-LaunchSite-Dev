@@ -689,7 +689,9 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await expect(customerAOrderLink).toContainText(customerAFixture.reference);
       await evidence(page, testInfo, observations, 'customer-order-history');
       await gotoPath(page, `/account/orders/${customerAFixture.orderId}`, 'Customer A order detail');
-      await expect(page.getByText(customerAFixture.reference, { exact: true })).toBeVisible();
+      const customerAOrderDetailReference = page.locator('main p.font-mono').filter({ hasText: customerAFixture.reference });
+      await expect(customerAOrderDetailReference).toHaveCount(1);
+      await expect(customerAOrderDetailReference).toBeVisible();
       await evidence(page, testInfo, observations, 'customer-order-detail');
     });
 
