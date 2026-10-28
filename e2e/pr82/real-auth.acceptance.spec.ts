@@ -403,6 +403,7 @@ async function seedWalletFixtures(client: SupabaseClient, customerA: string, cus
 }
 
 async function sameOriginJson(page: Page, pathname: string, method = 'GET', body?: unknown) {
+  assert(new URL(page.url()).origin === new URL(baseURL).origin, 'same-origin browser API request is made from the local application origin');
   return page.evaluate(async ({ pathname, method, body }) => {
     const response = await fetch(pathname, {
       method,
@@ -594,6 +595,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
     });
 
     await test.step('verify anonymous and cross-customer browser/API denials', async () => {
+      await gotoPath(anonymousPage, '/login', 'anonymous API origin');
       const anonymousResponse = await sameOriginJson(anonymousPage, '/api/account/wallet');
       assert(anonymousResponse.status === 401, 'anonymous wallet API is denied');
       await gotoPath(anonymousPage, '/account', 'anonymous account denial');
