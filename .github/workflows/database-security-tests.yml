@@ -137,4 +137,5 @@ jobs:
           fetch-depth: 0
       - name: Verify executable migration sequence
         run: |
+          bash scripts/verify-deployable-migrations.sh --self-test
           bash scripts/verify-deployable-migrations.sh
