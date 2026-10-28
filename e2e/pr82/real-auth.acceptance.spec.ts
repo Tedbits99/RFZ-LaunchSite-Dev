@@ -931,8 +931,14 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       assert(!remainingAdminSession, 'administrator logout removes all admin session cookie chunks');
       const protectedAfterLogout = await adminPage.goto(`${baseURL}/admin`, { waitUntil: 'domcontentloaded' });
       const protectedStatus = protectedAfterLogout?.status() ?? null;
-      const streamedNotFound = protectedStatus === 200
-        && await adminPage.getByText('This page could not be found.', { exact: true }).isVisible().catch(() => false);
+      const notFoundMessage = adminPage.getByText('This page could not be found.', { exact: true });
+      if (protectedStatus === 200) {
+        // Next may flush the streaming response before the protected server
+        // layout calls notFound(); wait for its actual boundary, not a DOM
+        // snapshot taken at DOMContentLoaded.
+        await expect(notFoundMessage).toBeVisible();
+      }
+      const streamedNotFound = protectedStatus === 200 && await notFoundMessage.isVisible();
       const protectedAdminContent = await adminPage.getByRole('heading', { name: 'Overview', exact: true }).count() > 0
         || await adminPage.getByText(superEmail, { exact: true }).count() > 0;
       assert(
@@ -949,7 +955,17 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       const staffApi = await sameOriginJson(adminPage, '/api/admin/rf-coins');
       assert(staffApi.status === 403, 'ordinary active staff cannot use Super Admin RF Coins API');
       const staffCenter = await adminPage.goto(`${baseURL}/admin/rf-coins`, { waitUntil: 'domcontentloaded' });
-      assert(staffCenter?.status() === 404, 'ordinary active staff cannot open Super Admin RF Coins Center');
+      const staffCenterStatus = staffCenter?.status() ?? null;
+      const staffCenterNotFound = adminPage.getByText('This page could not be found.', { exact: true });
+      if (staffCenterStatus === 200) await expect(staffCenterNotFound).toBeVisible();
+      const staffCenterStreamedNotFound = staffCenterStatus === 200 && await staffCenterNotFound.isVisible();
+      const protectedWalletCenterVisible = await adminPage.getByRole('heading', { name: 'RF Coins Center', exact: true }).count() > 0
+        || await adminPage.getByText('Wallet funding is awaiting financial release approval.', { exact: true }).count() > 0;
+      await evidence(adminPage, testInfo, observations, 'staff-rf-coins-center-denial');
+      assert(
+        (staffCenterStatus === 404 || staffCenterStreamedNotFound) && !protectedWalletCenterVisible,
+        `ordinary staff RF Coins Center denial: http_status=${staffCenterStatus ?? 'no_response'} streamed_not_found=${staffCenterStreamedNotFound} protected_content_visible=${protectedWalletCenterVisible}`,
+      );
       await adminPage.getByRole('button', { name: 'Log out of admin dashboard' }).click();
       await expect(adminPage.getByRole('heading', { name: 'Admin sign in' })).toBeVisible();
 
