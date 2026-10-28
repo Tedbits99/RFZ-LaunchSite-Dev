@@ -225,6 +225,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-data-contract.sql|\
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
           supabase/tests/hosted-acl-metadata-audit.sql|\
           supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
           supabase/tests/database/rf-coins-default-acl-fixture.sql|\
@@ -235,7 +236,10 @@ validate_psql_invocation() {
           supabase/tests/reconciliation-concurrency-cleanup.sql) ;;
           *) return 1 ;;
         esac
-        [ "$1" = "supabase/tests/database/existing-schema-upgrade.sql" ] && upgrade_assertion_file=1
+        case "$1" in
+          supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/database/rf-coins-current-schema-upgrade.sql) upgrade_assertion_file=1 ;;
+        esac
         seen_file=1
         shift
         ;;
@@ -285,6 +289,9 @@ test_psql_invocation_validator() {
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
     --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count="$manifest_count" \
+    --file supabase/tests/database/rf-coins-current-schema-upgrade.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
     --file supabase/tests/database/rf-coins-default-acl-fixture.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --command "SELECT 1;" || return 1
