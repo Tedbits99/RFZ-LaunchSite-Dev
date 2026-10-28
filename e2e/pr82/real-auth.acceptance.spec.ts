@@ -619,10 +619,17 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       const detailResponse = await customerBPage.goto(`${baseURL}/account/orders/${customerAFixture.orderId}`, { waitUntil: 'domcontentloaded' });
       const detailStatus = detailResponse?.status() ?? null;
       const otherCustomerOrderReferenceVisible = await customerBPage.getByText(customerAFixture.reference, { exact: true }).count() > 0;
+      const streamedNotFound = detailStatus === 200;
+      if (streamedNotFound) {
+        // With the root loading boundary, Next may commit a streaming 200
+        // before the Server Component calls notFound(). Require its actual
+        // generic 404 UI, and still require the foreign order data to be absent.
+        await expect(customerBPage.getByText('This page could not be found.', { exact: true })).toBeVisible();
+      }
       await evidence(customerBPage, testInfo, observations, 'customer-cross-order-denial');
       assert(
-        detailStatus === 404 && !otherCustomerOrderReferenceVisible,
-        `Customer B cross-order denial: http_status=${detailStatus ?? 'no_response'} final_path=${safePath(customerBPage)} protected_reference_visible=${otherCustomerOrderReferenceVisible}`,
+        (detailStatus === 404 || streamedNotFound) && !otherCustomerOrderReferenceVisible,
+        `Customer B cross-order denial: http_status=${detailStatus ?? 'no_response'} streamed_not_found=${streamedNotFound} protected_reference_visible=${otherCustomerOrderReferenceVisible}`,
       );
       const adminRouteResponse = await customerBPage.goto(`${baseURL}/admin`, { waitUntil: 'domcontentloaded' });
       assert(adminRouteResponse?.status() === 404, 'authenticated customer is denied administrator dashboard');
