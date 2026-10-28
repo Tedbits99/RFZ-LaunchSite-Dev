@@ -168,7 +168,6 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
           supabase/tests/hosted-acl-metadata-audit.sql|\
-          supabase/tests/database/hosted-acl-remediation-rehearsal.sql|\
           supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
           supabase/tests/database/rf-coins-default-acl-fixture.sql|\
           supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
@@ -234,8 +233,6 @@ test_psql_invocation_validator() {
   validate_psql_invocation "$valid_url" "$valid_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --quiet --tuples-only --no-align \
     --set ON_ERROR_STOP=1 --file supabase/tests/hosted-acl-metadata-audit.sql || return 1
-  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
-    --file supabase/tests/database/hosted-acl-remediation-rehearsal.sql || return 1
 
   assert_psql_args_rejected() {
     if validate_psql_invocation "$valid_url" "$valid_url" "$@"; then
@@ -320,6 +317,9 @@ fi
 
 supabase_bin="$(command -v supabase)"
 psql_bin="$(command -v psql)"
+
+echo "Running source-only hosted ACL remediation rehearsal in standalone disposable PostgreSQL 17..."
+bash "$project_root/scripts/test-hosted-acl-remediation-postgres17.sh"
 
 tmp_parent="${RUNNER_TEMP:-${TMPDIR:-$project_root}}"
 test_root="$(mktemp -d "$tmp_parent/runfazone-supabase.XXXXXX")"
@@ -441,8 +441,6 @@ cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
 cp "$project_root/supabase/tests/hosted-acl-metadata-audit.sql" \
   "$test_root/supabase/tests/hosted-acl-metadata-audit.sql"
-cp "$project_root/supabase/tests/database/hosted-acl-remediation-rehearsal.sql" \
-  "$test_root/supabase/tests/database/hosted-acl-remediation-rehearsal.sql"
 cp "$project_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql" \
   "$test_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql"
 cp "$project_root/supabase/tests/database/rf-coins-default-acl-fixture.sql" \
@@ -645,11 +643,6 @@ echo "Executing completion receipt outbox worker assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/completion-receipt-outbox-worker.sql
-
-echo "Rehearsing the hosted ACL remediation against disposable PostgreSQL 17 metadata..."
-PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
-  --set ON_ERROR_STOP=1 \
-  --file supabase/tests/database/hosted-acl-remediation-rehearsal.sql
 
 echo "Executing metadata-only ACL inventory against the disposable PostgreSQL 17 database..."
 acl_metadata_output="$test_root/hosted-acl-metadata-validation.jsonl"

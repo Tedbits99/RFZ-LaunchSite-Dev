@@ -18,17 +18,26 @@ not proof that the grants were exploitable through PostgREST; the migration is
 limited to reducing the recorded ACL surface without changing RLS, policies,
 or ordinary data privileges.
 
-Source migration `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql`
-now fails closed on an unexpected PUBLIC grant, missing audited object/role,
-disabled RLS, wrong PostgreSQL major version, unexpected PUBLIC defaults, or
-global browser-role defaults that a schema-scoped revoke could not cancel. It
-revokes only the four audited privileges for the recorded role/table pairs and
-five scoped default ACLs. The disposable rehearsal
+Staged migration candidate `supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql`
+has SHA-256 `596add41d9fbded5dd4370c0952d751506d2267cedaf7b17f93337c0d23b5d5f`.
+It fails closed on missing execution authority, an unexpected PUBLIC grant,
+missing audited object/role, disabled RLS, wrong PostgreSQL major version,
+unexpected PUBLIC defaults, or global browser-role defaults that a
+schema-scoped revoke could not cancel. It revokes only the four audited
+privileges for the recorded role/table pairs and five scoped default ACLs. The
+protected Development run `40643841253` attempted the migration using the
+standard local Supabase `postgres` role and returned SQLSTATE `42501` on
+`ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin`; that role cannot modify
+another role's defaults in this runner. The migration is therefore staged
+outside `supabase/migrations/` and is not part of normal `db reset` or deployment
+until an authorized execution context is verified. The disposable rehearsal
 `supabase/tests/database/hosted-acl-remediation-rehearsal.sql` reconstructs
 the audited grants in a transaction, applies the migration, and verifies
 ordinary SELECT/DML grants, RLS and policies, PUBLIC/service-role ACLs,
 unrelated default ACLs, and the `payment_transactions` access contract remain
-unchanged. The transaction rolls back. This is source/test preparation only:
+unchanged. It must run in a dedicated disposable PostgreSQL 17 superuser
+fixture, never against the hosted project; the transaction rolls back. This is
+source/test preparation only:
 the migration has **not** been applied to the hosted project, no ACL has been
 changed, and the migration recommendation remains **NO-GO** pending successful
 disposable PostgreSQL 17 rehearsal and separate release authorization.

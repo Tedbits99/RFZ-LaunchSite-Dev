@@ -22,6 +22,14 @@ BEGIN
      OR to_regrole('supabase_admin') IS NULL THEN
     RAISE EXCEPTION 'BROWSER_DDL_ACL_REQUIRED_ROLE_MISSING';
   END IF;
+  IF NOT COALESCE((
+       SELECT r.rolsuper
+       FROM pg_roles AS r
+       WHERE r.rolname = current_user
+     ), false)
+     AND NOT pg_has_role(current_user, 'supabase_admin', 'USAGE') THEN
+    RAISE EXCEPTION 'BROWSER_DDL_ACL_SUPABASE_ADMIN_DEFAULT_PRIVILEGES_UNAUTHORIZED';
+  END IF;
   IF to_regnamespace('public') IS NULL
      OR to_regnamespace('storage') IS NULL
      OR to_regnamespace('graphql') IS NULL
