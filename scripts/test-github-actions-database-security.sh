@@ -167,6 +167,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-data-contract.sql|\
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
           supabase/tests/customer-confirmation-resend-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-setup.sql|\
           supabase/tests/reconciliation-concurrency-assertion.sql|\
@@ -423,6 +424,8 @@ cp "$project_root/supabase/tests/completion-receipt-outbox-worker.sql" \
   "$test_root/supabase/tests/completion-receipt-outbox-worker.sql"
 cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
+cp "$project_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql" \
+  "$test_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
   "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
@@ -553,6 +556,23 @@ if [ "$upgrade_mode" = true ]; then
   # A second migration-up must be a no-op. This is separate from db reset so
   # forward-only and duplicate-history behavior are exercised.
   supabase_local migration up
+
+  echo "LEGACY_UPGRADE_PHASE=rf-coins-current-schema-rehearsal"
+  pending_dir="$project_root/supabase/migrations-pending"
+  for migration_name in \
+    20261028120000_rf_coins_schema.sql \
+    20261028120100_rf_coins_functions.sql \
+    20261028120200_rf_coin_admin_center_read.sql; do
+    test -s "$pending_dir/$migration_name" || {
+      echo "ERROR: Reviewed pending migration is missing: $migration_name" >&2
+      exit 13
+    }
+    cp "$pending_dir/$migration_name" "$test_root/supabase/migrations/$migration_name"
+  done
+  supabase_local migration up
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-current-schema-upgrade.sql
+  echo "LEGACY_UPGRADE_PHASE=rf-coins-current-schema-rehearsal-complete"
 else
   supabase_local db reset
 fi

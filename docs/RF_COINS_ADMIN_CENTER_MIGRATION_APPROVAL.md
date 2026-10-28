@@ -99,9 +99,14 @@ SHA-256 for the exact SQL files in source commit
 
 | Order | File | SHA-256 |
 |---|---|---|
-| 1 | `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` | `2e8ea07baa07ed7fb6ab766aed7e9983572ccf94e91ed0818aa9407ae2e871d3` |
+| 1 | `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` | `ac535120b08f3f76ebf9ea986f51fa1df492730fc2dbf12fae17480c1c9852b6` |
 | 2 | `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` | `8dbc11a82062f0cd1ebdd77ba5500ebae7fca89fa75f2450b0eaec26635efcb8` |
 | 3 | `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` | `1bef2626e079781180336a13990088db6ab7d07af09b144b77508a9a2563d924` |
+
+The first digest reflects the later SECURITY DEFINER search-path hardening
+recorded in the 2026-10-28 review. The original digest belongs to historical
+source commit `01076dfbf59206c1ec6101584ddcd819fb9e931e` and is superseded for
+the current candidate.
 
 The same filenames and digests must be rechecked against the final PR head
 before any later migration decision. The migration-version regression test
@@ -342,6 +347,158 @@ not migration approval. Any hosted apply remains a separate, explicit owner
 decision through the protected workflow; funding, spending, provider calls,
 supplier fulfillment, cron scheduling, and public release remain separately
 disabled and gated.
+
+## New ACL finding and compatibility review (2026-10-28)
+
+**Evidence provenance:** The following live privilege and payment-schema facts
+were supplied by the owner from a direct read-only inspection of development
+project `ketdhcmwowzztcdlmris`. They are treated as current owner-provided
+metadata, not as independently re-queried by this session. The protected
+`audit` artifact from run `40623744044` does not include effective table ACLs,
+grantors, role memberships, default ACLs, full constraints, or policy
+expressions. No hosted data or schema was changed.
+
+### Excessive database privileges
+
+Owner-provided effective privilege counts: `anon` can TRUNCATE 24 of 36 public
+tables, and `authenticated` can TRUNCATE 27 of 36. The same inspection reports
+explicit TRUNCATE, TRIGGER, and REFERENCES grants to both roles on
+`payment_transactions`; effective SELECT/INSERT/UPDATE/DELETE for those roles
+on that relation are false at the inspected scope. RLS is enabled there and a
+separate authenticated administrator SELECT policy exists; the policy does
+not grant table access on its own. PostgreSQL TRUNCATE is not filtered by
+row-level security.
+
+Classification: **confirmed excessive-privilege / high-risk P1 hardening
+finding; application exploitability is not demonstrated**. The effective
+TRUNCATE privilege is sufficient to clear a table for any execution context
+that can issue SQL as the affected role. It does not establish that the
+PostgREST Data API exposes arbitrary SQL or that an existing application route
+can invoke TRUNCATE. The hosted `rls_auto_enable()` function definition and
+complete deployed function bodies were not in the sanitized artifact, so no
+claim is made that every possible SQL execution path has been excluded.
+
+The explicit grant on `payment_transactions` is consistent with a direct ACL
+entry, but the grantor and whether an equivalent privilege is inherited from
+PUBLIC or a role membership have not been independently observed. The
+24/27-table counts do not identify all affected names or distinguish direct
+grants, inherited grants, PUBLIC ACLs, or creator-specific default ACLs. A
+source scan of the tracked executable migrations found no matching blanket
+TRUNCATE grant or `ALTER DEFAULT PRIVILEGES` grant to `anon`/
+`authenticated`; this source result does not identify which live mechanism
+created the privileges.
+
+Static application review found that product payment creation/webhook records
+use their actual order IDs, wallet top-up reservations use
+`rf_coin_topup_id` without manufacturing an order ID, and order payment,
+refund, and reporting reads retain their order filters. The webhook and
+payment Edge Functions use server-side Supabase clients. This is a source
+review only; the deployed Edge Function inventory and live function bodies
+were not independently re-read in this session. The temporary PostgreSQL test
+fixture confirms that an explicit role TRUNCATE grant succeeds even with RLS
+enabled and SELECT absent, while transaction rollback preserves the fixture
+row. It demonstrates PostgreSQL semantics only, not hosted application
+reachability.
+
+A text scan of tracked executable migrations, application routes, libraries,
+and Edge Function sources found no `TRUNCATE` statement or application route
+that exposes arbitrary SQL; the migration matches were ACL revoke statements
+and tests/comments. This reduces evidence for a direct source-level destructive
+path but cannot rule out SQL injection, deployed code drift, or behavior in the
+unavailable hosted `rls_auto_enable()` definition. The pending RF Coins schema
+does revoke client mutation privileges on its own feature tables and revokes
+all table privileges on the handoff queue, but it does not correct excessive
+ACLs on the existing public tables. No live mitigation is implied.
+
+**Hardening plan — not executed:** first collect the affected table names and
+`pg_class.relacl`/`aclexplode` grantor-grantee entries, effective
+`has_table_privilege` values, role memberships, PUBLIC privileges, and
+`pg_default_acl` grouped by object creator. Then remove only the demonstrated
+TRUNCATE/TRIGGER/REFERENCES paths for `anon` and `authenticated` from the exact
+affected relations and correct only the implicated default ACLs. Preserve
+owner/service-role privileges and required DML/RLS policies. Re-read effective
+privileges after the change and run Data API, checkout, admin, and security
+regressions. Do not apply a blanket live revoke until inheritance, default
+ACL, and object-owner provenance are known. No GRANT/REVOKE was run on the
+hosted database.
+
+### Hosted payment table contract
+
+Owner-provided current contract for `public.payment_transactions`:
+`order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE`, unique
+idempotency key, primary key, status check, provider-reference/order indexes,
+RLS enabled, one authenticated admin SELECT policy; the reported effective
+browser-role DML privileges are false. These exact definitions have not been
+independently exported or queried by this session, and no row data was
+accessed.
+
+The pending migration only drops `NOT NULL` on `order_id`, adds nullable
+`rf_coin_topup_id REFERENCES rf_coin_topups(id) ON DELETE SET NULL`, and adds
+its index. It does not drop or replace the existing order FK, primary key,
+idempotency uniqueness, status constraint, provider indexes, RLS, or policy.
+The disposable test baseline now starts with the owner-reported NOT NULL
+order-FK/status/index/RLS contract, then asserts the order cascade remains and
+both order-linked and top-up-linked payment rows can coexist after the exact
+pending migration. The full-canonical-upgrade CI path now applies all three
+pending RF Coins migrations after the canonical current schema and runs
+`rf-coins-current-schema-upgrade.sql`; that test requires all eight expected
+RF Coins tables, enabled RLS, the preserved order FK and new top-up FK, disabled
+release flags, no wallet payment method enabled, no handoff cron job/secret,
+and restricted privileged RPC ACLs. This rehearsal is synthetic and is not
+proof of hosted schema compatibility or compatibility with existing hosted
+rows.
+
+### Extension and fulfillment function
+
+Owner-provided extension inventory says `pg_stat_statements`, `pgcrypto`,
+`plpgsql`, `supabase_vault`, and `uuid-ossp` are installed; `cron` and `net`
+schemas are absent. The pending schema migration neither installs extensions
+nor schedules a job nor inserts a secret. PostgreSQL PL/pgSQL defers resolving
+the body’s `net.http_post` reference until that statement is executed, so
+creating the function does not require `pg_net`. Its early return when the
+secret is absent is covered by the disposable SQL test. A synthetic secret
+with `net` absent fails before any network request can occur. The function is
+`SECURITY DEFINER`, pins `search_path` to `pg_catalog, public, pg_temp`, uses
+the fixed development Edge Function URL, and EXECUTE is revoked from
+`PUBLIC`, `anon`, and `authenticated`, then granted to `postgres` only.
+
+Future activation needs both a scheduler (`pg_cron`) and HTTP transport
+(`pg_net`/`net.http_post`), plus a separately provisioned secret and deployed
+authenticated Edge Function. None is needed for the currently disabled wallet
+schema. Keep the function unscheduled and the secret absent; if the hosted
+environment should never gain those extensions, move fulfillment-specific
+activation into a later separately reviewed migration. Extension absence on
+the hosted project and future extension installation remain owner-provided
+metadata, not independently verified in this session.
+
+### Rehearsal, CI, and recovery evidence
+
+The new source tests cover the reported payment-table shape, the RLS/TRUNCATE
+semantic distinction, absence of `cron`/`net`, no-secret handoff no-op, and
+failure-before-network when a synthetic handoff secret is used without
+`pg_net`. The legacy-upgrade script has been extended to apply the exact three
+candidate migrations after all canonical migrations and run the current-schema
+assertion file. After these edits, local unit tests completed with 1,035
+passed and 1 skipped; TypeScript and lint completed with no errors (existing
+lint warnings remain). The isolated PostgreSQL 16 concurrency harness passed
+after a serial rerun, including wallet initialization (20), top-up
+creation/credit (16 each), order settlement (12), refund credit/reversal
+(8/12), and adjustment approval (12). Its initial attempt during parallel
+test startup failed to connect to a not-yet-ready PostgreSQL socket; the serial
+rerun reached terminal PASS. The new full canonical-migration-plus-pending
+rehearsal and Next/OpenNext builds still require terminal exact-head CI. This
+synthetic rehearsal is not a restored copy of the hosted database.
+
+Recovery remains **UNVERIFIED**. No provider backup/PITR retention or restore
+capability metadata was available in the sanitized audit, and no hosted
+row-data export was authorized or made. Path A requires an authenticated
+metadata-only confirmation of the plan, latest recovery point, retention, and
+approved restore method, with an actual controlled recovery demonstration if
+the provider supports it. Path B requires separate owner authorization for a
+protected encrypted export, restricted short-lived artifact storage, checksum
+verification, isolated restore, integrity comparison, and cleanup. Neither
+path has been completed. The migration recommendation therefore remains
+**NO-GO** even if the isolated CI rehearsal passes.
 
 ## Separate release prerequisites
 

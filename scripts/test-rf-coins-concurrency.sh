@@ -65,6 +65,10 @@ CREATE TABLE packages (id uuid PRIMARY KEY, game_id uuid NOT NULL REFERENCES gam
   sort_order integer NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE admins (id uuid PRIMARY KEY, email text UNIQUE NOT NULL, name text NOT NULL DEFAULT 'Admin',
   role text NOT NULL DEFAULT 'SUPER_ADMIN', claimed_at timestamptz NOT NULL DEFAULT now(), is_active boolean NOT NULL DEFAULT true);
+CREATE FUNCTION public.is_admin() RETURNS boolean
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+    SELECT EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND is_active IS TRUE)
+  $$;
 CREATE TABLE orders (id uuid PRIMARY KEY, reference text UNIQUE NOT NULL, email text NOT NULL,
   customer_name text NOT NULL, game_id uuid NOT NULL REFERENCES games(id), package_id uuid NOT NULL REFERENCES packages(id),
   player_inputs jsonb NOT NULL DEFAULT '{}'::jsonb, quantity integer NOT NULL DEFAULT 1,
@@ -83,25 +87,32 @@ CREATE TABLE payment_config (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), meth
   account_number text NOT NULL DEFAULT '', qr_data text, instructions text NOT NULL DEFAULT '', webhook_url text,
   test_mode boolean NOT NULL DEFAULT false, sort_order integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
-CREATE TABLE payment_transactions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
+CREATE TABLE payment_transactions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   idempotency_key text UNIQUE, provider_name text NOT NULL DEFAULT '', provider_reference text, action text NOT NULL DEFAULT 'create',
-  status text NOT NULL DEFAULT 'pending', amount_cents integer NOT NULL DEFAULT 0, currency text NOT NULL DEFAULT 'PHP',
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','paid','failed','expired','refunded','cancelled')),
+  amount_cents integer NOT NULL DEFAULT 0, currency text NOT NULL DEFAULT 'PHP',
   checkout_url text, webhook_payload jsonb, error_message text, metadata jsonb NOT NULL DEFAULT '{}',
+  qr_image_url text, expires_at timestamptz, provider_payment_id text, webhook_event_id text,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX idx_payment_tx_order_id ON payment_transactions(order_id);
+CREATE INDEX idx_payment_tx_provider_ref ON payment_transactions(provider_reference);
+CREATE INDEX idx_payment_tx_idempotency ON payment_transactions(idempotency_key);
+ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY admin_select_payment_transactions ON payment_transactions
+  FOR SELECT TO authenticated USING (public.is_admin());
+GRANT TRUNCATE, TRIGGER, REFERENCES ON payment_transactions TO anon, authenticated;
+GRANT ALL ON payment_transactions TO service_role;
 CREATE TABLE supplier_transactions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
   supplier_id uuid NOT NULL, mapping_id uuid, idempotency_key text UNIQUE, action text NOT NULL DEFAULT 'create_order',
   status text NOT NULL DEFAULT 'pending', supplier_reference text, request_payload jsonb, response_payload jsonb,
   error_message text, attempt integer NOT NULL DEFAULT 1, duration_ms integer,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
-CREATE SCHEMA cron;
-CREATE FUNCTION cron.schedule(name text, schedule text, command text) RETURNS bigint LANGUAGE sql AS $$ SELECT 1::bigint $$;
-CREATE SCHEMA net;
-CREATE FUNCTION net.http_post(url text, body jsonb, headers jsonb, timeout_milliseconds integer)
-  RETURNS bigint LANGUAGE sql AS $$ SELECT 1::bigint $$;
-CREATE SCHEMA extensions;
 SQL
 
 docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261028120000_rf_coins_schema.sql" >/dev/null
+no_transport_schemas="$(db_sql "SELECT (to_regnamespace('cron') IS NULL AND to_regnamespace('net') IS NULL)::text")"
+assert_value 'migration applies without pg_cron or pg_net schemas' 'true' "$no_transport_schemas"
+db_sql 'SELECT public.trigger_fulfillment_handoff()' >/dev/null
 # Exercise the future transaction bodies only inside this fresh local DB. The
 # committed release constants remain false and are checked above.
 sed -e 's/v_funding_release_enabled CONSTANT boolean := false/v_funding_release_enabled CONSTANT boolean := true/g' \

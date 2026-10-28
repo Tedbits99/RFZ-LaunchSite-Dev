@@ -427,7 +427,7 @@ CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO 'public', 'extensions'
+SET search_path TO 'pg_catalog', 'public', 'pg_temp'
 AS $function$
 DECLARE
   v_url text;

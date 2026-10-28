@@ -343,6 +343,19 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
     expect(schemaSql).toMatch(/ACTIVATION \(EXPLICIT OPERATOR STEP/);
   });
 
+  it('pins the SECURITY DEFINER handoff search path and remains installable without pg_net', () => {
+    const start = schemaSql.indexOf('CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()');
+    const end = schemaSql.indexOf('$function$;', start);
+    const handoff = schemaSql.slice(start, end > start ? end : undefined);
+    expect(handoff).toMatch(/SECURITY DEFINER\s+SET search_path TO 'pg_catalog', 'public', 'pg_temp'/);
+    expect(handoff).toContain("IF v_secret IS NULL THEN");
+    expect(handoff).toContain("v_url := 'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/fulfillment-handoff'");
+    // This SQL must be a function body only: the migration cannot require
+    // pg_net/pg_cron or perform/schedule the outbound call during installation.
+    expect(handoff).toContain('net.http_post(');
+    expect(schemaSql).not.toMatch(/^\s*(CREATE EXTENSION|SELECT\s+cron\.schedule|INSERT INTO public\._cron_secrets)/m);
+  });
+
   it('cron trigger is executable by postgres only (Codex fix 2)', () => {
     expect(schemaSql).toMatch(/REVOKE EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\)\s*\n\s*FROM PUBLIC, anon, authenticated/);
     expect(schemaSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO postgres/);

@@ -139,6 +139,14 @@ beforeAll(async () => {
       claimed_at timestamptz NOT NULL DEFAULT now(),
       is_active boolean NOT NULL DEFAULT true
     );
+    CREATE OR REPLACE FUNCTION public.is_admin()
+    RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path = pg_catalog, public
+    AS $$ SELECT EXISTS (
+      SELECT 1 FROM public.admins
+      WHERE id = auth.uid() AND is_active IS TRUE
+    ) $$;
     CREATE TABLE orders (
       id uuid PRIMARY KEY,
       reference text UNIQUE NOT NULL,
@@ -196,21 +204,34 @@ beforeAll(async () => {
     );
     CREATE TABLE payment_transactions (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
+      order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
       idempotency_key text UNIQUE,
       provider_name text NOT NULL DEFAULT '',
       provider_reference text,
       action text NOT NULL DEFAULT 'create',
-      status text NOT NULL DEFAULT 'pending',
+      status text NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'paid', 'failed', 'expired', 'refunded', 'cancelled')),
       amount_cents int NOT NULL DEFAULT 0,
       currency text NOT NULL DEFAULT 'PHP',
       checkout_url text,
       webhook_payload jsonb,
       error_message text,
       metadata jsonb NOT NULL DEFAULT '{}',
+      qr_image_url text,
+      expires_at timestamptz,
+      provider_payment_id text,
+      webhook_event_id text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE INDEX idx_payment_tx_order_id ON payment_transactions(order_id);
+    CREATE INDEX idx_payment_tx_provider_ref ON payment_transactions(provider_reference);
+    CREATE INDEX idx_payment_tx_idempotency ON payment_transactions(idempotency_key);
+    ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY admin_select_payment_transactions ON payment_transactions
+      FOR SELECT TO authenticated USING (public.is_admin());
+    GRANT TRUNCATE, TRIGGER, REFERENCES ON payment_transactions TO anon, authenticated;
+    GRANT ALL ON payment_transactions TO service_role;
     CREATE TABLE supplier_transactions (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
@@ -229,14 +250,6 @@ beforeAll(async () => {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
-    -- cron/net stubs so the staged cron-scheduling SQL can execute in PGlite.
-    CREATE SCHEMA IF NOT EXISTS cron;
-    CREATE FUNCTION cron.schedule(name text, schedule text, command text)
-      RETURNS bigint LANGUAGE sql AS $stub$ SELECT 1::bigint $stub$;
-    CREATE SCHEMA IF NOT EXISTS net;
-    CREATE SCHEMA IF NOT EXISTS extensions;
-    CREATE FUNCTION net.http_post(url text, body jsonb, headers jsonb, timeout_milliseconds int)
-      RETURNS bigint LANGUAGE sql AS $stub$ SELECT 1::bigint $stub$;
   `);
   await db.exec(schemaSql);
   await db.exec(functionsSql);
@@ -265,7 +278,7 @@ beforeAll(async () => {
   // Without these grants the RLS tests fail on ACL instead of proving the
   // policy behavior.
   await sql(`GRANT SELECT ON games, packages, admins, orders, order_timeline,
-    payment_config, payment_transactions TO anon, authenticated, service_role`);
+    payment_config TO anon, authenticated, service_role`);
 }, 120_000);
 
 afterAll(async () => { await db.close(); });
@@ -898,6 +911,92 @@ describe('rf coins real SQL behavior', () => {
     await db.exec(`SET ROLE postgres`);
     await sql(`SELECT public.trigger_fulfillment_handoff()`);
     await db.exec(`RESET ROLE`);
+  });
+
+  it('applies without pg_cron or pg_net and fails closed if handoff is forced without pg_net', async () => {
+    const extensions = await sql<{ cron_schema: string | null; net_schema: string | null }>(
+      `SELECT to_regnamespace('cron')::text AS cron_schema, to_regnamespace('net')::text AS net_schema`);
+    expect(extensions[0]).toEqual({ cron_schema: null, net_schema: null });
+
+    // No secret is installed by the migration; even postgres gets a no-op
+    // until a separate operator activation step is taken.
+    await db.exec('SET ROLE postgres');
+    await sql(`SELECT public.trigger_fulfillment_handoff()`);
+
+    // A synthetic secret is safe test input. Without pg_net, an accidental
+    // attempted dispatch errors before any external request can occur.
+    await sql(`INSERT INTO public._cron_secrets (key, value)
+      VALUES ('fulfillment_handoff_secret', 'synthetic-never-valid-secret')`);
+    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
+      .rejects.toThrow(/schema "net" does not exist|function net\.http_post/i);
+    await db.exec('RESET ROLE');
+    await sql(`DELETE FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret'`);
+  });
+
+  it('preserves existing order-payment constraints and supports only the new nullable top-up link', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000f2';
+    const topupId = 'bbbbbbbb-0000-0000-0000-0000000000f2';
+    await insertOrder({ id: orderId, userId: CUSTOMER });
+
+    const orderColumn = await sql<{ is_nullable: string }>(
+      `SELECT is_nullable FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'payment_transactions' AND column_name = 'order_id'`);
+    expect(orderColumn[0]?.is_nullable).toBe('YES');
+
+    const orderFk = await sql<{ delete_action: string }>(
+      `SELECT CASE confdeltype WHEN 'c' THEN 'CASCADE' ELSE confdeltype::text END AS delete_action
+       FROM pg_catalog.pg_constraint c
+       JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid
+       WHERE c.conrelid = 'public.payment_transactions'::regclass
+         AND c.contype = 'f' AND a.attname = 'order_id' AND a.attnum = ANY(c.conkey)`);
+    expect(orderFk).toEqual([{ delete_action: 'CASCADE' }]);
+
+    await sql(`INSERT INTO public.payment_transactions
+      (order_id, idempotency_key, status, amount_cents)
+      VALUES ($1, 'synthetic-product-payment', 'pending', 50000)`, [orderId]);
+    await sql(`INSERT INTO public.rf_coin_topups
+      (id, user_id, coins, price_cents, idempotency_key)
+      VALUES ($1, $2, 100, 10000, 'synthetic-topup-payment')`, [topupId, CUSTOMER]);
+    await sql(`INSERT INTO public.payment_transactions
+      (order_id, rf_coin_topup_id, idempotency_key, status, amount_cents)
+      VALUES (NULL, $1, 'synthetic-wallet-payment', 'pending', 10000)`, [topupId]);
+
+    const rows = await sql<{ order_id: string | null; rf_coin_topup_id: string | null }>(
+      `SELECT order_id, rf_coin_topup_id FROM public.payment_transactions
+       WHERE idempotency_key IN ('synthetic-product-payment', 'synthetic-wallet-payment')
+       ORDER BY idempotency_key`);
+    expect(rows).toEqual([
+      { order_id: orderId, rf_coin_topup_id: null },
+      { order_id: null, rf_coin_topup_id: topupId },
+    ]);
+  });
+
+  it('confirms excessive TRUNCATE grants bypass RLS only inside this disposable fixture', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000f3';
+    await insertOrder({ id: orderId, userId: CUSTOMER });
+    await sql(`INSERT INTO public.payment_transactions
+      (order_id, idempotency_key, status, amount_cents)
+      VALUES ($1, 'synthetic-truncate-probe', 'pending', 1)`, [orderId]);
+
+    const privileges = await sql<{ anon_truncate: boolean; authenticated_truncate: boolean; anon_select: boolean; authenticated_select: boolean }>(
+      `SELECT has_table_privilege('anon', 'public.payment_transactions', 'TRUNCATE') AS anon_truncate,
+              has_table_privilege('authenticated', 'public.payment_transactions', 'TRUNCATE') AS authenticated_truncate,
+              has_table_privilege('anon', 'public.payment_transactions', 'SELECT') AS anon_select,
+              has_table_privilege('authenticated', 'public.payment_transactions', 'SELECT') AS authenticated_select`);
+    expect(privileges[0]).toEqual({
+      anon_truncate: true,
+      authenticated_truncate: true,
+      anon_select: false,
+      authenticated_select: false,
+    });
+
+    await db.exec('BEGIN');
+    await db.exec('SET LOCAL ROLE anon');
+    await db.exec('TRUNCATE TABLE public.payment_transactions');
+    await db.exec('ROLLBACK');
+    const preserved = await sql<{ count: string }>(
+      `SELECT count(*)::text AS count FROM public.payment_transactions WHERE idempotency_key = 'synthetic-truncate-probe'`);
+    expect(preserved[0]?.count).toBe('1');
   });
 
   it('customer settings row is invisible to clients (fail-closed RLS)', async () => {
