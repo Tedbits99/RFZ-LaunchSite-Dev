@@ -617,8 +617,13 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       await expect(customerBOrderLink).toContainText(customerBFixture.reference);
       await expect(customerBPage.getByText(customerAFixture.reference, { exact: true })).toHaveCount(0);
       const detailResponse = await customerBPage.goto(`${baseURL}/account/orders/${customerAFixture.orderId}`, { waitUntil: 'domcontentloaded' });
-      assert(detailResponse?.status() === 404, 'Customer B cannot open Customer A order details');
-      await expect(customerBPage.getByText(customerAFixture.reference, { exact: true })).toHaveCount(0);
+      const detailStatus = detailResponse?.status() ?? null;
+      const otherCustomerOrderReferenceVisible = await customerBPage.getByText(customerAFixture.reference, { exact: true }).count() > 0;
+      await evidence(customerBPage, testInfo, observations, 'customer-cross-order-denial');
+      assert(
+        detailStatus === 404 && !otherCustomerOrderReferenceVisible,
+        `Customer B cross-order denial: http_status=${detailStatus ?? 'no_response'} final_path=${safePath(customerBPage)} protected_reference_visible=${otherCustomerOrderReferenceVisible}`,
+      );
       const adminRouteResponse = await customerBPage.goto(`${baseURL}/admin`, { waitUntil: 'domcontentloaded' });
       assert(adminRouteResponse?.status() === 404, 'authenticated customer is denied administrator dashboard');
       await expect(customerBPage.getByText('Overview', { exact: true })).toHaveCount(0);
