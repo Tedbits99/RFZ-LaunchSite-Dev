@@ -13,13 +13,27 @@ if ! command -v grep >/dev/null 2>&1; then
   echo "ERROR: Required pending-migration safety scanner (grep) is unavailable." >&2
   exit 2
 fi
-pending_migrations="$(find \
+pending_migration_dirs=()
+for pending_dir in \
   "$project_root/supabase/migrations-pending" \
-  "$project_root/supabase/migrations-pending-provider" \
-  -type f -name '*.sql' -print 2>/dev/null | sort)" || {
+  "$project_root/supabase/migrations-pending-provider"; do
+  # Empty/untracked directories disappear from clean Git checkouts. Treat a
+  # missing optional queue as empty, but fail closed for an existing unreadable
+  # path and continue scanning every pending SQL directory that is present.
+  [ -e "$pending_dir" ] || continue
+  if [ ! -d "$pending_dir" ] || [ ! -r "$pending_dir" ]; then
+    echo "ERROR: Pending migration inventory path is not a readable directory: ${pending_dir##*/}." >&2
+    exit 2
+  fi
+  pending_migration_dirs+=("$pending_dir")
+done
+pending_migrations=""
+if [ "${#pending_migration_dirs[@]}" -gt 0 ]; then
+  pending_migrations="$(find "${pending_migration_dirs[@]}" -type f -name '*.sql' -print 2>/dev/null | sort)" || {
   echo "ERROR: Could not inventory pending SQL migrations." >&2
   exit 2
-}
+  }
+fi
 if [ -n "$pending_migrations" ]; then
   pending_migration_count=0
   while IFS= read -r pending_migration; do
