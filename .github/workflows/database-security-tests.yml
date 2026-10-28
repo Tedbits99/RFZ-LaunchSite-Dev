@@ -118,7 +118,12 @@ jobs:
           deno check supabase/functions/create-qrph-payment/index.ts
           deno check supabase/functions/create-coin-topup-payment/index.ts
           deno check supabase/functions/fazercards-test/index.ts
-          deno test supabase/functions/fazercards-test/authorization_test.ts
+          rg -q 'disabledFazerCardsDiagnosticResponse' supabase/functions/fazercards-test/index.ts
+          if rg -n 'api\.fzr\.cards|SUPPLIER_FAZERCARDS_API_KEY|topups/order' supabase/functions/fazercards-test; then
+            echo 'Live FazerCards provider access must remain absent from the disabled diagnostic function.' >&2
+            exit 1
+          fi
+          deno eval 'import { disabledFazerCardsDiagnosticResponse } from "./supabase/functions/fazercards-test/disabledResponse.ts"; const r = disabledFazerCardsDiagnosticResponse(); if (r.status !== 503 || r.headers.get("cache-control") !== "no-store") Deno.exit(1); const body = await r.json(); if (body.error !== "FazerCards diagnostics are disabled; no provider request was made.") Deno.exit(1);'
           deno check supabase/functions/payment-webhook/index.ts
           deno check supabase/functions/send-transactional-email/index.ts
           deno check supabase/functions/completion-receipt-email-worker/index.ts
