@@ -568,3 +568,115 @@ once crediting, idempotent reversals/refunds, replay/race tests, reconciliation,
 supplier/email isolation, hosted owner acceptance, and explicit financial
 approval. Hosted Admin Center acceptance is also required after schema is
 approved; local disposable tests are not a substitute.
+
+## Trusted ACL audit and recovery evidence status (2026-10-28)
+
+This is an append-only status update. Earlier audit counts and checksums above
+remain historical evidence for their stated source/run and are not silently
+replaced.
+
+### Current candidate and exact-head validation
+
+- PR #82 source SHA: `220de8744e069f0670a42aebfab3a807e8421a42`; PR remains
+  OPEN/DRAFT and unmerged, based on main SHA
+  `7f72ba18a6e1641e0a6347895342e365d5a81fcb`.
+- Frontend validation run `40633394678`: terminal SUCCESS on the exact source
+  SHA.
+- Development validation run `40633394635`: terminal SUCCESS on the exact
+  source SHA. Its `Isolated Supabase RPC security tests` and `Production
+  release safety` jobs both completed SUCCESS.
+- The Development logs include
+  `RF_COINS_POSTGRES17_DEFAULT_ACL_FIXTURE_PASS` and
+  `RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS pg=17`, with browser write,
+  TRUNCATE, TRIGGER, REFERENCES, and MAINTAIN denied on the candidate wallet
+  surfaces; existing product-payment/order-FK/RLS/index contracts preserved;
+  and release locks, handoff job, and handoff secret remaining disabled/absent.
+  This is a disposable PostgreSQL 17 rehearsal, not a hosted ACL audit or
+  hosted migration.
+
+### Current migration checksums
+
+These SHA-256 values were recalculated from the three pending migration files
+at PR #82 SHA `220de8744e069f0670a42aebfab3a807e8421a42`. They supersede the
+earlier table only for this candidate; the prior table remains historical.
+
+| Order | File | SHA-256 at `220de874` |
+|---|---|---|
+| 1 | `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` | `b217e2715eece27bb2cf781e55a132c68d1d218e383c3378d0b0e777afb8eb25` |
+| 2 | `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` | `8dbc11a82062f0cd1ebdd77ba5500ebae7fca89fa75f2450b0eaec26635efcb8` |
+| 3 | `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` | `1bef2626e079781180336a13990088db6ab7d07af09b144b77508a9a2563d924` |
+
+The checksums must be recalculated again for any later candidate before a
+migration decision.
+
+### Trusted hosted ACL audit: pending review; no hosted run
+
+The separate infrastructure-only change is PR #88, source commit
+`9914d0c` (`codex/trusted-acl-metadata-audit`), based on the same verified
+main SHA above. It adds a distinct main-only, manual `metadata-acl-audit`
+operation to the existing protected database workflow and a bounded,
+SELECT-only catalog artifact. It is not merged; its mandatory GitHub checks
+are pending at the time of this update. No hosted audit was dispatched, no
+artifact exists, no ACL was changed, and no hosted migration was applied.
+
+Accordingly, the owner-provided current findings remain provenance-labeled
+but are not independently artifact-verified in this session: 36 public tables;
+`anon` TRUNCATE/TRIGGER privileges on 24 tables; `authenticated`
+TRUNCATE/TRIGGER privileges on 27 tables; direct `payment_transactions`
+TRUNCATE/TRIGGER/REFERENCES/MAINTAIN grants to both roles with grantor
+`postgres`; and future-table default ACL grants attributed to `postgres` and
+`supabase_admin`. The owner reported no direct role-membership entries for
+`anon`/`authenticated` in their inspected query. This candidate does not claim
+that a public/PostgREST route can execute those SQL privileges; application
+exploitability remains **NOT ESTABLISHED**.
+
+### ACL remediation plan — not executed
+
+After the trusted artifact identifies exact relations and grant/default-ACL
+provenance, prepare a separately reviewed, idempotent migration for only the
+demonstrated `anon`/`authenticated` TRUNCATE, TRIGGER, REFERENCES, and MAINTAIN
+privileges on affected relations. Correct only the specific creator/schema
+default ACL entries shown to reintroduce those grants. Preserve owner and
+service-role privileges, required browser DML/RLS behavior, and the existing
+administrator SELECT path. Verify effective privileges and ACL provenance
+afterward, then run customer isolation, payment/order, admin, and privileged
+RPC regressions. Do not generate blanket revokes or execute this plan before
+the artifact and compatibility review. **No hosted ACL remediation has been
+applied.**
+
+### Provider backup/PITR and recovery gate
+
+Provider backup/PITR state remains **UNVERIFIED**. The existing hosted
+`audit` run did not capture backup-plan metadata, and this session did not
+request a backup, export rows, or restore anything. No backup type/status,
+latest recovery point, retention, point-in-time setting, compatible PostgreSQL
+restore version, destination options, or restore limitation is claimed.
+
+Owner evidence still required from Supabase Dashboard under **Database →
+Backups / Point in time recovery** (or Supabase Support if the project plan
+does not expose these controls): provide sanitized plan/backup type and status,
+latest available recovery point with timezone, retention window, PITR status,
+compatible restore versions, destination choices, and any billing/region/plan
+constraints. Do not send credentials, customer rows, or backup contents.
+
+Before any later destructive or hosted migration operation, use an
+owner-authorized provider recovery point or separately approved encrypted
+export, restore only into a disposable isolated destination, disable outbound
+payment/supplier/email/webhook effects there, and compare schema plus
+non-sensitive integrity checks. Never restore over the current project. No
+isolated restore evidence exists yet.
+
+### Owner acceptance history and release decision
+
+The owner-reported `28/28 PASS` remains preserved as historical,
+candidate-bound acceptance: 13/13 authentication/account checks on
+`33824059569886944e4c8ac98eca22f425a1526a`, 8/8 wallet-header checks on
+`259467d31d0b6fb56d7ed711a35f41fb37580c1a`, and 7/7 Admin Center checks on
+`cc5687f45835c423860ae94c33cc640155f8e96b`. It is not acceptance of later
+source SHA `220de8744e069f0670a42aebfab3a807e8421a42` or of a hosted wallet
+schema.
+
+**Decision: NO-GO.** The trusted ACL artifact and provider backup/recovery
+evidence are still missing. Hosted schema/ACL changes, wallet funding and
+spending remain unapplied/disabled. No hosted data export, backup, restore,
+payment, supplier activity, or Worker activation occurred.
