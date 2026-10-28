@@ -712,6 +712,16 @@ remain historical and candidate-bound.
 - The protected `runfazone-development-db` environment's persisted deployment
   branch policy was read back: selected branches, exactly one allowed branch,
   `main`. No hosted database operation was launched.
+- The three pending RF Coins migration files were re-hashed from the PR #82
+  tree at `6f145b0094752697ee04b222932643528a036ba7`; they match the earlier
+  recorded values. The following evidence-only commit does not alter those
+  SQL files:
+
+  | File | SHA-256 |
+  |---|---|
+  | `supabase/migrations-pending/20261028120000_rf_coins_schema.sql` | `b217e2715eece27bb2cf781e55a132c68d1d218e383c3378d0b0e777afb8eb25` |
+  | `supabase/migrations-pending/20261028120100_rf_coins_functions.sql` | `8dbc11a82062f0cd1ebdd77ba5500ebae7fca89fa75f2450b0eaec26635efcb8` |
+  | `supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql` | `1bef2626e079781180336a13990088db6ab7d07af09b144b77508a9a2563d924` |
 - Before this supplemental document-only update, PR #82 was OPEN/DRAFT at
   `1f81165151b8b22065d97af13faa3485dba640d9` and reported
   `CONFLICTING` against main. A read-only merge-tree comparison identifies one
