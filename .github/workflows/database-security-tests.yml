@@ -100,6 +100,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
 
+      - name: Rehearse hosted ACL migration as PostgreSQL 17 non-superuser
+        run: bash scripts/test-hosted-acl-remediation-postgres17.sh
+
       - name: Install Deno
         uses: denoland/setup-deno@v2
         with:
