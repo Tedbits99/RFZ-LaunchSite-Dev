@@ -24,7 +24,7 @@ on:
         required: false
         type: string
       operation:
-        description: 'Audit/plan, apply reviewed migrations, or lock the legacy admin bootstrap'
+        description: 'Metadata ACL audit, safe audit/plan, apply reviewed migrations, or guarded development operation'
         required: true
         type: choice
         options:
@@ -37,6 +37,7 @@ on:
           - auth-confirmation-allowlist
           - auth-confirmation-configure
           - gate-b-audit
+          - metadata-acl-audit
           - integration-safety-lockdown
           - payment-safety-lockdown
           - admin-bootstrap-lockdown
@@ -130,7 +131,7 @@ jobs:
             exit 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BLOCKED: source_sha must be a full commit SHA.' >&2; exit 1; }
-          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure || "$OPERATION" = gate-b-audit || "$OPERATION" = integration-safety-lockdown || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
+          [[ "$OPERATION" = audit || "$OPERATION" = behavioral-audit || "$OPERATION" = customer-security-audit || "$OPERATION" = customer-security-cleanup || "$OPERATION" = admin-auth-audit || "$OPERATION" = auth-confirmation-audit || "$OPERATION" = auth-confirmation-allowlist || "$OPERATION" = auth-confirmation-configure || "$OPERATION" = gate-b-audit || "$OPERATION" = metadata-acl-audit || "$OPERATION" = integration-safety-lockdown || "$OPERATION" = payment-safety-lockdown || "$OPERATION" = admin-bootstrap-lockdown || "$OPERATION" = plan || "$OPERATION" = apply ]] || { echo 'BLOCKED: unsupported operation.' >&2; exit 1; }
           if [[ "$OPERATION" = admin-auth-audit ]]; then
             test -n "$ADMIN_EMAIL" || { echo 'BLOCKED: admin-auth-audit requires admin_email.' >&2; exit 1; }
           fi
@@ -328,6 +329,17 @@ jobs:
           set -euo pipefail
           supabase migration list --linked > "$RUNNER_TEMP/migrations-before.txt"
           awk 'NF { print }' "$RUNNER_TEMP/migrations-before.txt" | sed -E 's/[[:space:]]+/ /g' | tail -n 40
+
+      - name: Capture trusted hosted ACL provenance (metadata only)
+        if: inputs.operation == 'metadata-acl-audit'
+        env:
+          PROJECT_ID: ${{ steps.identity.outputs.project_id }}
+          PROJECT_REGION: ${{ steps.identity.outputs.region }}
+          POOLER_PORT: ${{ steps.postgres_auth.outputs.pooler_port }}
+          SUPABASE_POOLER_HOST: aws-0-${{ steps.identity.outputs.region }}.pooler.supabase.com
+          SUPABASE_DB_USER: postgres.${{ steps.identity.outputs.project_id }}
+        shell: bash
+        run: bash scripts/audit-hosted-acl-metadata.sh
 
       - name: Audit hosted Auth confirmation configuration
         if: inputs.operation == 'auth-confirmation-audit'
@@ -555,6 +567,13 @@ jobs:
           if [[ "$OPERATION" != audit && "$OPERATION" != auth-confirmation-audit && "$OPERATION" != auth-confirmation-allowlist && "$OPERATION" != auth-confirmation-configure ]]; then
             test -s "$RUNNER_TEMP/migrations-after.txt"
           fi
+          if [[ "$OPERATION" = metadata-acl-audit ]]; then
+            diff -u "$RUNNER_TEMP/migrations-before.txt" "$RUNNER_TEMP/migrations-after.txt" || {
+              echo 'BLOCKED: metadata-only ACL audit changed hosted migration history.' >&2
+              exit 1
+            }
+            echo 'HOSTED_ACL_AUDIT_MIGRATION_HISTORY_UNCHANGED=true'
+          fi
 
       - name: Upload sanitized synchronization evidence
         if: always()
@@ -568,4 +587,6 @@ jobs:
             ${{ runner.temp }}/hosted-security-summary.json
             ${{ runner.temp }}/hosted-behavioral-audit.log
             ${{ runner.temp }}/hosted-privileged-rpc-audit.log
+            ${{ runner.temp }}/hosted-acl-metadata.json
           if-no-files-found: ignore
+          retention-days: 90

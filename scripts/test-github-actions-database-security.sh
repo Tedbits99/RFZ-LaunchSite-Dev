@@ -167,6 +167,7 @@ validate_psql_invocation() {
           supabase/tests/completion-receipt-data-contract.sql|\
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/hosted-acl-metadata-audit.sql|\
           supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
           supabase/tests/database/rf-coins-default-acl-fixture.sql|\
           supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
@@ -226,6 +227,8 @@ test_psql_invocation_validator() {
     --file supabase/tests/database/rf-coins-default-acl-fixture.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --command "SELECT 1;" || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --quiet --tuples-only --no-align \
+    --set ON_ERROR_STOP=1 --file supabase/tests/hosted-acl-metadata-audit.sql || return 1
 
   assert_psql_args_rejected() {
     if validate_psql_invocation "$valid_url" "$valid_url" "$@"; then
@@ -429,6 +432,8 @@ cp "$project_root/supabase/tests/completion-receipt-outbox-worker.sql" \
   "$test_root/supabase/tests/completion-receipt-outbox-worker.sql"
 cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
+cp "$project_root/supabase/tests/hosted-acl-metadata-audit.sql" \
+  "$test_root/supabase/tests/hosted-acl-metadata-audit.sql"
 cp "$project_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql" \
   "$test_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql"
 cp "$project_root/supabase/tests/database/rf-coins-default-acl-fixture.sql" \
@@ -631,6 +636,48 @@ echo "Executing completion receipt outbox worker assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/completion-receipt-outbox-worker.sql
+
+echo "Executing metadata-only ACL inventory against the disposable PostgreSQL 17 database..."
+acl_metadata_output="$test_root/hosted-acl-metadata-validation.jsonl"
+psql "$db_url" --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --file supabase/tests/hosted-acl-metadata-audit.sql > "$acl_metadata_output"
+node - "$acl_metadata_output" <<'NODE'
+const fs = require('node:fs');
+const [outputPath] = process.argv.slice(2);
+const lines = fs.readFileSync(outputPath, 'utf8').trim().split(/\r?\n/);
+if (lines.length !== 9) throw new Error(`expected 9 metadata sections, got ${lines.length}`);
+const rows = lines.map((line) => JSON.parse(line));
+const expected = [
+  'database', 'tables', 'effective_table_privileges', 'direct_relation_acl',
+  'default_acl', 'role_memberships', 'payment_transactions', 'public_functions', 'scheduled_jobs',
+];
+if (rows.some((row, index) => row.section !== expected[index])) {
+  throw new Error('metadata sections are missing, duplicated, or incorrectly ordered');
+}
+const data = Object.fromEntries(rows.map((row) => [row.section, row.data]));
+const tableCount = Number(data.database.public_table_count);
+if (Number(data.database.server_version_num) < 170000) throw new Error('database is below PostgreSQL 17');
+if (data.database.required_roles_present !== true) throw new Error('required Supabase roles are missing');
+if (tableCount < 1 || data.tables.length !== tableCount || data.direct_relation_acl.length !== tableCount) {
+  throw new Error('public table or direct ACL inventory is incomplete');
+}
+if (data.effective_table_privileges.length !== tableCount * 2) {
+  throw new Error('effective anon/authenticated privilege inventory is incomplete');
+}
+if (data.payment_transactions.exists !== true) throw new Error('payment_transactions metadata is absent');
+const tableNames = new Set(data.tables.map((table) => table.name));
+for (const table of data.effective_table_privileges) {
+  if (!tableNames.has(table.table) || !['anon', 'authenticated'].includes(table.role)) {
+    throw new Error('effective privilege row references an unexpected table or role');
+  }
+}
+for (const table of data.direct_relation_acl) {
+  if (!tableNames.has(table.table) || !Array.isArray(table.entries)) {
+    throw new Error('direct ACL provenance is incomplete');
+  }
+}
+process.stdout.write(`HOSTED_ACL_METADATA_POSTGRES17_FIXTURE_PASS tables=${tableCount} sections=${rows.length}\n`);
+NODE
 
 # Exercise the isolated engine against the local disposable Supabase API only.
 # This fake acknowledgment may mark the disposable fixture sent; it cannot reach
