@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -317,7 +318,7 @@ async function createAdminIdentity(client: SupabaseClient, email: string, role: 
   assert(!row.error, 'synthetic administrator role fixture is created');
 }
 
-async function createOrderFixture(email: string, password: string) {
+async function createOrderFixture(localAdmin: SupabaseClient, email: string, password: string) {
   const client = createClient(supabaseUrl!, anonKey!, { auth: { persistSession: false, autoRefreshToken: false } });
   const signedIn = await client.auth.signInWithPassword({ email, password });
   assert(!signedIn.error && signedIn.data.user, 'confirmed customer has a real local Auth session');
@@ -325,20 +326,52 @@ async function createOrderFixture(email: string, password: string) {
   assert(!game.error && game.data, 'canonical synthetic game fixture is available');
   const product = await client.from('packages').select('id').eq('game_id', game.data.id).eq('is_active', true).limit(1).single();
   assert(!product.error && product.data, 'canonical synthetic product package is available');
+  // Match the real checkout route: generate an unguessable capability, send
+  // only its SHA-256 digest through the customer-authenticated RPC, and let
+  // the database trigger persist that digest outside player_inputs.
+  const orderCapability = randomBytes(32).toString('base64url');
+  const orderCapabilityHash = createHash('sha256').update(orderCapability, 'utf8').digest('hex');
   const order = await client.rpc('create_order', {
     p_game_id: game.data.id,
     p_package_id: product.data.id,
     p_email: email,
     p_customer_name: 'Synthetic Customer A',
-    p_player_inputs: { user_id: 'synthetic-player-1001', server_id: '1001' },
+    p_player_inputs: {
+      user_id: 'synthetic-player-1001',
+      server_id: '1001',
+      __rfz_order_access_hash: orderCapabilityHash,
+    },
     p_payment_method: 'manual',
     p_voucher_code: null,
     p_voucher_email: null,
   });
+  if (order.error) {
+    const code = typeof order.error.code === 'string' && /^[0-9A-Z]{5}$/.test(order.error.code)
+      ? order.error.code
+      : 'unknown';
+    const status = 'status' in order.error && typeof order.error.status === 'number'
+      ? order.error.status
+      : null;
+    console.error('ISOLATED_ORDER_RPC_FAILURE', {
+      stage: 'authenticated_create_order',
+      http_status: status,
+      sqlstate: code,
+      category: code === '42501' ? 'insufficient_privilege' : code === 'P0001' ? 'database_exception' : 'postgrest_error',
+    });
+  }
   assert(!order.error, 'synthetic pending manual order is created by authenticated RPC');
   const row = Array.isArray(order.data) ? order.data[0] : order.data;
   assert(row && typeof row.out_order_id === 'string' && !row.out_error, 'synthetic order fixture has an owned order ID');
-  return { client, userId: signedIn.data.user.id, orderId: row.out_order_id as string, reference: row.out_reference as string };
+  const orderId = row.out_order_id as string;
+  const persisted = await localAdmin.from('orders').select('player_inputs').eq('id', orderId).single();
+  assert(!persisted.error && !('__rfz_order_access_hash' in (persisted.data.player_inputs as Record<string, unknown>)), 'order capability digest is not exposed in customer player inputs');
+  const storedCapability = await localAdmin.from('guest_order_access')
+    .select('order_id')
+    .eq('order_id', orderId)
+    .eq('token_hash', orderCapabilityHash)
+    .maybeSingle();
+  assert(!storedCapability.error && storedCapability.data?.order_id === orderId, 'order capability digest is stored in the protected capability table');
+  return { client, userId: signedIn.data.user.id, orderId, reference: row.out_reference as string };
 }
 
 async function seedWalletFixtures(client: SupabaseClient, customerA: string, customerB: string) {
@@ -529,8 +562,8 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
     });
 
     const { customerAFixture } = await test.step('verify actual PostgREST customer ownership and wallet behavior', async () => {
-      const customerAFixture = await createOrderFixture(customerAEmail, oldPassword);
-      const customerBFixture = await createOrderFixture(customerBEmail, oldPassword);
+      const customerAFixture = await createOrderFixture(localAdmin, customerAEmail, oldPassword);
+      const customerBFixture = await createOrderFixture(localAdmin, customerBEmail, oldPassword);
       const own = await customerAFixture.client.from('orders').select('id').eq('id', customerAFixture.orderId);
       const cross = await customerBFixture.client.from('orders').select('id').eq('id', customerAFixture.orderId);
       assert(!own.error && own.data.length === 1, 'Customer A can read its owned order through PostgREST');
