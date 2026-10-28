@@ -1007,3 +1007,55 @@ and stop on any ledger/schema/authority mismatch. Any later `apply` requires
 its separately scoped authorization; do not run `db reset` or migration
 repair. Wallet funding/spending, PayMongo wallet top-ups, supplier fulfillment,
 live payment, public access, and normal Worker activation remain disabled.
+
+## Latest ACL authority split and Free-plan handoff (2026-10-28)
+
+This section supersedes the earlier single-file proposal above that attempted
+to change all five default-ACL contexts through the standard hosted
+`postgres` role. The metadata audit found all 36 public tables owned by
+`postgres`, and the owner confirmed the hosted role is not superuser, has no
+`supabase_admin` membership, and cannot `SET ROLE` to it. No permission
+escalation is attempted.
+
+- Supported, transaction-wrapped pending migration:
+  `supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql`
+  SHA-256 `3e14097751cea54dbe0d7eece91275751484ab310a31bc48e9382f211e3c0ed4`.
+  It targets the exact 204 direct relation privilege entries plus the 16
+  `postgres`-owned defaults in `public` and `storage`. It preserves SELECT/DML,
+  RLS, policies, PUBLIC, and `service_role`; it validates PG17, relation
+  ownership, RLS, audit counts, grant provenance, and absence of unexpected
+  browser-role memberships/grants.
+- Separately staged provider-authorized operation:
+  `supabase/migrations-pending-provider/20261028113100_revoke_supabase_admin_browser_defaults.sql`
+  SHA-256 `d9f9333a7efc1aced5ae73de802dec40337bd3fa4911f0a1f10492df06a34d1c`.
+  It targets only the 24 `supabase_admin`-owned defaults across
+  `public`/`graphql`/`graphql_public`; it is not in the ordinary migration
+  directory and refuses to run without that role's authority. If Supabase
+  cannot provide an approved execution path, that residual scope stays
+  blocked—not escalated.
+- New authority fixture runs a non-superuser `postgres` role separately from
+  the bootstrap user, asserts `42501` for that role's provider-ACL attempt,
+  applies the two scopes independently/idempotently, and compares safe grants,
+  RLS, policies, PUBLIC, and `service_role`. The provider SQL is scanned by
+  both fail-closed pending-SQL scanners. The scan reports five pending SQL
+  files. A supplemental PGlite 17.5 authority-split execution passed with an
+  aliased non-superuser role; the native Docker PostgreSQL 17 harness could
+  not run in this local environment because Docker storage was full. The
+  exact-head GitHub native PostgreSQL 17 check remains required.
+- Read-only exact row-count query is prepared at
+  `supabase/tests/hosted-development-row-count-inventory.sql`
+  (SHA-256 `edcf24936bc516348cafb9db382e7eb1298c7ee950f549d635983fc10ecf1cbb`).
+  It returns only counts for `auth.users` and 36 public relations inside a
+  read-only transaction. It was not run here; current row counts are
+  UNVERIFIED. It exports no row values.
+- No migration, ACL change, row write, export/snapshot, restore, payment,
+  supplier/email activity, or Worker activation occurred. Supabase Free
+  paid-backup/PITR and full restore rehearsal remain nonrequirements; no paid
+  resources were created. The supported SQL rollback is the exact inverse
+  grant/default statements in
+  `docs/hosted-acl-remediation-execution.md`.
+
+The current exact-scope execution package is
+`docs/hosted-acl-remediation-execution.md`. PR #82 stays OPEN/DRAFT. These SQL
+files remain pending and do not authorize `plan`, `apply`, migration repair,
+or an ACL write. Wallet funding/spending remain disabled.

@@ -10,6 +10,9 @@ import { describe, expect, it } from 'vitest';
 const functionsSql = readFileSync('supabase/migrations-pending/20261028120100_rf_coins_functions.sql', 'utf8');
 const schemaSql = readFileSync('supabase/migrations-pending/20261028120000_rf_coins_schema.sql', 'utf8');
 const adminCenterSql = readFileSync('supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
+const supportedAclSql = readFileSync('supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql', 'utf8');
+const providerAclSql = readFileSync('supabase/migrations-pending-provider/20261028113100_revoke_supabase_admin_browser_defaults.sql', 'utf8');
+const aclRehearsal = readFileSync('scripts/test-hosted-acl-remediation-postgres17.sh', 'utf8');
 
 describe('canonical RF Coins ACL contract', () => {
   it('revokes anonymous access from customer and guarded admin RPCs', () => {
@@ -115,6 +118,30 @@ describe('canonical RF Coins ACL contract', () => {
     expect(schemaSql).toMatch(/'rf_coin_wallet', 'RF Coins Wallet', 'rf_coin_wallet', false/);
     expect(schemaSql).not.toMatch(/^\s*SELECT\s+cron\.schedule\(/m);
     expect(schemaSql).not.toMatch(/^\s*INSERT INTO public\._cron_secrets/m);
+  });
+
+  it('limits the hosted postgres ACL migration to its audited authority and exact grants', () => {
+    expect(supportedAclSql).toContain('current_user <> \'postgres\'');
+    expect(supportedAclSql).toContain("v_direct_count NOT IN (0, 204)");
+    expect(supportedAclSql).toContain("v_postgres_default_count NOT IN (0, 16)");
+    expect(supportedAclSql).toContain("v_provider_default_count <> 24");
+    expect(supportedAclSql).toContain('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public');
+    expect(supportedAclSql).toContain('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage');
+    expect(supportedAclSql).not.toContain('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin');
+    expect(supportedAclSql).not.toContain('SET ROLE supabase_admin');
+    expect(supportedAclSql).toContain('FROM anon, authenticated;');
+  });
+
+  it('keeps provider-owned ACL work outside normal migrations and rehearses role boundaries', () => {
+    expect(providerAclSql).toContain('PROVIDER-AUTHORIZED ACL OPERATION; NOT A NORMAL SUPABASE MIGRATION');
+    expect(providerAclSql).toContain('PROVIDER_ACL_SUPABASE_ADMIN_AUTHORITY_REQUIRED');
+    expect(providerAclSql).toContain('IN SCHEMA graphql');
+    expect(providerAclSql).toContain('IN SCHEMA graphql_public');
+    expect(aclRehearsal).toContain('--env POSTGRES_USER=bootstrap');
+    expect(aclRehearsal).toContain('postgresql://${role}@127.0.0.1:5432/postgres');
+    expect(aclRehearsal).toContain('psql_in_container postgres');
+    expect(aclRehearsal).toContain('psql_in_container supabase_admin');
+    expect(aclRehearsal).toContain('read-only');
   });
 
   it('serializes same-package top-up retries and prevents duplicate pending attempts', () => {

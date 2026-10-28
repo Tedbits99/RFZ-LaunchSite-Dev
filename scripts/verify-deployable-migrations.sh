@@ -87,10 +87,13 @@ if ! scan_external_operations "$migrations"; then
   exit 1
 fi
 
-pending_migrations="$project_root/supabase/migrations-pending"
-if [ -d "$pending_migrations" ] && ! scan_external_operations "$pending_migrations"; then
-  echo 'ERROR: pending migration set did not pass its external-operation safety scan.' >&2
-  exit 1
-fi
+for pending_migrations in \
+  "$project_root/supabase/migrations-pending" \
+  "$project_root/supabase/migrations-pending-provider"; do
+  if [ -d "$pending_migrations" ] && ! scan_external_operations "$pending_migrations"; then
+    echo "ERROR: pending SQL set did not pass its external-operation safety scan: ${pending_migrations##*/}." >&2
+    exit 1
+  fi
+done
 
 echo "DEPLOYABLE_MIGRATION_MANIFEST_PASS count=$count"

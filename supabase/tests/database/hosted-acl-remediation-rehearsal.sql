@@ -1,14 +1,14 @@
 \set ON_ERROR_STOP on
 
--- Disposable PostgreSQL 17 rehearsal. It recreates only the audited browser
--- role grants/default ACLs, replays the proposed migration, and compares the
--- rest of the effective access-policy metadata. This file must never target a
--- hosted connection.
-BEGIN;
-
+-- Disposable PostgreSQL 17 rehearsal. Run as a NOSUPERUSER postgres role
+-- with no membership in supabase_admin, matching the verified hosted
+-- migration authority. It applies only the postgres-owned ACL scope and
+-- proves that provider-owned defaults remain unchanged. Never target hosted.
 DO $$
 BEGIN
-  IF current_user <> 'postgres' THEN
+  IF current_user <> 'postgres'
+     OR (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)
+     OR pg_has_role(current_user, 'supabase_admin', 'MEMBER') THEN
     RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_WRONG_DISPOSABLE_OWNER';
   END IF;
   IF current_setting('server_version_num')::integer < 170000 THEN
@@ -17,42 +17,11 @@ BEGIN
 END;
 $$;
 
--- Reproduce the exact audited direct grants. The 24-table set had all four
--- privileges for both roles; admins/orders/order_timeline had them only for
--- authenticated.
-GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE
-  public.announcements, public.app_settings, public.email_sent_log,
-  public.game_input_fields, public.games, public.global_announcement,
-  public.notifications, public.order_notes, public.packages, public.payment_config,
-  public.payment_submissions, public.payment_transactions, public.player_cache,
-  public.promotions, public.refunds, public.supplier_package_mappings,
-  public.supplier_test_runs, public.suppliers, public.support_messages,
-  public.support_tickets, public.verification_attempts, public.verified_users,
-  public.voucher_usages, public.vouchers
-TO anon, authenticated;
-
-GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE
-  public.admins, public.order_timeline, public.orders
-TO authenticated;
-
--- Recreate only the five creator/schema default ACL contexts reported by the
--- trusted metadata artifact. No production or hosted project is linked here.
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-  GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
-  GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA graphql
-  GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA graphql_public
-  GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage
-  GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO anon, authenticated;
-
 CREATE TEMP TABLE expected_affected_acl (
   role_name text NOT NULL,
   table_name text NOT NULL,
   PRIMARY KEY (role_name, table_name)
-) ON COMMIT DROP;
+);
 
 INSERT INTO expected_affected_acl (role_name, table_name)
 SELECT role_name, table_name
@@ -78,7 +47,7 @@ CREATE TEMP TABLE expected_default_acl (
   grantee_name text NOT NULL,
   privilege_name text NOT NULL,
   PRIMARY KEY (creator_name, schema_name, grantee_name, privilege_name)
-) ON COMMIT DROP;
+);
 
 INSERT INTO expected_default_acl (creator_name, schema_name, grantee_name, privilege_name)
 SELECT context.creator_name, context.schema_name, role_name, privilege_name
@@ -92,7 +61,7 @@ FROM (VALUES
 CROSS JOIN (VALUES ('anon'), ('authenticated')) AS roles(role_name)
 CROSS JOIN (VALUES ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) AS privileges(privilege_name);
 
-CREATE TEMP TABLE before_ddl_privileges ON COMMIT DROP AS
+CREATE TEMP TABLE before_ddl_privileges AS
 SELECT r.role_name, c.relname AS table_name, p.privilege_name,
        has_table_privilege(r.role_name, c.oid, p.privilege_name) AS has_privilege
 FROM pg_class AS c
@@ -118,7 +87,25 @@ BEGIN
 END;
 $$;
 
-CREATE TEMP TABLE before_safe_privileges ON COMMIT DROP AS
+-- The current hosted postgres authority must not be able to change
+-- supabase_admin defaults. Assert the exact expected SQLSTATE and do not
+-- compensate by granting membership or changing roles.
+DO $$
+DECLARE
+  v_sqlstate text;
+BEGIN
+  BEGIN
+    EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES FROM anon, authenticated';
+  EXCEPTION WHEN insufficient_privilege THEN
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE;
+  END;
+  IF v_sqlstate IS DISTINCT FROM '42501' THEN
+    RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_PROVIDER_PRIVILEGE_BOUNDARY_UNEXPECTED sqlstate=%', v_sqlstate;
+  END IF;
+END;
+$$;
+
+CREATE TEMP TABLE before_safe_privileges AS
 SELECT r.role_name, c.relname AS table_name, p.privilege_name,
        has_table_privilege(r.role_name, c.oid, p.privilege_name) AS has_privilege
 FROM pg_class AS c
@@ -127,18 +114,18 @@ CROSS JOIN (VALUES ('anon'), ('authenticated')) AS r(role_name)
 CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(privilege_name)
 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');
 
-CREATE TEMP TABLE before_rls ON COMMIT DROP AS
+CREATE TEMP TABLE before_rls AS
 SELECT c.relname AS table_name, c.relrowsecurity, c.relforcerowsecurity
 FROM pg_class AS c
 JOIN pg_namespace AS n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');
 
-CREATE TEMP TABLE before_policies ON COMMIT DROP AS
+CREATE TEMP TABLE before_policies AS
 SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
 FROM pg_policies
 WHERE schemaname = 'public';
 
-CREATE TEMP TABLE before_default_acl ON COMMIT DROP AS
+CREATE TEMP TABLE before_default_acl AS
 SELECT creator.rolname AS creator_name,
        COALESCE(schema_name.nspname, '') AS schema_name,
        acl.grantee,
@@ -169,7 +156,7 @@ BEGIN
 END;
 $$;
 
-CREATE TEMP TABLE before_other_role_acl ON COMMIT DROP AS
+CREATE TEMP TABLE before_other_role_acl AS
 SELECT c.relname AS table_name, acl.grantee, acl.grantor, acl.privilege_type, acl.is_grantable
 FROM pg_class AS c
 JOIN pg_namespace AS n ON n.oid = c.relnamespace
@@ -182,7 +169,7 @@ WHERE n.nspname = 'public'
 -- candidate. Execution is confined to the dedicated disposable PG17 script.
 \ir ../../migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql
 
-CREATE TEMP TABLE after_ddl_privileges ON COMMIT DROP AS
+CREATE TEMP TABLE after_ddl_privileges AS
 SELECT r.role_name, c.relname AS table_name, p.privilege_name,
        has_table_privilege(r.role_name, c.oid, p.privilege_name) AS has_privilege
 FROM pg_class AS c
@@ -191,7 +178,7 @@ CROSS JOIN (VALUES ('anon'), ('authenticated')) AS r(role_name)
 CROSS JOIN (VALUES ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) AS p(privilege_name)
 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');
 
-CREATE TEMP TABLE after_safe_privileges ON COMMIT DROP AS
+CREATE TEMP TABLE after_safe_privileges AS
 SELECT r.role_name, c.relname AS table_name, p.privilege_name,
        has_table_privilege(r.role_name, c.oid, p.privilege_name) AS has_privilege
 FROM pg_class AS c
@@ -200,18 +187,18 @@ CROSS JOIN (VALUES ('anon'), ('authenticated')) AS r(role_name)
 CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(privilege_name)
 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');
 
-CREATE TEMP TABLE after_rls ON COMMIT DROP AS
+CREATE TEMP TABLE after_rls AS
 SELECT c.relname AS table_name, c.relrowsecurity, c.relforcerowsecurity
 FROM pg_class AS c
 JOIN pg_namespace AS n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');
 
-CREATE TEMP TABLE after_policies ON COMMIT DROP AS
+CREATE TEMP TABLE after_policies AS
 SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
 FROM pg_policies
 WHERE schemaname = 'public';
 
-CREATE TEMP TABLE after_default_acl ON COMMIT DROP AS
+CREATE TEMP TABLE after_default_acl AS
 SELECT creator.rolname AS creator_name,
        COALESCE(schema_name.nspname, '') AS schema_name,
        acl.grantee,
@@ -225,7 +212,7 @@ LEFT JOIN pg_namespace AS schema_name ON schema_name.oid = d.defaclnamespace
 CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl
 LEFT JOIN pg_roles AS grantee_role ON grantee_role.oid = acl.grantee;
 
-CREATE TEMP TABLE after_other_role_acl ON COMMIT DROP AS
+CREATE TEMP TABLE after_other_role_acl AS
 SELECT c.relname AS table_name, acl.grantee, acl.grantor, acl.privilege_type, acl.is_grantable
 FROM pg_class AS c
 JOIN pg_namespace AS n ON n.oid = c.relnamespace
@@ -284,12 +271,32 @@ BEGIN
        AND expected.schema_name = before.schema_name
        AND expected.grantee_name = before.grantee_name
        AND expected.privilege_name = before.privilege_name
+      WHERE expected.creator_name = 'postgres'
+        AND expected.schema_name IN ('public', 'storage')
     ) AS unexplained_removed_defaults
   ) THEN
     RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_UNAUDITED_DEFAULT_ACL_CHANGED';
   END IF;
   IF EXISTS (SELECT * FROM after_default_acl EXCEPT SELECT * FROM before_default_acl) THEN
     RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_DEFAULT_ACL_ADDED';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM after_default_acl
+    WHERE creator_name = 'postgres'
+      AND schema_name IN ('public', 'storage')
+      AND grantee_name IN ('anon', 'authenticated')
+      AND privilege_name IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
+  ) THEN
+    RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_POSTGRES_DEFAULTS_REMAIN';
+  END IF;
+  IF (
+    SELECT count(*) FROM after_default_acl
+    WHERE creator_name = 'supabase_admin'
+      AND schema_name IN ('public', 'graphql', 'graphql_public')
+      AND grantee_name IN ('anon', 'authenticated')
+      AND privilege_name IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
+  ) <> 24 THEN
+    RAISE EXCEPTION 'HOSTED_ACL_REHEARSAL_PROVIDER_DEFAULTS_CHANGED';
   END IF;
   IF EXISTS (SELECT * FROM before_other_role_acl EXCEPT SELECT * FROM after_other_role_acl)
      OR EXISTS (SELECT * FROM after_other_role_acl EXCEPT SELECT * FROM before_other_role_acl) THEN
@@ -319,7 +326,5 @@ END;
 $$;
 
 DO $$ BEGIN
-  RAISE NOTICE 'HOSTED_ACL_REMEDIATION_POSTGRES17_REHEARSAL_PASS';
+  RAISE NOTICE 'HOSTED_ACL_POSTGRES17_NON_SUPERUSER_REHEARSAL_PASS provider_defaults_preserved=24';
 END $$;
-
-ROLLBACK;

@@ -13,7 +13,10 @@ if ! command -v grep >/dev/null 2>&1; then
   echo "ERROR: Required pending-migration safety scanner (grep) is unavailable." >&2
   exit 2
 fi
-pending_migrations="$(find "$project_root/supabase/migrations-pending" -maxdepth 1 -type f -name '*.sql' -print | sort)" || {
+pending_migrations="$(find \
+  "$project_root/supabase/migrations-pending" \
+  "$project_root/supabase/migrations-pending-provider" \
+  -type f -name '*.sql' -print 2>/dev/null | sort)" || {
   echo "ERROR: Could not inventory pending SQL migrations." >&2
   exit 2
 }
