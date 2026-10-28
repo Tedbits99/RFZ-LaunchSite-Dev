@@ -143,6 +143,11 @@ jobs:
           set -euo pipefail
           [[ "$(sed -n 's/^project_id = "\([^"]*\)"$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")" == runfazone-pr82-isolated-auth ]]
           [[ ! -e "$RFZ_STACK_ROOT/supabase/.temp/project-ref" ]]
+          refresh_reuse_interval="$(sed -n 's/^refresh_token_reuse_interval = \([0-9][0-9]*\)$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")"
+          [[ "$refresh_reuse_interval" == 10 ]] || {
+            echo 'Disposable Auth refresh-token reuse grace does not match the reviewed 10-second test policy.' >&2
+            exit 1
+          }
           cli_log="$RUNNER_TEMP/rfz-pr82-cli-${E2E_WALLET_SCHEMA_MODE}.log"
           trap 'rm -f "$cli_log"' EXIT
           report_sanitized_cli_failure() {

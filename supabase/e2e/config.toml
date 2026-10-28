@@ -37,7 +37,10 @@ enable_signup = true
 enable_anonymous_sign_ins = false
 enable_manual_linking = false
 minimum_password_length = 12
-refresh_token_reuse_interval = 0
+# Match GoTrue's standard grace for concurrent refresh requests. A zero-second
+# window makes the middleware and downstream SSR client invalidate one another
+# when a browser reload triggers multiple requests at access-token expiry.
+refresh_token_reuse_interval = 10
 
 [auth.rate_limit]
 # Supabase's CLI default is 2 emails/hour, too low for the synthetic signup,
