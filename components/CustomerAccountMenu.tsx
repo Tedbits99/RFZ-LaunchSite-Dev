@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, CircleUserRound, LogOut, Package, Search, Settings, WalletCards } from 'lucide-react';
+import CustomerWalletBalance from '@/components/CustomerWalletBalance';
 
 type Account = { display_name: string; email: string };
 type AccountState = 'checking' | 'anonymous' | 'authenticated' | 'unavailable';
@@ -60,6 +61,12 @@ export default function CustomerAccountMenu({ compact = false, compactOnMobile =
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
+
+  useEffect(() => {
+    const closeAccountMenu = () => setOpen(false);
+    window.addEventListener('rfz:wallet-popover-open', closeAccountMenu);
+    return () => window.removeEventListener('rfz:wallet-popover-open', closeAccountMenu);
+  }, []);
 
   useEffect(() => {
     setOpen(false);
@@ -130,22 +137,29 @@ export default function CustomerAccountMenu({ compact = false, compactOnMobile =
     .map((part) => part[0]?.toUpperCase())
     .join('') || 'P';
   return (
-    <div ref={root} className="relative">
-      <button ref={trigger} type="button" aria-controls={open ? menuId : undefined} aria-expanded={open} aria-label={`Account menu for ${account.display_name || account.email}`} title="Open account menu" onClick={() => setOpen((value) => !value)} className={`inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#253451] text-xs text-slate-200 hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${compactOnMobile ? 'size-10 justify-center p-1 sm:size-auto sm:px-3 sm:py-0' : 'px-3'}`}>
-        <span className="grid size-6 place-items-center rounded-full bg-cyan-400/15 font-semibold text-cyan-200" aria-hidden="true">{initials}</span>
-        <span className={`${compact ? 'max-w-32' : 'max-w-36'} truncate ${compactOnMobile ? 'hidden sm:inline' : ''}`}>{account.display_name || 'My account'}</span>
-        <ChevronDown size={14} aria-hidden="true" className={compactOnMobile ? 'hidden sm:inline' : undefined} />
-      </button>
-      {open ? <nav id={menuId} aria-label="Customer account menu" className={`absolute right-0 z-50 mt-2 w-60 rounded-xl border border-[#20304b] bg-[#080f20] p-2 shadow-2xl ${compact ? 'left-0 right-auto' : ''}`}>
-        <p className="truncate px-3 py-2 text-xs text-slate-500">{account.email}</p>
-        <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account"><CircleUserRound size={16} />My Account</Link>
-        <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/orders"><Package size={16} />My Orders</Link>
-        <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/wallet"><WalletCards size={16} />RF Coins Wallet</Link>
-        <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/profile"><Settings size={16} />Profile &amp; Settings</Link>
-        <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/track-order"><Search size={16} />Track an order</Link>
-        {error ? <p role="alert" className="px-3 py-2 text-xs text-rose-300">{error}</p> : null}
-        <button type="button" disabled={busy} onClick={() => void signOut()} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm text-rose-200 hover:bg-rose-400/10 disabled:opacity-60"><LogOut size={16} />{busy ? 'Signing out…' : 'Sign out'}</button>
-      </nav> : null}
+    <div ref={root} className="relative flex shrink-0 items-center gap-1.5 sm:gap-2">
+      <CustomerWalletBalance authenticated compact={compactOnMobile} />
+      <div className="relative">
+        <button ref={trigger} type="button" aria-controls={open ? menuId : undefined} aria-expanded={open} aria-label={`Account menu for ${account.display_name || account.email}`} title="Open account menu" onClick={() => {
+          const nextOpen = !open;
+          if (nextOpen) window.dispatchEvent(new Event('rfz:account-menu-open'));
+          setOpen(nextOpen);
+        }} className={`inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#253451] text-xs text-slate-200 hover:border-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${compactOnMobile ? 'size-10 justify-center p-1 sm:size-auto sm:px-3 sm:py-0' : 'px-3'}`}>
+          <span className="grid size-6 place-items-center rounded-full bg-cyan-400/15 font-semibold text-cyan-200" aria-hidden="true">{initials}</span>
+          <span className={`${compact ? 'max-w-32' : 'max-w-36'} truncate ${compactOnMobile ? 'hidden sm:inline' : ''}`}>{account.display_name || 'My account'}</span>
+          <ChevronDown size={14} aria-hidden="true" className={compactOnMobile ? 'hidden sm:inline' : undefined} />
+        </button>
+        {open ? <nav id={menuId} aria-label="Customer account menu" className={`absolute right-0 z-50 mt-2 w-60 rounded-xl border border-[#20304b] bg-[#080f20] p-2 shadow-2xl ${compact ? 'left-0 right-auto' : ''}`}>
+          <p className="truncate px-3 py-2 text-xs text-slate-500">{account.email}</p>
+          <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account"><CircleUserRound size={16} />My Account</Link>
+          <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/orders"><Package size={16} />My Orders</Link>
+          <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/wallet"><WalletCards size={16} />RF Coins Wallet</Link>
+          <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/account/profile"><Settings size={16} />Profile &amp; Settings</Link>
+          <Link onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-slate-200 hover:bg-[#13213a]" href="/track-order"><Search size={16} />Track an order</Link>
+          {error ? <p role="alert" className="px-3 py-2 text-xs text-rose-300">{error}</p> : null}
+          <button type="button" disabled={busy} onClick={() => void signOut()} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm text-rose-200 hover:bg-rose-400/10 disabled:opacity-60"><LogOut size={16} />{busy ? 'Signing out…' : 'Sign out'}</button>
+        </nav> : null}
+      </div>
     </div>
   );
 }

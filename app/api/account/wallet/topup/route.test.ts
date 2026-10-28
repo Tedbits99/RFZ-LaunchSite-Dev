@@ -62,16 +62,12 @@ describe('POST /api/account/wallet/topup', () => {
     vi.stubGlobal('fetch', mocks.edgeFetch);
   });
 
-  it.each([
-    ['wallet disabled', { enabled: false, topups_enabled: false }],
-    ['funding disabled', { enabled: true, topups_enabled: false }],
-  ])('does not call the payment Edge Function when %s', async (_label, settings) => {
-    mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: settings, error: null });
-
+  it('keeps the server payment path locked even if the database flags are enabled', async () => {
     const response = await POST(request());
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: 'RF Coins payments are unavailable.' });
+    expect(await response.json()).toEqual({ error: 'RF Coins funding is not available yet.' });
+    expect(mocks.settingsMaybeSingle).not.toHaveBeenCalled();
     expect(mocks.edgeFetch).not.toHaveBeenCalled();
   });
 
@@ -94,13 +90,10 @@ describe('POST /api/account/wallet/topup', () => {
     expect(mocks.edgeFetch).not.toHaveBeenCalled();
   });
 
-  it('forwards only when the server-side wallet and top-up flags are explicitly enabled', async () => {
+  it('does not forward a customer request to the payment Edge Function before release approval', async () => {
     const response = await POST(request());
 
-    expect(response.status).toBe(200);
-    expect(mocks.edgeFetch).toHaveBeenCalledOnce();
-    expect(String(mocks.edgeFetch.mock.calls[0][0])).toBe(
-      'https://ketdhcmwowzztcdlmris.supabase.co/functions/v1/create-coin-topup-payment',
-    );
+    expect(response.status).toBe(503);
+    expect(mocks.edgeFetch).not.toHaveBeenCalled();
   });
 });

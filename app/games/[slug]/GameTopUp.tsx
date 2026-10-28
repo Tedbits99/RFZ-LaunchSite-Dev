@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { PAYMENT_METHODS, paymentMethodLabel, type PaymentMethodKey } from '@/lib/paymentMethods';
 import { formatCoins } from '@/lib/rfCoins';
 import { firstMissingTopUpField } from '@/lib/topUpValidation';
@@ -8,7 +9,9 @@ import { ArrowLeft, BadgeCheck, ChevronDown, CircleHelp, CreditCard, Download, I
 
 import { createPortal } from 'react-dom';
 import SiteFooter from '@/components/SiteFooter';
+import CustomerAccountMenu from '@/components/CustomerAccountMenu';
 import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets';
+import { isWalletTopupReminderSnoozed, shouldShowWalletTopupReminder, WALLET_TOPUP_REMINDER_STORAGE_KEY, walletTopupReminderSnoozeUntil } from '@/lib/walletTopupReminder';
 
 type Game = { id: string; slug: string; name: string; description: string; region: string; currency: string; banner_url?: string | null; logo_url?: string | null };
 type Field = { id: string; label: string; field_key: string; placeholder: string; help_text: string; is_required: boolean };
@@ -55,15 +58,26 @@ function gameBadge(name: string): string {
 
 export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], paymentMethodsConfigured = false, bannerUrl = null, coinPaymentEnabled = false }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; paymentMethodsConfigured?: boolean; bannerUrl?: string | null; coinPaymentEnabled?: boolean }) {
   const [coinWallet, setCoinWallet] = useState<{ balance: number } | null>(null);
+  const [walletTopupsAvailable, setWalletTopupsAvailable] = useState(false);
+  const [walletReminderSnoozed, setWalletReminderSnoozed] = useState(false);
 
   useEffect(() => {
+    try {
+      setWalletReminderSnoozed(isWalletTopupReminderSnoozed(window.localStorage.getItem(WALLET_TOPUP_REMINDER_STORAGE_KEY)));
+    } catch {
+      setWalletReminderSnoozed(false);
+    }
     if (!coinPaymentEnabled) return;
     // Load the wallet balance only when the server has enabled coin payment.
     void (async () => {
       try {
         const res = await fetch('/api/account/wallet', { cache: 'no-store' });
-        const data = await res.json().catch(() => null) as { wallet?: { balance_coins?: number } | null } | null;
-        if (res.ok && data?.wallet) setCoinWallet({ balance: Number(data.wallet.balance_coins || 0) });
+        const data = await res.json().catch(() => null) as { wallet?: { balance_coins?: unknown } | null; walletStatus?: string; enabled?: boolean; spendingEnabled?: boolean; topupsEnabled?: boolean; packages?: unknown[] } | null;
+        const balance = data?.wallet?.balance_coins;
+        if (res.ok && data?.walletStatus === 'ready' && data.enabled === true && data.spendingEnabled === true && typeof balance === 'number' && Number.isSafeInteger(balance) && balance >= 0) {
+          setCoinWallet({ balance });
+          setWalletTopupsAvailable(data.topupsEnabled === true && Array.isArray(data.packages) && data.packages.length > 0);
+        }
       } catch {
         setCoinWallet(null);
       }
@@ -173,12 +187,12 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
       key: 'rf_coin_wallet',
       name: 'RF Coins Wallet',
       detail: coinWallet && coinsNeeded
-        ? `${formatCoins(coinWallet.balance)} RF verfügbar · Kosten: ${formatCoins(coinsNeeded)} RF · Danach: ${formatCoins(Math.max(0, coinWallet.balance - coinsNeeded))} RF`
-        : 'Bezahlen Sie vollständig mit Ihrem RF-Coins-Guthaben',
+        ? `${formatCoins(coinWallet.balance)} RF balance · Cost: ${formatCoins(coinsNeeded)} RF · After purchase: ${formatCoins(Math.max(0, coinWallet.balance - coinsNeeded))} RF`
+        : 'Sign in and load your wallet balance before using RF Coins.',
       className: 'from-[#b45309] to-[#92400e]',
       logo_url: null as string | null,
     };
-    const insufficient = Boolean(coinWallet && coinsNeeded && coinWallet.balance < coinsNeeded);
+    const insufficient = !coinWallet || !coinsNeeded || coinWallet.balance < coinsNeeded;
     return [...base, { ...coinMethod, insufficient } as typeof base[number] & { insufficient?: boolean }];
   }, [dbPaymentMethods, paymentMethodsConfigured, coinPaymentEnabled, coinWallet, selectedPackage]);
 
@@ -187,7 +201,22 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
   const coinPaymentSelected = paymentMethod === 'rf_coin_wallet';
   const coinBalanceSufficient = !coinPaymentSelected || Boolean(
     coinWallet && selectedPackage && coinWallet.balance >= Math.ceil(selectedPackage.price_cents / 100));
+  const coinShortfall = coinPaymentSelected && coinWallet && selectedPackage
+    ? Math.max(0, Math.ceil(selectedPackage.price_cents / 100) - coinWallet.balance)
+    : 0;
+  const showWalletTopupReminder = shouldShowWalletTopupReminder({
+    fundingAvailable: walletTopupsAvailable,
+    walletOptionSelected: coinPaymentSelected,
+    balance: coinWallet?.balance ?? null,
+    requiredCoins: selectedPackage ? Math.ceil(selectedPackage.price_cents / 100) : null,
+    snoozed: walletReminderSnoozed,
+  });
   const isReady = Boolean(verified && selectedPackage && paymentMethod && emailValid && coinBalanceSufficient);
+
+  const snoozeWalletTopupReminder = () => {
+    try { window.localStorage.setItem(WALLET_TOPUP_REMINDER_STORAGE_KEY, walletTopupReminderSnoozeUntil()); } catch { /* The in-memory dismissal still prevents repeats on this page. */ }
+    setWalletReminderSnoozed(true);
+  };
 
   const subtotalCents = selectedPackage?.price_cents ?? 0;
   const finalCents = voucher ? voucher.total : subtotalCents;
@@ -302,6 +331,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
       }
       setShowReview(false);
       if (coinPaymentSelected) {
+        window.dispatchEvent(new Event('rfz:wallet-updated'));
         setQrModal({
           reference: data.reference,
           totalCents: data.totalCents ?? finalCents,
@@ -351,7 +381,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
   };
 
   return <main className="rfz-topup-page min-h-screen bg-[#030718] text-slate-100">
-    <header className="sticky top-0 z-30 border-b border-[#14203a] bg-[#030718]/95 backdrop-blur-xl"><div className="mx-auto flex max-w-[760px] items-center justify-between px-4 py-4"><a href="/" className="inline-flex items-center gap-2 text-xs text-slate-300 transition hover:text-cyan-300"><ArrowLeft size={15} /> Back to games</a><span className="font-display text-sm font-bold">Run<span className="text-cyan-300">Fazone</span></span><a href="/track-order" className="text-xs text-slate-400 hover:text-cyan-300">Track order</a></div></header>
+    <header className="sticky top-0 z-30 border-b border-[#14203a] bg-[#030718]/95 backdrop-blur-xl"><div className="mx-auto flex max-w-[760px] items-center justify-between gap-2 px-3 py-3 sm:px-4 sm:py-4"><a href="/" className="inline-flex min-h-10 shrink-0 items-center gap-1 text-xs text-slate-300 transition hover:text-cyan-300"><ArrowLeft size={15} /><span>Games</span></a><span className="font-display hidden text-sm font-bold sm:inline">Run<span className="text-cyan-300">Fazone</span></span><div className="flex shrink-0 items-center gap-2"><a href="/track-order" className="hidden text-xs text-slate-400 hover:text-cyan-300 sm:inline">Track order</a><CustomerAccountMenu compactOnMobile /></div></div></header>
 
     <div className="mx-auto max-w-[760px] px-4 pb-28 pt-5">
       <section className="relative overflow-hidden rounded-2xl border border-[#1c3855] bg-gradient-to-br from-[#0d3049] via-[#10182e] to-[#230d32] shadow-[inset_0_0_80px_rgba(16,156,214,.12)]" style={bannerAspect ? { aspectRatio: String(bannerAspect) } : { minHeight: '280px' }}>
@@ -367,6 +397,8 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
       <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Packages</h2><p className="mt-1 text-xs text-slate-500">Choose one package to continue</p></div>{packages.length === 0 ? <div role="status" className="mt-5 rounded-xl border border-dashed border-[#29405f] bg-[#080f20] p-6 text-center"><PackageOpen size={24} className="mx-auto text-slate-500" /><p className="mt-2 text-sm font-semibold text-slate-300">Packages temporarily unavailable</p><p className="mt-1 text-xs leading-5 text-slate-500">Please check back shortly. No order can be created until a valid package is available.</p></div> : <div role="radiogroup" aria-label={`${game.name} packages`}>{specialPackages.length > 0 && <div className="mt-5"><div className="mb-3 flex items-center gap-2 text-xs font-semibold text-violet-200"><Sparkles size={14} className="text-violet-300" /> Special Item</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{specialPackages.map(packageCard)}</div></div>}<div className="mt-6"><div className="mb-3 flex items-center gap-2 text-xs font-semibold text-cyan-200"><Zap size={14} className="text-cyan-300" /> Packages</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{diamondPackages.map(packageCard)}</div>{diamondPackages.length === 0 && <p className="text-xs text-slate-500">No standard packages are currently available.</p>}</div></div>}</section>
 
       <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Payment Methods</h2><p className="mt-1 text-xs text-slate-500">Choose your preferred payment method</p></div>{resolvedMethods.length === 0 ? <div role="status" className="mt-5 rounded-xl border border-dashed border-[#29405f] bg-[#080f20] p-5 text-center text-xs text-slate-500">No payment methods are currently available. Please check back shortly.</div> : <div className="mt-5 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Payment methods">{resolvedMethods.map((method) => <label key={method.key} className={`flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border p-3 text-left transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/40 ${paymentMethod === method.key ? 'border-cyan-300 bg-cyan-400/10 shadow-[0_0_18px_rgba(34,211,238,.1)]' : 'border-[#20304b] bg-[#080f20] hover:border-[#3d5c80]'}`}><input type="radio" name="payment-method" value={method.key} checked={paymentMethod === method.key} onChange={() => setPaymentMethod(method.key)} disabled={Boolean('insufficient' in method && method.insufficient)} aria-label={method.name} className="sr-only" /><span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-gradient-to-br ${method.className} text-[10px] font-bold text-white`}>{method.logo_url ? <img src={method.logo_url} alt="" className="h-full w-full object-contain bg-[#0e1a33]" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : method.key === 'gcash' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698010/gcash1_icon_f4qiy0.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'maya' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698009/maya1_icon_jlw6zs.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'coinsph' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1760245657/coinsph_icon_znsgeu.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.name[0]}</span><span><span className="block text-xs font-semibold">{method.name}</span><span className="block text-[10px] text-slate-500">{method.detail}</span></span>{paymentMethod === method.key && <BadgeCheck size={15} className="ml-auto text-cyan-300" />}</label>)}</div>}</section>
+
+      {showWalletTopupReminder ? <aside role="status" aria-live="polite" className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-300/25 bg-amber-300/5 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-amber-100">You need {formatCoins(coinShortfall)} more RF Coins</p><p className="mt-1 text-xs leading-5 text-slate-400">Add funds to your wallet before choosing RF Coins for this order.</p></div><div className="flex shrink-0 items-center gap-3"><Link href="/account/wallet#add-funds" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-3 text-xs font-semibold text-white">Add Funds</Link><button type="button" onClick={snoozeWalletTopupReminder} className="min-h-10 rounded-lg px-2 text-xs text-slate-400 underline underline-offset-2 hover:text-slate-200">Remind me in 7 days</button></div></aside> : null}
 
       <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Order Tracking</h2><p className="mt-1 text-xs text-slate-500">Enter your email to track order</p></div><label className="mt-5 block"><span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-300"><Mail size={13} className="text-cyan-300" /> Email Address</span><input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setMessage(''); }} placeholder="Enter your email address" className="w-full rounded-xl border border-[#233653] bg-[#080f20] px-3.5 py-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-cyan-300" /></label><div className="mt-4 flex gap-2 rounded-xl border border-emerald-400/15 bg-emerald-400/5 p-3 text-[11px] leading-5 text-slate-400"><Info size={15} className="mt-0.5 shrink-0 text-emerald-300" /><p>Your order number and payment instructions will be sent to this email address.</p></div></section>
 

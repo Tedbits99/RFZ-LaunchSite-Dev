@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Coins, Loader2, RefreshCw, X, QrCode } from 'lucide-react';
 import { formatCoins, formatCoinPrice, type RfCoinPackage, type RfCoinLedgerEntry, type RfCoinWallet } from '@/lib/rfCoins';
 import { shouldLoadRfCoinLedger, type RfCoinWalletStatus } from '@/lib/rfCoinWalletStatus';
+import { isTopupStatus, TOPUP_STATUS_COPY, type TopupStatus } from '@/lib/walletTopupStatus';
 
 type WalletResponse = {
   wallet: RfCoinWallet | null;
@@ -16,7 +17,6 @@ type WalletResponse = {
 };
 
 type LedgerResponse = { entries?: RfCoinLedgerEntry[] };
-
 const KIND_LABELS: Record<string, { label: string; tone: string }> = {
   topup_purchase: { label: 'Purchased', tone: 'text-emerald-300' },
   order_payment: { label: 'Spent on order', tone: 'text-violet-300' },
@@ -36,7 +36,7 @@ export default function WalletClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedPackage, setSelectedPackage] = useState<RfCoinPackage | null>(null);
-  const [qr, setQr] = useState<{ topupId: string; qrImageUrl: string; amountCents: number; expiresAt: string } | null>(null);
+  const [qr, setQr] = useState<{ topupId: string; qrImageUrl: string; amountCents: number; expiresAt: string; status: TopupStatus } | null>(null);
   const [buying, setBuying] = useState(false);
   const [buyError, setBuyError] = useState('');
   const [ledgerError, setLedgerError] = useState('');
@@ -89,6 +89,40 @@ export default function WalletClient() {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    if (!qr || qr.status !== 'PENDING') return;
+    let active = true;
+    let checking = false;
+    const checkStatus = async () => {
+      if (!active || checking) return;
+      checking = true;
+      try {
+        const response = await fetch(`/api/account/wallet/topup/${encodeURIComponent(qr.topupId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null) as { topup?: { status?: unknown } } | null;
+        const nextStatus = payload?.topup?.status;
+        if (active && response.ok && isTopupStatus(nextStatus)) {
+          setQr((current) => current?.topupId === qr.topupId && current.status !== nextStatus
+            ? { ...current, status: nextStatus }
+            : current);
+          if (nextStatus === 'PAID') {
+            window.dispatchEvent(new Event('rfz:wallet-updated'));
+            void load();
+          }
+        }
+      } catch {
+        // Keep the last verified pending state; a failed status read is not a payment failure.
+      } finally {
+        checking = false;
+      }
+    };
+    void checkStatus();
+    const interval = window.setInterval(() => { void checkStatus(); }, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [load, qr]);
+
   const buy = async (pkg: RfCoinPackage) => {
     setSelectedPackage(pkg);
     setBuying(true);
@@ -104,7 +138,7 @@ export default function WalletClient() {
         setBuyError(data?.error || 'Could not start your coin purchase.');
         return;
       }
-      setQr({ topupId: data.topupId!, qrImageUrl: data.qrImageUrl, amountCents: data.amountCents!, expiresAt: data.expiresAt! });
+      setQr({ topupId: data.topupId!, qrImageUrl: data.qrImageUrl, amountCents: data.amountCents!, expiresAt: data.expiresAt!, status: 'PENDING' });
     } catch {
       setBuyError('Could not reach the server. Please try again.');
     } finally {
@@ -199,7 +233,7 @@ export default function WalletClient() {
       </div>
 
       {settings.topupsEnabled && packages.length > 0 && (
-        <div>
+        <div id="add-funds">
           <h2 className="font-display mb-3 text-lg font-bold">Buy RF Coins</h2>
           <div className="grid gap-3 sm:grid-cols-3">
             {packages.map((pkg) => (
@@ -227,20 +261,20 @@ export default function WalletClient() {
         <div className="rounded-2xl border border-cyan-400/30 bg-[#0a1225] p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="font-display flex items-center gap-2 text-sm font-semibold text-cyan-300"><QrCode size={16} /> Scan to Pay</h3>
-              <p className="mt-1 text-xs text-slate-400">
-                Scan with your banking or e-wallet app to pay {formatCoinPrice(qr.amountCents)}.
-                Coins are added automatically after payment is confirmed.
+              <h3 className={`font-display flex items-center gap-2 text-sm font-semibold ${TOPUP_STATUS_COPY[qr.status].tone}`}><QrCode size={16} /> {TOPUP_STATUS_COPY[qr.status].title}</h3>
+              <p role="status" aria-live="polite" className="mt-1 max-w-xl text-xs leading-5 text-slate-400">
+                {TOPUP_STATUS_COPY[qr.status].message}
+                {qr.status === 'PENDING' ? ` Scan with your banking or e-wallet app to pay ${formatCoinPrice(qr.amountCents)}.` : ''}
               </p>
             </div>
             <button type="button" onClick={closeQr} className="text-slate-500 hover:text-slate-300" aria-label="Close QR code">
               <X size={18} />
             </button>
           </div>
-          <div className="mt-4 flex justify-center">
-                        <img src={qr.qrImageUrl} alt="RF Coins payment QR code" className="h-64 w-64 rounded-lg bg-white p-2" />
-          </div>
-          <p className="mt-3 text-center text-xs text-slate-500">Expires {new Date(qr.expiresAt).toLocaleTimeString('en-PH')}</p>
+          {qr.status === 'PENDING' ? <>
+            <div className="mt-4 flex justify-center"><img src={qr.qrImageUrl} alt="RF Coins payment QR code" className="h-64 w-64 rounded-lg bg-white p-2" /></div>
+            <p className="mt-3 text-center text-xs text-slate-500">QR payment expires {new Date(qr.expiresAt).toLocaleTimeString('en-PH')} · Status refreshes automatically</p>
+          </> : null}
         </div>
       )}
 

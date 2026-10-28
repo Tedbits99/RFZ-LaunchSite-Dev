@@ -38,4 +38,15 @@ describe('PayMongo settlement fail-closed contract', () => {
     expect(topupSource).toContain('status: "pending",\n        provider_reference: intentId');
     expect(pendingCoinFunctions).toContain('RF_COIN_PROVIDER_REFERENCE_MISMATCH');
   });
+
+  it('locks the RF Coins PayMongo wallet-funding Edge Function before reading secrets or making provider calls', () => {
+    const releaseLock = topupSource.indexOf('const RF_COINS_FUNDING_RELEASE_ENABLED = false;');
+    const requestGate = topupSource.indexOf('if (!RF_COINS_FUNDING_RELEASE_ENABLED)');
+    const firstSecretRead = topupSource.indexOf('Deno.env.get("SUPABASE_URL")');
+    const providerCall = topupSource.indexOf('paymongoJson(PAYMONGO_SECRET');
+    expect(releaseLock).toBeGreaterThan(-1);
+    expect(requestGate).toBeGreaterThan(releaseLock);
+    expect(firstSecretRead).toBeGreaterThan(requestGate);
+    expect(providerCall).toBeGreaterThan(requestGate);
+  });
 });

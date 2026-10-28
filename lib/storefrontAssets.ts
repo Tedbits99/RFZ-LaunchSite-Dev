@@ -7,7 +7,7 @@
  * unavailable.
  */
 export const RFZ_PUBLIC_ASSETS = {
-  logo: 'https://res.cloudinary.com/dex5ykrfs/image/upload/v1792987471/file_00000000a3c082078081a735ed68ce28_tnzc5h.png',
+  logo: '/assets/runfazone/logo.webp',
   mlbbLogo: '/assets/runfazone/mlbb.webp',
   heroBanners: [
     '/assets/runfazone/banner-01.webp',

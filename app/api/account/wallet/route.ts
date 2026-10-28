@@ -3,6 +3,7 @@ import { adminSupabase } from '@/lib/supabaseAdmin';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { rfCoinErrorMessage } from '@/lib/rfCoins';
 import { isMissingRfCoinTable } from '@/lib/rfCoinSchema';
+import { RF_COINS_FUNDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 function unavailable(status: 'not_deployed' | 'not_configured' | 'disabled' | 'incomplete') {
   return NextResponse.json({
@@ -40,34 +41,52 @@ export async function GET() {
     const enabled = Boolean(settings?.enabled);
     if (!enabled) return unavailable(settings ? 'disabled' : 'not_configured');
 
-    const [walletRes, packagesRes] = await Promise.all([
-      session.client
-        .from('rf_coin_wallets')
-        .select('user_id, balance_coins, total_purchased_coins, total_spent_coins, total_manual_credited_coins, total_manual_debited_coins, total_reversed_coins')
-        .eq('user_id', session.user.id)
-        .maybeSingle(),
-      settings?.topups_enabled
-        ? session.client
-          .from('rf_coin_packages')
-          .select('id, name, coins, bonus_coins, price_cents, is_active, sort_order')
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true })
-        : Promise.resolve({ data: [], error: null }),
-    ]);
+    let walletRes = await session.client
+      .from('rf_coin_wallets')
+      .select('user_id, balance_coins, total_purchased_coins, total_spent_coins, total_manual_credited_coins, total_manual_debited_coins, total_reversed_coins')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
 
     if (walletRes.error) {
       if (isMissingRfCoinTable(walletRes.error, 'rf_coin_wallets')) return unavailable('incomplete');
       return NextResponse.json({ error: rfCoinErrorMessage(null, 'Could not load your wallet.') }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
     }
-    if (settings?.topups_enabled && packagesRes.error) {
+
+    if (!walletRes.data) {
+      // Create a real, zero-balance wallet only for this verified active
+      // customer. The SECURITY DEFINER RPC checks auth.uid() = p_user_id;
+      // direct browser INSERT remains revoked and the follow-up read stays
+      // under the customer's own RLS session.
+      const { error: initializeError } = await session.client.rpc('rf_coin_get_or_create_wallet', {
+        p_user_id: session.user.id,
+      });
+      if (initializeError) return unavailable('incomplete');
+      walletRes = await session.client
+        .from('rf_coin_wallets')
+        .select('user_id, balance_coins, total_purchased_coins, total_spent_coins, total_manual_credited_coins, total_manual_debited_coins, total_reversed_coins')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+      if (walletRes.error || !walletRes.data) return unavailable('incomplete');
+    }
+
+    const topupsAvailable = RF_COINS_FUNDING_RELEASE_ENABLED && enabled && Boolean(settings?.topups_enabled);
+    const packagesRes = topupsAvailable
+      ? await session.client
+        .from('rf_coin_packages')
+        .select('id, name, coins, bonus_coins, price_cents, is_active, sort_order')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+      : { data: [], error: null };
+
+    if (topupsAvailable && packagesRes.error) {
       return NextResponse.json({ error: 'Could not load available coin packages.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
     }
 
     return NextResponse.json({
       wallet: walletRes.data || null,
       enabled,
-      packages: settings?.topups_enabled ? (packagesRes.data || []) : [],
-      topupsEnabled: enabled && Boolean(settings?.topups_enabled),
+      packages: topupsAvailable ? (packagesRes.data || []) : [],
+      topupsEnabled: topupsAvailable,
       spendingEnabled: enabled && Boolean(settings?.spending_enabled),
       centavosPerCoin: settings?.centavos_per_coin ?? 100,
       walletStatus: 'ready',

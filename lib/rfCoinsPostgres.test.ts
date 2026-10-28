@@ -502,6 +502,7 @@ describe('rf coins real SQL behavior', () => {
       grants.some((g) => g.proname === fn && g.grantee === role && g.privilege_type === priv);
 
     // Customer-callable + admin RPCs → authenticated; webhook RPCs → service_role.
+    expect(has('rf_coin_get_or_create_wallet', 'authenticated')).toBe(true);
     expect(has('rf_coin_create_topup', 'authenticated')).toBe(true);
     // Legacy direct settlement is locked down: only the atomic wrapper is
     // customer-callable, so settlement can never bypass the handoff enqueue.
@@ -514,14 +515,42 @@ describe('rf coins real SQL behavior', () => {
     expect(has('rf_coin_credit_paid_topup', 'service_role')).toBe(true);
     expect(has('rf_coin_mark_topup_status', 'service_role')).toBe(true);
     expect(has('rf_coin_release_order_payment', 'service_role')).toBe(true);
-    // Nothing granted to PUBLIC; helpers not granted at all.
+    // Nothing is granted to PUBLIC; only the caller-scoped wallet initializer
+    // is exposed to authenticated customers, and internal helpers stay private.
     for (const g of grants) expect(g.grantee).not.toBe('PUBLIC');
     expect(has('rf_coin_assert_super_admin', 'authenticated')).toBe(false);
     expect(has('rf_coin_assert_super_admin', 'service_role')).toBe(false);
+    expect(has('rf_coin_get_or_create_wallet', 'anon')).toBe(false);
+    expect(has('rf_coin_get_or_create_wallet', 'service_role')).toBe(false);
     expect(has('rf_coin_get_settings', 'authenticated')).toBe(false);
     // Legacy settlement is not executable by any client or service identity.
     expect(has('rf_coin_settle_order_payment', 'anon')).toBe(false);
     expect(has('rf_coin_settle_order_payment', 'service_role')).toBe(false);
+  });
+
+  it('initializes only the authenticated caller wallet at a genuine zero balance', async () => {
+    const INITIALIZED_CUSTOMER = '77777777-7777-7777-7777-777777777701';
+    await sql(`INSERT INTO auth.users (id, email, email_confirmed_at) VALUES ($1, 'new-wallet@example.invalid', now())`, [INITIALIZED_CUSTOMER]);
+    await asRole('authenticated', INITIALIZED_CUSTOMER);
+    const initial = await sql<{ user_id: string; balance_coins: string }>(
+      'SELECT user_id, balance_coins FROM rf_coin_get_or_create_wallet($1)', [INITIALIZED_CUSTOMER],
+    );
+    expect(Number(initial[0].balance_coins)).toBe(0);
+    expect(initial[0].user_id).toBe(INITIALIZED_CUSTOMER);
+
+    const repeated = await sql<{ user_id: string; balance_coins: string }>(
+      'SELECT user_id, balance_coins FROM rf_coin_get_or_create_wallet($1)', [INITIALIZED_CUSTOMER],
+    );
+    expect(Number(repeated[0].balance_coins)).toBe(0);
+    expect(repeated[0].user_id).toBe(INITIALIZED_CUSTOMER);
+    await expect(sql('SELECT * FROM rf_coin_get_or_create_wallet($1)', [CUSTOMER2]))
+      .rejects.toThrow(/RF_COIN_FORBIDDEN/);
+    await resetRole();
+
+    await asRole('anon');
+    await expect(sql('SELECT * FROM rf_coin_get_or_create_wallet($1)', [CUSTOMER]))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
   });
 
   it('webhook RPCs are denied to authenticated even though granted roles differ', async () => {

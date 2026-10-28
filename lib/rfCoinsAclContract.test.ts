@@ -29,7 +29,6 @@ describe('canonical RF Coins ACL contract', () => {
     const lockedRevokes = [
       'rf_coin_assert_super_admin()',
       'rf_coin_get_settings()',
-      'rf_coin_get_or_create_wallet(uuid)',
       'rf_coin_credit_paid_topup(uuid, text)',
       'rf_coin_mark_topup_status(uuid, text, text)',
       'rf_coin_release_order_payment(uuid, text)',
@@ -51,6 +50,7 @@ describe('canonical RF Coins ACL contract', () => {
 
   it('grants only the intended authenticated and service-role entry points', () => {
     const grants = [
+      ['rf_coin_get_or_create_wallet(uuid)', 'authenticated'],
       ['rf_coin_create_topup(uuid, uuid)', 'authenticated'],
       ['rf_coin_settle_order_payment_and_enqueue(uuid, uuid)', 'authenticated'],
       ['rf_coin_request_adjustment(uuid, text, integer, text, text, text)', 'authenticated'],

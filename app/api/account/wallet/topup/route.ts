@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { RF_COINS_FUNDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 /*
   Thin proxy to the create-coin-topup-payment Edge Function, which holds the
@@ -19,6 +20,9 @@ export async function POST(req: NextRequest) {
   const session = await getActiveCustomerSessionForRequest(req);
   if (!session) {
     return NextResponse.json({ error: 'Sign in with a verified account to buy RF Coins.' }, { status: 401 });
+  }
+  if (!RF_COINS_FUNDING_RELEASE_ENABLED) {
+    return NextResponse.json({ error: 'RF Coins funding is not available yet.' }, { status: 503 });
   }
   if (!adminSupabase) {
     return NextResponse.json({ error: 'RF Coins payments are unavailable.' }, { status: 503 });

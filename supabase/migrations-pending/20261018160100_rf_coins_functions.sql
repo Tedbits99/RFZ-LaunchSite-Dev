@@ -15,7 +15,8 @@
      role SUPER_ADMIN. Raises RF_COIN_FORBIDDEN otherwise.
    - rf_coin_get_settings()        — internal settings reader (fail closed:
      raises RF_COIN_DISABLED if row missing or enabled=false).
-   - rf_coin_get_or_create_wallet(p_user_id) — idempotent wallet creation.
+   - rf_coin_get_or_create_wallet(p_user_id) — authenticated caller's own,
+     idempotent zero-balance wallet initialization (auth.uid() enforced).
    - rf_coin_create_topup(p_user_id, p_package_id) — validates master+topup
      flags and active package, snapshots coins/bonus/price, inserts a PENDING
      top-up, returns out_topup_id/out_coins/out_bonus/out_price_cents/out_error.
@@ -113,6 +114,12 @@ RETURNS rf_coin_wallets LANGUAGE plpgsql SECURITY DEFINER SET search_path = publ
 DECLARE
   w rf_coin_wallets;
 BEGIN
+  -- This narrowly scoped initializer is the only customer-callable wallet
+  -- mutation. It may create the caller's own zero-balance row, never another
+  -- customer's wallet. Table INSERT remains revoked from browser roles.
+  IF auth.uid() IS NULL OR p_user_id IS NULL OR p_user_id <> auth.uid() THEN
+    RAISE EXCEPTION 'RF_COIN_FORBIDDEN';
+  END IF;
   INSERT INTO rf_coin_wallets (user_id) VALUES (p_user_id)
   ON CONFLICT (user_id) DO NOTHING;
   SELECT * INTO w FROM rf_coin_wallets WHERE user_id = p_user_id;
@@ -1108,6 +1115,7 @@ REVOKE ALL ON FUNCTION rf_coin_claim_fulfillment_handoffs(integer, integer) FROM
 REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
 -- Customer-callable functions (identity checked against auth.uid() inside).
+GRANT EXECUTE ON FUNCTION rf_coin_get_or_create_wallet(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION rf_coin_create_topup(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) TO authenticated;
 

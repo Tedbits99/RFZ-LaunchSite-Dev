@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   walletMaybeSingle: vi.fn(),
   packagesOrder: vi.fn(),
   settingsMaybeSingle: vi.fn(),
+  walletInitRpc: vi.fn(),
 }));
 
 vi.mock('@/lib/customerSession', () => ({
@@ -31,7 +32,7 @@ function activeSession() {
   }));
   mocks.getActiveCustomerSession.mockResolvedValue({
     user: { id: 'customer-a' },
-    client: { from },
+    client: { from, rpc: mocks.walletInitRpc },
   });
 }
 
@@ -42,6 +43,7 @@ describe('GET /api/account/wallet', () => {
     mocks.walletMaybeSingle.mockResolvedValue({ data: { user_id: 'customer-a', balance_coins: 0 }, error: null });
     mocks.packagesOrder.mockResolvedValue({ data: [], error: null });
     mocks.settingsMaybeSingle.mockResolvedValue({ data: { enabled: false, topups_enabled: false, spending_enabled: false, centavos_per_coin: 100 }, error: null });
+    mocks.walletInitRpc.mockResolvedValue({ data: null, error: null });
   });
 
   it('returns explicit disabled state without exposing packages', async () => {
@@ -82,6 +84,31 @@ describe('GET /api/account/wallet', () => {
     expect(mocks.walletMaybeSingle).not.toHaveBeenCalled();
   });
 
+  it('initializes a real zero-balance wallet only through the caller-scoped RPC', async () => {
+    mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: { enabled: true, topups_enabled: false, spending_enabled: true, centavos_per_coin: 100 }, error: null });
+    mocks.walletMaybeSingle
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { user_id: 'customer-a', balance_coins: 0, total_purchased_coins: 0, total_spent_coins: 0 }, error: null });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ wallet: { user_id: 'customer-a', balance_coins: 0 }, enabled: true, walletStatus: 'ready' });
+    expect(mocks.walletInitRpc).toHaveBeenCalledWith('rf_coin_get_or_create_wallet', { p_user_id: 'customer-a' });
+    expect(mocks.walletMaybeSingle).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the wallet unavailable when safe caller-scoped initialization fails', async () => {
+    mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: { enabled: true, topups_enabled: true, spending_enabled: true, centavos_per_coin: 100 }, error: null });
+    mocks.walletMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    mocks.walletInitRpc.mockResolvedValueOnce({ data: null, error: { code: '42501' } });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ wallet: null, enabled: false, walletStatus: 'incomplete', topupsEnabled: false });
+  });
+
   it('fails closed if wallet settings exist but the wallet relation is missing', async () => {
     mocks.settingsMaybeSingle.mockResolvedValueOnce({
       data: { enabled: true, topups_enabled: false, spending_enabled: true, centavos_per_coin: 100 },
@@ -102,12 +129,18 @@ describe('GET /api/account/wallet', () => {
     });
   });
 
-  it('fails visibly if enabled coin packages cannot be read', async () => {
+  it('keeps Add Funds unavailable even if database flags and packages are enabled', async () => {
     mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: { enabled: true, topups_enabled: true, spending_enabled: true, centavos_per_coin: 100 }, error: null });
     mocks.packagesOrder.mockResolvedValueOnce({ data: null, error: { message: 'read failed' } });
     const response = await GET();
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: 'Could not load available coin packages.' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      enabled: true,
+      topupsEnabled: false,
+      packages: [],
+      wallet: { user_id: 'customer-a', balance_coins: 0 },
+    });
+    expect(mocks.packagesOrder).not.toHaveBeenCalled();
   });
 
   it('does not query privileged wallet data without an active customer session', async () => {

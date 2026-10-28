@@ -33,6 +33,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+// This legacy PayMongo wallet-funding path is release-locked. Product
+// checkout uses a separate endpoint and is not affected. Do not enable this
+// path until the approved wallet funding architecture and hosted financial
+// acceptance gates are complete.
+const RF_COINS_FUNDING_RELEASE_ENABLED = false;
+
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
     status,
@@ -84,6 +90,10 @@ Deno.serve(async (req: Request) => {
   try {
     if (req.method !== "POST") {
       return json({ error: "Method not allowed." }, 405);
+    }
+
+    if (!RF_COINS_FUNDING_RELEASE_ENABLED) {
+      return json({ error: "RF Coins funding is not available yet." }, 503);
     }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
