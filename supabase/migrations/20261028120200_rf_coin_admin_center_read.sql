@@ -1,7 +1,7 @@
 -- RF Coins Admin Center: bounded, role-checked reporting surface.
--- STATUS: PENDING. This migration has not been applied to the hosted project.
--- Requires 20261028120000_rf_coins_schema.sql and
--- 20261028120100_rf_coins_functions.sql.
+-- Deploys through the canonical Supabase migration pipeline after the exact PR
+-- containing this migration is reviewed and approved. Requires the preceding
+-- RF Coins schema and functions migrations in timestamp order.
 
 CREATE INDEX IF NOT EXISTS rf_coin_ledger_created_kind_idx
   ON public.rf_coin_ledger (created_at DESC, kind);

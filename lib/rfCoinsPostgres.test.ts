@@ -1,7 +1,7 @@
 /*
-  Real PostgreSQL execution tests for the staged RF Coins migrations.
+  Real PostgreSQL execution tests for the RF Coins migrations proposed by PR #82.
 
-  Runs both PENDING migration files inside an in-process PostgreSQL (PGlite),
+  Runs the three candidate migration files inside an in-process PostgreSQL (PGlite),
   then exercises the actual RPC behavior under real roles: settlement,
   double-payment protection, cross-method rejection, top-up crediting,
   duplicate webhook idempotency, partial refund reversal without double
@@ -14,9 +14,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 const projectRoot = process.cwd();
-const schemaSql = readFileSync(join(projectRoot, 'supabase/migrations-pending/20261028120000_rf_coins_schema.sql'), 'utf8');
-const functionsSql = readFileSync(join(projectRoot, 'supabase/migrations-pending/20261028120100_rf_coins_functions.sql'), 'utf8');
-const adminCenterSql = readFileSync(join(projectRoot, 'supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql'), 'utf8');
+const schemaSql = readFileSync(join(projectRoot, 'supabase/migrations/20261028120000_rf_coins_schema.sql'), 'utf8');
+const functionsSql = readFileSync(join(projectRoot, 'supabase/migrations/20261028120100_rf_coins_functions.sql'), 'utf8');
+const adminCenterSql = readFileSync(join(projectRoot, 'supabase/migrations/20261028120200_rf_coin_admin_center_read.sql'), 'utf8');
 
 let db: PGlite;
 

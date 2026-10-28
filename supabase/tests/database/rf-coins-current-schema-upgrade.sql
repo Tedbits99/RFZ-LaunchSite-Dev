@@ -1,6 +1,8 @@
 -- Read-only post-migration assertions executed only against the isolated local
 -- Supabase project after replaying the canonical active migrations and the
 -- three exact RF Coins candidate migrations. No hosted database is targeted.
+\set ON_ERROR_STOP on
+SELECT set_config('rfz.expected_migration_count', :'expected_migration_count', false);
 DO $$
 DECLARE
   v_order_nullable boolean;
@@ -21,10 +23,20 @@ DECLARE
   v_privilege text;
   v_relation text;
   v_select_expected boolean;
+  v_expected_migration_count integer;
 BEGIN
   IF current_setting('server_version_num')::integer < 170000
      OR current_setting('server_version_num')::integer >= 180000 THEN
     RAISE EXCEPTION 'RF_COINS_POSTGRESQL_17_REQUIRED';
+  END IF;
+
+  v_expected_migration_count := NULLIF(
+    current_setting('rfz.expected_migration_count', true), ''
+  )::integer;
+  IF v_expected_migration_count IS NULL
+     OR (SELECT count(*) FROM supabase_migrations.schema_migrations)
+        <> v_expected_migration_count THEN
+    RAISE EXCEPTION 'RF_COINS_FINAL_MIGRATION_COUNT_INVALID';
   END IF;
 
   IF to_regclass('public.payment_transactions') IS NULL

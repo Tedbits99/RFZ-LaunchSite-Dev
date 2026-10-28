@@ -1,5 +1,6 @@
--- STATUS: PENDING — NOT applied to the live database. Requires separate owner approval.
--- Apply via the Supabase migration tool with filename 20261028120100_rf_coins_functions.sql
+-- Deploys through the canonical Supabase migration pipeline after the exact PR
+-- containing this migration is reviewed and approved. Funding and spending
+-- release locks remain hard-coded false pending separate financial approval.
 /*
 # RF Coins — Secured Functions (Phase 3)
 

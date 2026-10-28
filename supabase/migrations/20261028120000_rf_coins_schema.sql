@@ -1,5 +1,6 @@
--- STATUS: PENDING — NOT applied to the live database. Requires separate owner approval.
--- Apply via the Supabase migration tool with filename 20261028120000_rf_coins_schema.sql
+-- Deploys through the canonical Supabase migration pipeline after the exact PR
+-- containing this migration is reviewed and approved. All financial release
+-- switches are false; schema installation alone does not enable wallet use.
 /*
 # RF Coins — Schema (Phase 3, feature DISABLED by default)
 
@@ -322,7 +323,7 @@ INSERT INTO public.payment_config
 VALUES
   ('rf_coin_wallet', 'RF Coins Wallet', 'rf_coin_wallet', false, 'rf_coin_wallet', 'rf_coins',
    'Pay the full order total with your RF Coins wallet balance.', 50)
-ON CONFLICT (method_key) DO NOTHING;
+ON CONFLICT (method_key) DO UPDATE SET is_enabled = false;
 
 -- ============ RLS ============
 ALTER TABLE rf_coin_settings ENABLE ROW LEVEL SECURITY;

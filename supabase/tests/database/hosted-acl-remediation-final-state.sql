@@ -37,11 +37,41 @@ BEGIN
   IF EXISTS (
     SELECT 1
     FROM pg_default_acl AS d
+    JOIN pg_roles AS creator ON creator.oid = d.defaclrole
+    JOIN pg_namespace AS n ON n.oid = d.defaclnamespace
     CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl
-    WHERE acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
+    WHERE creator.rolname = 'postgres'
+      AND n.nspname IN ('public', 'storage')
+      AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
       AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
   ) THEN
-    RAISE EXCEPTION 'HOSTED_ACL_FINAL_BROWSER_DEFAULTS_REMAIN';
+    RAISE EXCEPTION 'HOSTED_ACL_FINAL_POSTGRES_DEFAULTS_REMAIN';
+  END IF;
+  IF (
+    SELECT count(*)
+    FROM pg_default_acl AS d
+    JOIN pg_roles AS creator ON creator.oid = d.defaclrole
+    JOIN pg_namespace AS n ON n.oid = d.defaclnamespace
+    CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl
+    WHERE creator.rolname = 'supabase_admin'
+      AND n.nspname IN ('public', 'graphql', 'graphql_public')
+      AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
+      AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
+  ) <> 24 THEN
+    RAISE EXCEPTION 'HOSTED_ACL_FINAL_PROVIDER_DEFAULTS_NOT_PRESERVED';
+  END IF;
+  IF (
+    SELECT count(*)
+    FROM pg_default_acl AS d
+    JOIN pg_roles AS creator ON creator.oid = d.defaclrole
+    JOIN pg_namespace AS n ON n.oid = d.defaclnamespace
+    CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl
+    WHERE creator.rolname = 'supabase_admin'
+      AND n.nspname = 'supabase_functions'
+      AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
+      AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
+  ) <> 8 THEN
+    RAISE EXCEPTION 'HOSTED_ACL_FINAL_SUPABASE_FUNCTIONS_DEFAULTS_NOT_PRESERVED';
   END IF;
 
   IF has_table_privilege('anon', 'public.admins', 'SELECT')
@@ -79,6 +109,6 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'HOSTED_ACL_FINAL_PAYMENT_ADMIN_POLICY_MISSING';
   END IF;
-  RAISE NOTICE 'HOSTED_ACL_POSTGRES17_FINAL_STATE_PASS direct_acl=0 postgres_defaults=0 provider_defaults=0';
+  RAISE NOTICE 'HOSTED_ACL_POSTGRES17_FINAL_STATE_PASS direct_acl=0 postgres_defaults=0 provider_audited_defaults_preserved=24 managed_supabase_functions_defaults_preserved=8';
 END;
 $$;

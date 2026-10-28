@@ -2,6 +2,14 @@
 set -euo pipefail
 
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+expected_migration_sha256='a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d'
+migration_file="$project_root/supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql"
+
+actual_migration_sha256="$(sha256sum "$migration_file" | awk '{print $1}')"
+if [ "$actual_migration_sha256" != "$expected_migration_sha256" ]; then
+  echo 'ERROR: ACL migration checksum differs from the reviewed candidate.' >&2
+  exit 3
+fi
 
 for required in docker; do
   if ! command -v "$required" >/dev/null 2>&1; then
@@ -55,10 +63,8 @@ psql_in_container() {
 
 psql_in_container bootstrap "$project_root/supabase/tests/database/hosted-acl-remediation-fixture.sql"
 psql_in_container postgres "$project_root/supabase/tests/database/hosted-acl-remediation-rehearsal.sql"
-psql_in_container postgres "$project_root/supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql"
-psql_in_container postgres "$project_root/supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql"
-psql_in_container supabase_admin "$project_root/supabase/migrations-pending-provider/20261028113100_revoke_supabase_admin_browser_defaults.sql"
-psql_in_container supabase_admin "$project_root/supabase/migrations-pending-provider/20261028113100_revoke_supabase_admin_browser_defaults.sql"
+psql_in_container postgres "$migration_file"
+psql_in_container postgres "$migration_file"
 psql_in_container bootstrap "$project_root/supabase/tests/database/hosted-acl-remediation-final-state.sql"
 
-echo "HOSTED_ACL_REMEDIATION_POSTGRES17_AUTHORITY_SPLIT_REHEARSAL_PASS"
+echo "HOSTED_ACL_REMEDIATION_POSTGRES17_SUPPORTED_SCOPE_PASS migration_sha256=$actual_migration_sha256 provider_audited_defaults_preserved=24 managed_supabase_functions_defaults_preserved=8"

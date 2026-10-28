@@ -5,11 +5,9 @@
 -- on 24 tables for both roles and 3 additional tables for authenticated.
 -- It also removes postgres-owned defaults in public/storage only.
 --
--- supabase_admin-owned defaults are deliberately handled by the separate
--- provider-authorized operation in supabase/migrations-pending-provider/.
--- The hosted postgres role is not a member of supabase_admin; this migration
--- must not try to impersonate that role or make elevated privileges a
--- prerequisite for the independently authorized postgres-owned changes.
+-- supabase_admin-owned defaults are deliberately outside this migration.
+-- Hosted postgres cannot impersonate that managed role; remediation requires
+-- a Supabase-supported execution path or provider escalation.
 -- No hosted application or migration is authorized by this source change.
 
 BEGIN;
@@ -21,6 +19,7 @@ DECLARE
   v_direct_count integer;
   v_postgres_default_count integer;
   v_provider_default_count integer;
+  v_unexpected_default_entries text;
 BEGIN
   IF current_setting('server_version_num')::integer < 170000 THEN
     RAISE EXCEPTION 'BROWSER_DDL_ACL_REMEDIATION_REQUIRES_POSTGRESQL_17';
@@ -174,8 +173,9 @@ BEGIN
 
   -- The audit recorded exactly 16 postgres-owned defaults in public/storage
   -- and 24 supabase_admin-owned defaults in public/graphql/graphql_public.
-  -- Global browser defaults and PUBLIC defaults were absent. This migration
-  -- changes only the postgres-owned contexts; the provider-owned 24 remain.
+  -- Global browser defaults and PUBLIC defaults were absent. The migration
+  -- changes only postgres-owned contexts; all supabase_admin defaults remain
+  -- untouched, including managed schemas outside the hosted 24-entry scope.
   SELECT count(*) INTO v_postgres_default_count
   FROM pg_default_acl AS d
   JOIN pg_roles AS creator ON creator.oid = d.defaclrole
@@ -200,12 +200,20 @@ BEGIN
     AND n.nspname IN ('public', 'graphql', 'graphql_public')
     AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
     AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN');
-  IF v_provider_default_count <> 24 THEN
+  -- Supabase local fixtures can omit provider defaults; on the hosted target,
+  -- the protected preflight separately requires the audited count of 24.
+  IF v_provider_default_count NOT IN (0, 24) THEN
     RAISE EXCEPTION 'BROWSER_DDL_ACL_PROVIDER_DEFAULT_BASELINE_MISMATCH count=%', v_provider_default_count;
   END IF;
 
-  IF EXISTS (
-    SELECT 1
+  SELECT string_agg(entry, ', ' ORDER BY entry)
+  INTO v_unexpected_default_entries
+  FROM (
+    SELECT format('%I.%I grantee=%I privilege=%s', creator.rolname,
+      COALESCE(n.nspname, '<global>'),
+      CASE WHEN acl.grantee = 0 THEN 'PUBLIC'
+        ELSE pg_get_userbyid(acl.grantee) END,
+      acl.privilege_type) AS entry
     FROM pg_default_acl AS d
     LEFT JOIN pg_namespace AS n ON n.oid = d.defaclnamespace
     JOIN pg_roles AS creator ON creator.oid = d.defaclrole
@@ -215,13 +223,14 @@ BEGIN
       AND (
         acl.grantee = 0
         OR acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
-           AND NOT (
-             creator.rolname = 'postgres' AND n.nspname IN ('public', 'storage')
-             OR creator.rolname = 'supabase_admin' AND n.nspname IN ('public', 'graphql', 'graphql_public')
-           )
+           AND creator.rolname <> 'supabase_admin'
+           AND NOT (creator.rolname = 'postgres' AND n.nspname IN ('public', 'storage'))
       )
-  ) THEN
-    RAISE EXCEPTION 'BROWSER_DDL_ACL_UNEXPECTED_DEFAULT_GRANT';
+    ORDER BY creator.rolname, n.nspname, acl.grantee, acl.privilege_type
+    LIMIT 10
+  ) AS unexpected_defaults;
+  IF v_unexpected_default_entries IS NOT NULL THEN
+    RAISE EXCEPTION 'BROWSER_DDL_ACL_UNEXPECTED_DEFAULT_GRANT entries=%', v_unexpected_default_entries;
   END IF;
   IF EXISTS (
     SELECT 1
@@ -246,7 +255,6 @@ BEGIN
     JOIN pg_roles AS creator ON creator.oid = d.defaclrole
     CROSS JOIN LATERAL aclexplode(d.defaclacl) AS acl
     WHERE d.defaclnamespace = 0
-      AND creator.rolname IN ('postgres', 'supabase_admin')
       AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
       AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN')
   ) THEN
@@ -272,8 +280,7 @@ REVOKE TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE
 FROM authenticated;
 
 -- These two default-ACL owners are the only contexts this hosted postgres role
--- can safely change. The three supabase_admin contexts stay pending for the
--- provider-authorized operation; nothing here attempts role impersonation.
+-- can safely change. The three supabase_admin contexts remain untouched.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   REVOKE TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage
@@ -330,7 +337,7 @@ BEGIN
     AND n.nspname IN ('public', 'graphql', 'graphql_public')
     AND acl.grantee IN (to_regrole('anon')::oid, to_regrole('authenticated')::oid)
     AND acl.privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN');
-  IF v_provider_default_count <> 24 THEN
+  IF v_provider_default_count NOT IN (0, 24) THEN
     RAISE EXCEPTION 'BROWSER_DDL_ACL_PROVIDER_DEFAULTS_WERE_CHANGED count=%', v_provider_default_count;
   END IF;
   RAISE NOTICE 'HOSTED_ACL_POSTGRES_SCOPE_PASS provider_owned_defaults_pending=24';

@@ -1,6 +1,6 @@
 -- DISPOSABLE PostgreSQL 17 fixture only. The upgrade harness invokes this
 -- against its unlinked, loopback-only Supabase database before applying the
--- pending RF Coins migrations. It mirrors the excessive table defaults
+-- candidate RF Coins migrations. It mirrors the excessive table defaults
 -- reported for the hosted project and proves the fixture is effective before
 -- exercising the migration's explicit per-table revokes.
 DO $$

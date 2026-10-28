@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Executes the staged SQL on a disposable PostgreSQL server using independent
+# Executes the proposed canonical SQL on a disposable PostgreSQL server using independent
 # concurrent connections. No host port is published; HTTP integration calls
 # are stubbed and the container has no provider credentials.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -109,7 +109,7 @@ CREATE TABLE supplier_transactions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 SQL
 
-docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261028120000_rf_coins_schema.sql" >/dev/null
+docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations/20261028120000_rf_coins_schema.sql" >/dev/null
 no_transport_schemas="$(db_sql "SELECT (to_regnamespace('cron') IS NULL AND to_regnamespace('net') IS NULL)::text")"
 assert_value 'migration applies without pg_cron or pg_net schemas' 'true' "$no_transport_schemas"
 handoff_dispatcher_absent="$(db_sql "SELECT (to_regprocedure('public.trigger_fulfillment_handoff()') IS NULL)::text")"
@@ -118,9 +118,9 @@ assert_value 'migration installs no outbound handoff dispatcher' 'true' "$handof
 # committed release constants remain false and are checked above.
 sed -e 's/v_funding_release_enabled CONSTANT boolean := false/v_funding_release_enabled CONSTANT boolean := true/g' \
     -e 's/v_spending_release_enabled CONSTANT boolean := false/v_spending_release_enabled CONSTANT boolean := true/g' \
-  "$ROOT_DIR/supabase/migrations-pending/20261028120100_rf_coins_functions.sql" \
+  "$ROOT_DIR/supabase/migrations/20261028120100_rf_coins_functions.sql" \
   | docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null
-docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql" >/dev/null
+docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres < "$ROOT_DIR/supabase/migrations/20261028120200_rf_coin_admin_center_read.sql" >/dev/null
 
 docker exec -i "$CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres <<SQL >/dev/null
 INSERT INTO auth.users (id, email, email_confirmed_at) VALUES

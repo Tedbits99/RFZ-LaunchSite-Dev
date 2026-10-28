@@ -287,7 +287,7 @@ export default function RfCoinsClient() {
       <div role="status" className="rounded-2xl border border-amber-400/25 bg-amber-400/5 p-6 text-sm text-amber-200">
         <AlertTriangle size={16} className="mr-2 inline" />
         {error || 'RF Coins has not been configured for this environment.'}
-        <p className="mt-2 text-xs leading-5 text-slate-400">No balances or totals are inferred. Review the staged RF Coins migrations in a disposable database first; hosted migrations are not applied by this console.</p>
+        <p className="mt-2 text-xs leading-5 text-slate-400">No balances or totals are inferred. Review the canonical RF Coins migrations in a disposable database first; schema deployment does not enable funding or spending.</p>
         <button type="button" onClick={() => { setError(''); setLoading(true); void load(); }} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-amber-300/30 px-3 text-xs font-semibold hover:bg-amber-300/10"><RefreshCw size={14} /> Retry</button>
       </div>
     );

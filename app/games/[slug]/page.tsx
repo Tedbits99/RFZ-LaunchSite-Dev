@@ -127,5 +127,8 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     }
   }
 
-  return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} paymentMethodsConfigured={payConfigs !== null} bannerUrl={detailBannerUrl} coinPaymentEnabled={Boolean(coinSettings)} />;
+  // The database is authoritative even when the query fails or returns no
+  // enabled rows. Never advertise hard-coded payment methods that checkout
+  // cannot actually accept.
+  return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} paymentConfigAuthoritative bannerUrl={detailBannerUrl} coinPaymentEnabled={Boolean(coinSettings)} />;
 }

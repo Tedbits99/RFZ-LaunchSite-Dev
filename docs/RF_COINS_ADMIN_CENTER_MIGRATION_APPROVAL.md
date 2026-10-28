@@ -1,6 +1,54 @@
 # RF Coins Admin Center — hosted migration review package
 
-Status: **PREPARED, NOT APPLIED — paid backup/PITR and a production-style restore rehearsal are not prerequisites for this unreleased Supabase Free development project. The remaining apply gates are trusted-main source/ledger verification and hosted authority for the audited default ACL owners.**
+Status: **RF Coins schema PREPARED, NOT APPLIED.** Paid backup/PITR and a
+production-style restore rehearsal are not prerequisites for this unreleased
+Supabase Free development project.
+
+Current PR #82 source proposal (draft branch only; not in `main` or hosted):
+
+| Canonical migration | SHA-256 | Release state after schema install |
+|---|---|---|
+| `supabase/migrations/20261028120000_rf_coins_schema.sql` | `9c5fd8a8065dfbb841751f4ee5e73e5522cac3cb91acb3712b7dea3b0875e085` | RLS enabled; RF Coins payment-config row forced disabled; settings flags false |
+| `supabase/migrations/20261028120100_rf_coins_functions.sql` | `3fa8cda9d129cef217807d2058cff04e931647aa149addd5dd4eedcc6041cb46` | Funding/spending release constants hard-false; no provider calls |
+| `supabase/migrations/20261028120200_rf_coin_admin_center_read.sql` | `9ce49de1c1fada9e051648cddfc33fd50f0e98da43dba013a653ec6bdec688f1` | Active-SUPER_ADMIN-only bounded reports and audit |
+
+These exact hashes must be regenerated and reviewed for the eventual candidate
+SHA; a source hash is not evidence that a hosted migration ran.
+
+Older review sections below describe the pre-canonical pending-file layout and
+are historical. The active manifest and hashes above are the current PR #82
+source proposal; they remain unmerged and unapplied until the exact merge is
+approved and its automatic deployment is verified.
+
+## Current state after PR #90 ACL deployment — 2026-10-28
+
+The owner confirms the reviewed postgres-owned ACL migration
+`20261028113000_revoke_browser_table_ddl_privileges.sql` was deployed through
+the existing Supabase GitHub integration after the approved PR #90 merge; its
+execution provenance and recorded SQL were reconciled. The sanitized
+post-deployment audit `40659937258` on main SHA
+`0fde4cf946c85150fc0a607657e4a9e18f8c4afe` reports zero audited direct excess
+grants and zero postgres-owned public/storage defaults, with the 24
+`supabase_admin` defaults preserved. The ledger contains 101 versions and the
+audit changed no migration history. Do not repeat the ACL migration.
+
+Historical sections below that describe this ACL migration as pending or
+unapplied record the earlier pre-PR90 state and are superseded by this update.
+The stale PR #82 copy of the postgres-owned ACL SQL was removed so the same
+migration version cannot be queued a second time. The 24 provider-owned
+defaults remain separately tracked; the provider-specific pending SQL is not
+part of normal deployment and has not been applied. PR #82's three RF Coins
+schema/function/reporting migrations are now in the canonical active migration
+source on the draft branch only; they are not yet on main or hosted. Funding,
+spending, live payments, financial cron, supplier fulfillment, and live provider
+transactions remain locked off.
+
+Automatic deployment policy: after required exact-head checks pass and the
+owner approves the exact PR #82 merge candidate, the existing Supabase GitHub
+integration may deploy only the reviewed migration and Edge Function sources
+included in that approved merge. Schema installation does not authorize
+financial activation. Post-deployment verification of ledger, schema, RLS,
+Auth, checkout compatibility, Edge Functions, and financial locks is required.
 
 ## Current owner policy — Supabase Free development
 
@@ -12,24 +60,26 @@ forward-only development migrations. Migration history tracks schema versions;
 it is not a backup of database rows. Do not export customer/order data merely
 to satisfy a prior checklist.
 
-The protected audit on main `b726746dfd42b0976188cb8e0c731e46cd97f092`
-verified the existing project and ACL metadata; the hosted ledger matched 100
-repository migration versions. The four proposed SQL files remain under
-`supabase/migrations-pending/` on draft PR #82, not in the trusted main
-migration source, so the main-only workflow cannot apply them yet. The exact
-PR-head PostgreSQL 17 rehearsal and security/build CI passed, but do not
-substitute for a hosted workflow `plan` or a matching hosted-ledger check.
+The pre-PR90 protected audit on main `b726746dfd42b0976188cb8e0c731e46cd97f092`
+verified the existing project and ACL metadata; the hosted ledger then matched
+100 repository migration versions. The ACL migration is now deployed. The
+three current RF Coins SQL files are in `supabase/migrations/` on the draft
+PR #82 branch so the existing Supabase integration can deploy those exact
+reviewed files only after approved merge. They are not yet on trusted `main`
+or hosted. Historical exact-head rehearsal and CI results apply only to their
+recorded SHAs; they do not replace fresh checks for an updated candidate or
+the approved post-merge verification.
 
-Before considering a narrowly scoped development apply: verify the exact
-trusted main SHA contains the reviewed files; confirm the hosted ledger and
-schema still match the expected preconditions; verify the database execution
-role can alter the five audited default-ACL contexts (a disposable runner
-previously returned SQLSTATE `42501` for `supabase_admin`); run the protected
-workflow plan and review its exact migration list; then use the protected
-apply operation only for those reviewed files. Do not use reset or migration
-repair. Existing data must be preserved. The RF Coins funding/spending release
-constants remain false, and the migration does not enable payments, suppliers,
-emails, or a Worker. No hosted change is authorized by this preparation note.
+Before the proposed RF Coins development deployment, verify the exact trusted
+main SHA, hosted ledger and schema; review only the three wallet SQL files and
+any associated Edge Function changes; pass PostgreSQL 17 rehearsals and all
+required security/build gates; and obtain the owner's approval of the exact PR
+merge candidate. The approved Supabase GitHub integration may then deploy the
+reviewed active migrations automatically. Do not repeat the ACL migration,
+use reset or migration repair, or include the separate provider ACL
+operation. Preserve existing records. Funding/spending release constants
+remain false, and schema installation does not enable payments, suppliers,
+emails, financial cron, or a Worker.
 
 ## 2026-10-28 hosted ACL follow-up — source-only, still NO-GO
 
@@ -82,7 +132,7 @@ The Admin Center therefore reports the feature as unavailable; it does not
 substitute zeros for missing schema. This package is a review aid, not approval
 to migrate or enable funding/spending.
 
-## Canonical migration order
+## Historical pre-PR90 migration proposal — superseded
 
 Apply only after reviewing the exact migration files in the approved PR head:
 
@@ -1037,7 +1087,7 @@ escalation is attempted.
   the bootstrap user, asserts `42501` for that role's provider-ACL attempt,
   applies the two scopes independently/idempotently, and compares safe grants,
   RLS, policies, PUBLIC, and `service_role`. The provider SQL is scanned by
-  both fail-closed pending-SQL scanners. The scan reports five pending SQL
+  both fail-closed pending-SQL scanners. The scan reports four pending SQL
   files. A supplemental PGlite 17.5 authority-split execution passed with an
   aliased non-superuser role; the native Docker PostgreSQL 17 harness could
   not run in this local environment because Docker storage was full. The

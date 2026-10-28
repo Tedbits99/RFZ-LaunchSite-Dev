@@ -1,6 +1,6 @@
 -- Synthetic seed executed only in the disposable full-upgrade Supabase stack,
--- after all canonical migrations and immediately before the pending RF Coins
--- migrations. It represents one existing product order/payment snapshot.
+-- after the non-wallet legacy migration set and immediately before the RF Coins
+-- migration rehearsal. It represents one existing product order/payment snapshot.
 DO $$
 DECLARE
   v_game_id uuid;

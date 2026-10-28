@@ -2,12 +2,12 @@
 
 **Status:** reviewed executable migration manifest for an unlinked disposable Supabase instance and the repository's deployable `supabase/migrations/` directory. This artifact does not alter any historical migration and is not authorization to apply anything to `ketdhcmwowzztcdlmris`.
 
-**Source history:** 119 SQL files are present; **executable:** 100; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
+**Source history:** see the inventory documents for the current repository file count; **executable:** 104; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
 
 ## Selection rules
 
 1. Apply every SQL file present in the executable `supabase/migrations/` directory; there are no hidden test-only exclusions.
-2. Preserve the active filenames and numeric order. The 19 superseded, duplicate, scheduler, and owner-approved RF Coins files remain outside the executable directory in the archive and are never replayed implicitly.
+2. Preserve the active filenames and numeric order. The 19 superseded, duplicate, and scheduler files remain outside the executable directory in the archive and are never replayed implicitly. The older archived RF Coins proposal remains excluded; the three later reviewed, fail-closed RF Coins migrations below are the canonical replacement.
 3. The corrected fulfillment, RPC, and slug-based Honor of Kings migrations are the executable replacements for their archived predecessors.
 4. Fail closed if an executable migration contains an external scheduler or HTTP target. Development must have no `pg_cron`, `pg_net`, payment, supplier, SMTP, webhook, or external HTTP activity.
 5. Treat Vault/provider migrations as schema-only with synthetic values; no secrets or external endpoints may be inherited. Verify RLS, grants, `SECURITY DEFINER` authorization, ownership, payment boundaries, supplier reconciliation, receipt outbox, and concurrency after reset.
@@ -133,10 +133,14 @@
 | 95 | INCLUDE | `20261019110000_restrict_order_archive_rpc.sql` | `cc165f381d0a256b215a4e0907eed7f3488d94e6222a6b1033e3b16999a8075f` | 94. 20261018153746_20261018160000_restore_mlbb_package_count_filter.sql | no outbound target; run in isolated disposable DB |
 | 96 | INCLUDE | `20261019120000_completion_receipt_reconciliation_contract.sql` | `4dc3561332c5c4b604d7e3d880380e076b32b83d691c546f880ec5dd0902b7e2` | 95. 20261019110000_restrict_order_archive_rpc.sql | no outbound target; run in isolated disposable DB |
 
-| 97 | INCLUDE | `20261026053026_fazercards_signed_webhook_inbox.sql` | `56cbfb5d6622067c9280ce36f7232c553514304da7082dae8d0d78a4b3ffe8af` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | signed supplier event inbox, restricted RLS, admin notifications; publication metadata only |
+| 97 | INCLUDE | `20261026053026_fazercards_signed_webhook_inbox.sql` | `bdef9625c14f05ca7f4dec384d2170b04e2605612d71341d6d2f51577e598e76` | 96. 20261019120000_completion_receipt_reconciliation_contract.sql | signed supplier event inbox, restricted RLS, admin notifications; publication metadata only |
 | 98 | INCLUDE | `20261026120000_admins_select_privilege.sql` | `dce788c276dc804f337ff0f8259bc56c0c477c707d31ab4dd6cee6dc4da667f9` | 97. 20261026053026_fazercards_signed_webhook_inbox.sql | minimum API-role SELECT grant for existing admin RLS; no anonymous access or outbound target |
 | 99 | INCLUDE | `20261026130000_lock_first_admin_bootstrap.sql` | `405e1e03115c394a1ef3c7d496952aa020d8edbc4443039dc67b970330820991` | 98. 20261026120000_admins_select_privilege.sql | revoke client-role execution from legacy first-admin bootstrap; no outbound target |
 | 100 | INCLUDE | `20261027110000_grant_public_catalog_columns.sql` | `ed297e3c69578a0dbf6268e06213e055a200cbc291bccea095fdee1466db852b` | 99. 20261026130000_lock_first_admin_bootstrap.sql | minimum public catalog column grants; RLS still restricts inactive rows; supplier cost/offer/markup columns remain private |
+| 101 | INCLUDE | `20261028113000_revoke_browser_table_ddl_privileges.sql` | `a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d` | 100. 20261027110000_grant_public_catalog_columns.sql | already deployed by approved PR #90; revoke only audited browser-role privileges and postgres defaults; all supabase_admin defaults unchanged |
+| 102 | INCLUDE | `20261028120000_rf_coins_schema.sql` | `9c5fd8a8065dfbb841751f4ee5e73e5522cac3cb91acb3712b7dea3b0875e085` | 101. 20261028113000_revoke_browser_table_ddl_privileges.sql | additive wallet schema; RLS on; master/top-up/spending flags false; RF Coins payment method inserted/kept disabled; no outbound calls, jobs, or secrets |
+| 103 | INCLUDE | `20261028120100_rf_coins_functions.sql` | `3fa8cda9d129cef217807d2058cff04e931647aa149addd5dd4eedcc6041cb46` | 102. 20261028120000_rf_coins_schema.sql | constrained SECURITY DEFINER RPCs and explicit grants; funding/spending release constants false; no provider or supplier calls |
+| 104 | INCLUDE | `20261028120200_rf_coin_admin_center_read.sql` | `9ce49de1c1fada9e051648cddfc33fd50f0e98da43dba013a653ec6bdec688f1` | 103. 20261028120100_rf_coins_functions.sql | bounded active-SUPER_ADMIN reports/export audit; no payment, supplier, email, or scheduler side effects |
 
 ## Execution gates
 

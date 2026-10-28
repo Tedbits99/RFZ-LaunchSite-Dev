@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /*
-  SQL contract tests for the staged (NOT yet applied) RF Coins migrations.
+  SQL contract tests for the canonical RF Coins migrations proposed by PR #82.
   They assert the security-critical behavior is present in the SQL that will
   run: atomic settlement marking orders paid, bounded refund reversal,
   debit-only balance checks, wallet creation for credits, and restrictive
@@ -10,9 +10,9 @@ import { describe, expect, it } from 'vitest';
   live database.
 */
 
-const functionsSql = readFileSync('supabase/migrations-pending/20261028120100_rf_coins_functions.sql', 'utf8');
-const schemaSql = readFileSync('supabase/migrations-pending/20261028120000_rf_coins_schema.sql', 'utf8');
-const adminCenterSql = readFileSync('supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
+const functionsSql = readFileSync('supabase/migrations/20261028120100_rf_coins_functions.sql', 'utf8');
+const schemaSql = readFileSync('supabase/migrations/20261028120000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
 
 function extractFunction(sql: string, name: string): string {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`);
@@ -193,23 +193,26 @@ describe('rf_coin_release_order_payment', () => {
 });
 
 describe('grants and schema', () => {
-  it('orders pending RF Coins migrations after the complete deployable migration set', () => {
+  it('orders RF Coins migrations at the end of the canonical deployable sequence', () => {
     const currentVersions = readdirSync('supabase/migrations')
       .filter((name) => name.endsWith('.sql'))
       .map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
-    const pendingNames = readdirSync('supabase/migrations-pending')
-      .filter((name) => name.endsWith('.sql') && name.includes('rf_coin'))
-      .sort();
-    const pendingVersions = pendingNames.map((name) => name.match(/^([0-9]{14})_/)?.[1] || '');
-    const latestCurrentVersion = Math.max(...currentVersions);
-
-    expect(latestCurrentVersion).toBeGreaterThan(0);
-    expect(pendingNames).toEqual([
+    const walletNames = [
       '20261028120000_rf_coins_schema.sql',
       '20261028120100_rf_coins_functions.sql',
       '20261028120200_rf_coin_admin_center_read.sql',
-    ]);
-    expect(pendingVersions.every((version) => Number(version) > latestCurrentVersion)).toBe(true);
+    ];
+    const manifest = readFileSync('docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md', 'utf8');
+    const walletVersions = walletNames.map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
+    const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version));
+    const latestNonWalletVersion = Math.max(...nonWalletVersions);
+
+    expect(walletVersions.every((version) => version > latestNonWalletVersion)).toBe(true);
+    for (const name of walletNames) {
+      expect(currentVersions).toContain(Number(name.slice(0, 14)));
+      expect(manifest).toContain(`| INCLUDE | \`${name}\` |`);
+      expect(readdirSync('supabase/migrations-pending')).not.toContain(name);
+    }
   });
 
   it('super admin guard denies inactive or suspended admins', () => {
@@ -250,7 +253,7 @@ describe('grants and schema', () => {
 
   it('registers the rf_coin_wallet payment method disabled by default', () => {
     expect(schemaSql).toMatch(/'rf_coin_wallet', 'RF Coins Wallet'.*false/);
-    expect(schemaSql).toMatch(/ON CONFLICT \(method_key\) DO NOTHING/);
+    expect(schemaSql).toContain('ON CONFLICT (method_key) DO UPDATE SET is_enabled = false;');
   });
 
   it('keeps payment_transactions.order_id nullable change and topup link column', () => {
@@ -275,9 +278,12 @@ describe('grants and schema', () => {
     expect(adminCenterSql.match(/SECURITY DEFINER\s+SET search_path = pg_catalog, public, pg_temp/g)).toHaveLength(2);
   });
 
-  it('marks both files as pending and feature disabled', () => {
-    expect(schemaSql).toMatch(/STATUS: PENDING/);
-    expect(functionsSql).toMatch(/STATUS: PENDING/);
+  it('keeps release switches locked in the canonical migration source', () => {
+    expect(schemaSql).toMatch(/enabled boolean NOT NULL DEFAULT false/);
+    expect(schemaSql).toMatch(/topups_enabled boolean NOT NULL DEFAULT false/);
+    expect(schemaSql).toMatch(/spending_enabled boolean NOT NULL DEFAULT false/);
+    expect(functionsSql).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(functionsSql).toContain('v_spending_release_enabled CONSTANT boolean := false');
   });
 });
 

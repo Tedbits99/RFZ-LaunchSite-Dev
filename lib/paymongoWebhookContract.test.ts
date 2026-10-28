@@ -10,7 +10,7 @@ const topupSource = readFileSync(
   'utf8',
 );
 const pendingCoinFunctions = readFileSync(
-  new URL('../supabase/migrations-pending/20261028120100_rf_coins_functions.sql', import.meta.url),
+  new URL('../supabase/migrations/20261028120100_rf_coins_functions.sql', import.meta.url),
   'utf8',
 );
 

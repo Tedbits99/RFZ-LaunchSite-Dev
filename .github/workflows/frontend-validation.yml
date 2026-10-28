@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify auto-merge discovery safety cases
         run: bash scripts/discover-codex-pr.sh --self-test
+      - name: Verify auto-merge approval and exact-head gate safety cases
+        run: bash scripts/verify-auto-merge-gates.sh --self-test
       - name: Guard Cloudflare CSS and JavaScript deployment order
         run: node scripts/verify-preview-static-assets.mjs
       - uses: actions/setup-node@v4

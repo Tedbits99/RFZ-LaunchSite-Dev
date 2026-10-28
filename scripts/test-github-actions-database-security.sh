@@ -592,6 +592,16 @@ if [ "$upgrade_mode" = true ]; then
         continue
         ;;
     esac
+    case "$migration_name" in
+      20261028120000_rf_coins_schema.sql|\
+      20261028120100_rf_coins_functions.sql|\
+      20261028120200_rf_coin_admin_center_read.sql)
+        # The legacy stage intentionally stops before RF Coins. The three
+        # reviewed wallet migrations are applied in the separate post-upgrade
+        # rehearsal below, matching their canonical dependency order.
+        continue
+        ;;
+    esac
     source_migration="$project_root/supabase/migrations/$migration_name"
     echo "LEGACY_UPGRADE_CANDIDATE=$migration_name"
     [ -f "$source_migration" ] || {
@@ -607,7 +617,9 @@ if [ "$upgrade_mode" = true ]; then
   done < <(awk -F'|' '/\| INCLUDE \|/ {gsub(/`/, "", $4); gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")
 
   manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")"
-  expected_upgrade_count=$((manifest_count - 11))
+  wallet_migration_count=3
+  pre_wallet_manifest_count=$((manifest_count - wallet_migration_count))
+  expected_upgrade_count=$((pre_wallet_manifest_count - 11))
   if [ "$upgrade_count" -ne "$expected_upgrade_count" ]; then
     echo "ERROR: Expected $expected_upgrade_count canonical post-baseline migrations from the reviewed manifest; found $upgrade_count." >&2
     exit 13
@@ -616,7 +628,7 @@ if [ "$upgrade_mode" = true ]; then
   supabase_local migration up
   echo "LEGACY_UPGRADE_PHASE=canonical-apply-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
-    --set expected_migration_count="$manifest_count" \
+    --set expected_migration_count="$pre_wallet_manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql
   echo "LEGACY_UPGRADE_PHASE=seed-synthetic-order-payment"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
@@ -629,19 +641,20 @@ if [ "$upgrade_mode" = true ]; then
   echo "LEGACY_UPGRADE_PHASE=postgres17-default-acl-fixture"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --file supabase/tests/database/rf-coins-default-acl-fixture.sql
-  pending_dir="$project_root/supabase/migrations-pending"
   for migration_name in \
     20261028120000_rf_coins_schema.sql \
     20261028120100_rf_coins_functions.sql \
     20261028120200_rf_coin_admin_center_read.sql; do
-    test -s "$pending_dir/$migration_name" || {
-      echo "ERROR: Reviewed pending migration is missing: $migration_name" >&2
+    source_migration="$project_root/supabase/migrations/$migration_name"
+    test -s "$source_migration" || {
+      echo "ERROR: Canonical RF Coins migration is missing: $migration_name" >&2
       exit 13
     }
-    cp "$pending_dir/$migration_name" "$test_root/supabase/migrations/$migration_name"
+    cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
   done
   supabase_local migration up
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/rf-coins-current-schema-upgrade.sql
   echo "LEGACY_UPGRADE_PHASE=rf-coins-current-schema-rehearsal-complete"
 else

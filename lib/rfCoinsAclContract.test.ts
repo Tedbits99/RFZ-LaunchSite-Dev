@@ -1,20 +1,27 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /*
-  Contract test for the current staged RF Coins migration chain. In particular,
-  it protects against project-level default EXECUTE grants leaking to browser
-  roles. These tests inspect SQL only; they never mutate a hosted database.
+  Contract test for the RF Coins migration chain proposed in the draft PR. In
+  particular, it protects against project-level default EXECUTE grants leaking
+  to browser roles. These tests inspect SQL only; they never mutate a hosted DB.
 */
 
-const functionsSql = readFileSync('supabase/migrations-pending/20261028120100_rf_coins_functions.sql', 'utf8');
-const schemaSql = readFileSync('supabase/migrations-pending/20261028120000_rf_coins_schema.sql', 'utf8');
-const adminCenterSql = readFileSync('supabase/migrations-pending/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
-const supportedAclSql = readFileSync('supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql', 'utf8');
+const functionsSql = readFileSync('supabase/migrations/20261028120100_rf_coins_functions.sql', 'utf8');
+const schemaSql = readFileSync('supabase/migrations/20261028120000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
+const supportedAclPath = 'supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql';
+const stalePendingAclPath = 'supabase/migrations-pending/20261028113000_revoke_browser_table_ddl_privileges.sql';
+const supportedAclSql = readFileSync(supportedAclPath, 'utf8');
 const providerAclSql = readFileSync('supabase/migrations-pending-provider/20261028113100_revoke_supabase_admin_browser_defaults.sql', 'utf8');
 const aclRehearsal = readFileSync('scripts/test-hosted-acl-remediation-postgres17.sh', 'utf8');
 
 describe('canonical RF Coins ACL contract', () => {
+  it('uses the single reviewed ACL migration already in the deployable main sequence', () => {
+    expect(existsSync(supportedAclPath)).toBe(true);
+    expect(existsSync(stalePendingAclPath)).toBe(false);
+  });
+
   it('revokes anonymous access from customer and guarded admin RPCs', () => {
     const anonRevokes = [
       'rf_coin_create_topup(uuid, uuid)',
@@ -124,7 +131,7 @@ describe('canonical RF Coins ACL contract', () => {
     expect(supportedAclSql).toContain('current_user <> \'postgres\'');
     expect(supportedAclSql).toContain("v_direct_count NOT IN (0, 204)");
     expect(supportedAclSql).toContain("v_postgres_default_count NOT IN (0, 16)");
-    expect(supportedAclSql).toContain("v_provider_default_count <> 24");
+    expect(supportedAclSql).toContain("v_provider_default_count NOT IN (0, 24)");
     expect(supportedAclSql).toContain('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public');
     expect(supportedAclSql).toContain('ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA storage');
     expect(supportedAclSql).not.toContain('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin');
@@ -140,7 +147,8 @@ describe('canonical RF Coins ACL contract', () => {
     expect(aclRehearsal).toContain('--env POSTGRES_USER=bootstrap');
     expect(aclRehearsal).toContain('postgresql://${role}@127.0.0.1:5432/postgres');
     expect(aclRehearsal).toContain('psql_in_container postgres');
-    expect(aclRehearsal).toContain('psql_in_container supabase_admin');
+    expect(aclRehearsal).not.toContain('psql_in_container supabase_admin');
+    expect(aclRehearsal).toContain('provider_audited_defaults_preserved=24');
     expect(aclRehearsal).toContain('read-only');
   });
 
@@ -166,6 +174,8 @@ describe('canonical RF Coins ACL contract', () => {
   it('does not broaden project defaults or mutate the live database during tests', () => {
     expect(functionsSql).not.toMatch(/^\s*ALTER DEFAULT PRIVILEGES/m);
     expect(schemaSql).not.toMatch(/^\s*ALTER DEFAULT PRIVILEGES/m);
-    expect(schemaSql).toContain('-- STATUS: PENDING — NOT applied to the live database.');
+    expect(schemaSql).toContain('schema installation alone does not enable wallet use.');
+    expect(functionsSql).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(functionsSql).toContain('v_spending_release_enabled CONSTANT boolean := false');
   });
 });

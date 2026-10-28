@@ -56,7 +56,7 @@ function gameBadge(name: string): string {
   return initials.length >= 2 ? initials : name.slice(0, 4).toUpperCase();
 }
 
-export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], paymentMethodsConfigured = false, bannerUrl = null, coinPaymentEnabled = false }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; paymentMethodsConfigured?: boolean; bannerUrl?: string | null; coinPaymentEnabled?: boolean }) {
+export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], paymentConfigAuthoritative = false, bannerUrl = null, coinPaymentEnabled = false }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; paymentConfigAuthoritative?: boolean; bannerUrl?: string | null; coinPaymentEnabled?: boolean }) {
   const [coinWallet, setCoinWallet] = useState<{ balance: number } | null>(null);
   const [walletTopupsAvailable, setWalletTopupsAvailable] = useState(false);
   const [walletReminderSnoozed, setWalletReminderSnoozed] = useState(false);
@@ -175,8 +175,8 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     { id: 'zone-id', label: 'Zone ID', field_key: 'zone_id', placeholder: 'Enter your Zone ID', help_text: 'Find your Zone ID beside your User ID.', is_required: true },
   ];
   const resolvedMethods = useMemo(() => {
-    const base = paymentMethodsConfigured
-      ? dbPaymentMethods.map((m) => {
+    const base = paymentConfigAuthoritative
+      ? dbPaymentMethods.filter((method) => method.is_enabled).map((m) => {
           const style = METHOD_STYLES[m.method_key] || DEFAULT_STYLE;
           return { key: m.method_key, name: m.display_name, detail: style.detail, className: style.className, logo_url: m.logo_url || null };
         })
@@ -194,7 +194,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     };
     const insufficient = !coinWallet || !coinsNeeded || coinWallet.balance < coinsNeeded;
     return [...base, { ...coinMethod, insufficient } as typeof base[number] & { insufficient?: boolean }];
-  }, [dbPaymentMethods, paymentMethodsConfigured, coinPaymentEnabled, coinWallet, selectedPackage]);
+  }, [dbPaymentMethods, paymentConfigAuthoritative, coinPaymentEnabled, coinWallet, selectedPackage]);
 
   const isUidOnly = useMemo(() => displayFields.every((field) => field.field_key === 'uid'), [displayFields]);
   const emailValid = Boolean(email.trim() && email.includes('@'));
