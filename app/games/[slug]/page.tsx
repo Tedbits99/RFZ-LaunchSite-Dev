@@ -43,19 +43,6 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     .order('sort_order');
   const { data: payConfigs } = await supabase.from('payment_config').select('method_key, display_name, is_enabled, logo_url').eq('is_enabled', true).order('sort_order');
 
-  // RF Coins wallet as payment method: feature stays OFF unless the database
-  // flags say otherwise (fail closed); wallet info is filled in client-side.
-  let coinSettings: { enabled: boolean; spending_enabled: boolean } | null = null;
-  const { data: coinSettingsRow } = await supabase
-    .from('rf_coin_settings')
-    .select('enabled, spending_enabled')
-    .eq('id', 1)
-    .maybeSingle();
-  coinSettings = coinSettingsRow as { enabled: boolean; spending_enabled: boolean } | null;
-  if (!coinSettings?.enabled || !coinSettings.spending_enabled) {
-    coinSettings = null;
-  }
-
   let detailBannerUrl: string | null = null;
   const { data: detailPromo } = await supabase
     .from('promotions')
@@ -130,5 +117,5 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
   // The database is authoritative even when the query fails or returns no
   // enabled rows. Never advertise hard-coded payment methods that checkout
   // cannot actually accept.
-  return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} paymentConfigAuthoritative bannerUrl={detailBannerUrl} coinPaymentEnabled={Boolean(coinSettings)} />;
+  return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} paymentConfigAuthoritative bannerUrl={detailBannerUrl} />;
 }

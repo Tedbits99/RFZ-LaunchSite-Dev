@@ -68,6 +68,15 @@ describe('POST /api/orders authorization boundary', () => {
     mocks.paymentMaybeSingle.mockResolvedValue({ data: null, error: null });
   });
 
+  it('rejects direct RF Coins checkout requests before database or provider work while release-locked', async () => {
+    const response = await POST(request({ ...body, paymentMethod: 'rf_coin_wallet' }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'RF Coins spending is not available in this release.' });
+    expect(mocks.packageMaybeSingle).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it('does not fall back to guest checkout when a recognized session is invalid', async () => {
     mocks.customerGetUser.mockResolvedValue({ data: { user: null }, error: new Error('invalid session') });
     const response = await POST(request(body, 'rfz-customer-auth=invalid'));

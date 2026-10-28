@@ -30,6 +30,9 @@ const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const FULFILLMENT_TIMEOUT_MS = 30000;
 const CLAIM_BATCH_LIMIT = 10;
 const LEASE_SECONDS = 300;
+// Database settings, queue rows, and cron configuration cannot enable wallet
+// spending. Releasing this requires a reviewed source change and new migration.
+export const RF_COINS_SPENDING_RELEASE_ENABLED = false;
 
 export type HandoffRow = {
   out_id: string;
@@ -282,6 +285,9 @@ export function isAuthorizedFulfillmentHandoffRequest(
 export async function processFulfillmentHandoffBatch(
   db: EdgeSupabaseClient,
 ): Promise<Response> {
+  if (!RF_COINS_SPENDING_RELEASE_ENABLED) {
+    return json({ claimed: 0, fulfilled: 0, failed: 0, rejected: 0, releaseLocked: true });
+  }
   const { data: claimed, error: claimError } = await db.rpc("rf_coin_claim_fulfillment_handoffs", {
     p_limit: CLAIM_BATCH_LIMIT,
     p_lease_seconds: LEASE_SECONDS,

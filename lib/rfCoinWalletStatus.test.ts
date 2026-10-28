@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { shouldLoadRfCoinLedger } from './rfCoinWalletStatus';
 
 describe('RF Coins ledger availability', () => {
-  it('loads history only when the wallet is explicitly enabled and ready', () => {
+  it('loads customer history when infrastructure is ready, independent of release toggles', () => {
     expect(shouldLoadRfCoinLedger(true, 'ready')).toBe(true);
     expect(shouldLoadRfCoinLedger(false, 'ready')).toBe(false);
     expect(shouldLoadRfCoinLedger(true, 'disabled')).toBe(false);

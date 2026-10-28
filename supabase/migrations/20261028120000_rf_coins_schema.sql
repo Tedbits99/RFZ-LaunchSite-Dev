@@ -314,16 +314,42 @@ ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS rf_coin_topup_id
 CREATE INDEX IF NOT EXISTS idx_payment_tx_rf_coin_topup
   ON payment_transactions (rf_coin_topup_id);
 
--- Register the RF Coins wallet as a payment method, DISABLED. create_order
--- only accepts payment methods present in payment_config with is_enabled =
--- true, so the method stays invisible/unusable until a Super Admin enables
--- it deliberately (together with the RF Coins spending flag).
+-- Register the RF Coins wallet as a payment method, DISABLED. This row is
+-- presentation/configuration only; the independent static release guards
+-- below and in the settlement RPCs remain authoritative.
 INSERT INTO public.payment_config
   (method_key, display_name, provider, is_enabled, provider_name, provider_type, instructions, sort_order)
 VALUES
   ('rf_coin_wallet', 'RF Coins Wallet', 'rf_coin_wallet', false, 'rf_coin_wallet', 'rf_coins',
    'Pay the full order total with your RF Coins wallet balance.', 50)
 ON CONFLICT (method_key) DO UPDATE SET is_enabled = false;
+
+-- Backstop generic create_order and any other caller that might try to create
+-- a wallet-paid order after an admin toggles payment_config. The static false
+-- lock is intentionally separate from all mutable database settings. Opening
+-- wallet spending later requires an explicitly reviewed migration as well as
+-- the application/Edge release gates.
+CREATE OR REPLACE FUNCTION public.rf_coin_block_locked_spending_order()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_spending_release_enabled CONSTANT boolean := false;
+BEGIN
+  IF NEW.payment_method = 'rf_coin_wallet' AND NOT v_spending_release_enabled THEN
+    RAISE EXCEPTION 'RF_COIN_SPENDING_RELEASE_LOCKED';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.rf_coin_block_locked_spending_order()
+  FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS rf_coin_orders_spending_release_guard ON public.orders;
+CREATE TRIGGER rf_coin_orders_spending_release_guard
+  BEFORE INSERT OR UPDATE OF payment_method ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.rf_coin_block_locked_spending_order();
 
 -- ============ RLS ============
 ALTER TABLE rf_coin_settings ENABLE ROW LEVEL SECURITY;

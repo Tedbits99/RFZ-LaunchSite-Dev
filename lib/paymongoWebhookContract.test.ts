@@ -49,4 +49,18 @@ describe('PayMongo settlement fail-closed contract', () => {
     expect(firstSecretRead).toBeGreaterThan(requestGate);
     expect(providerCall).toBeGreaterThan(requestGate);
   });
+
+  it('rejects paid RF Coins webhook credits before database reads or credit RPCs while funding is locked', () => {
+    const releaseLock = webhookSource.indexOf('const RF_COINS_FUNDING_RELEASE_ENABLED = false;');
+    const walletTopupBranch = webhookSource.indexOf('if (coinTopupId && !orderId)');
+    const paidBranch = webhookSource.indexOf('if (result.status === "PAID")', walletTopupBranch);
+    const lockCheck = webhookSource.indexOf('if (!RF_COINS_FUNDING_RELEASE_ENABLED)', paidBranch);
+    const topupRead = webhookSource.indexOf('.from("rf_coin_topups")', paidBranch);
+    const creditRpc = webhookSource.indexOf('supabase.rpc("rf_coin_credit_paid_topup"', paidBranch);
+    expect(releaseLock).toBeGreaterThan(-1);
+    expect(walletTopupBranch).toBeGreaterThan(releaseLock);
+    expect(lockCheck).toBeGreaterThan(paidBranch);
+    expect(lockCheck).toBeLessThan(topupRead);
+    expect(lockCheck).toBeLessThan(creditRpc);
+  });
 });

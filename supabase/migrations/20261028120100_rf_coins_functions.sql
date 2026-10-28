@@ -948,11 +948,16 @@ CREATE OR REPLACE FUNCTION rf_coin_enqueue_fulfillment(
 RETURNS TABLE (out_handoff_id uuid, out_error text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- A mutable queue row or service-role RPC call cannot open spending.
+  v_spending_release_enabled CONSTANT boolean := false;
   v_id uuid;
   v_order_status text;
   v_payment_status text;
   v_method text;
 BEGIN
+  IF NOT v_spending_release_enabled THEN
+    RETURN QUERY SELECT NULL::uuid, 'RF_COIN_SPENDING_RELEASE_LOCKED'::text; RETURN;
+  END IF;
   IF p_order_id IS NULL THEN
     RETURN QUERY SELECT NULL::uuid, 'RF_COIN_ORDER_NOT_FOUND'::text; RETURN;
   END IF;
@@ -990,9 +995,15 @@ RETURNS TABLE (out_id uuid, out_order_id uuid, out_attempt_count integer,
                out_lease_token uuid, out_lease_until timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- Do not claim work or invoke supplier fulfillment while wallet spending is
+  -- release-locked, even if rows were inserted by a privileged caller.
+  v_spending_release_enabled CONSTANT boolean := false;
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1), 100);
   v_lease_seconds integer := LEAST(GREATEST(COALESCE(p_lease_seconds, 300), 30), 900);
 BEGIN
+  IF NOT v_spending_release_enabled THEN
+    RETURN;
+  END IF;
   -- Quarantine rows that exhausted their bounded attempts; never re-serve them.
   UPDATE rf_coin_fulfillment_handoffs
     SET status = 'DEAD_LETTER', lease_until = NULL, lease_token = NULL,

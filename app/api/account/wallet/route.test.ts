@@ -46,10 +46,20 @@ describe('GET /api/account/wallet', () => {
     mocks.walletInitRpc.mockResolvedValue({ data: null, error: null });
   });
 
-  it('returns explicit disabled state without exposing packages', async () => {
+  it('returns an actual customer wallet row read-only while database features are disabled', async () => {
     const response = await GET();
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ enabled: false, packages: [], topupsEnabled: false, spendingEnabled: false });
+    expect(await response.json()).toMatchObject({
+      wallet: { user_id: 'customer-a', balance_coins: 0 },
+      enabled: false,
+      databaseEnabled: false,
+      infrastructureReady: true,
+      fundingEnabled: false,
+      packages: [],
+      topupsEnabled: false,
+      spendingEnabled: false,
+      walletStatus: 'ready',
+    });
   });
 
   it('fails visibly if settings cannot be read instead of claiming the wallet is disabled', async () => {
@@ -84,29 +94,23 @@ describe('GET /api/account/wallet', () => {
     expect(mocks.walletMaybeSingle).not.toHaveBeenCalled();
   });
 
-  it('initializes a real zero-balance wallet only through the caller-scoped RPC', async () => {
+  it('does not initialize a wallet while the static financial release locks are closed', async () => {
     mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: { enabled: true, topups_enabled: false, spending_enabled: true, centavos_per_coin: 100 }, error: null });
-    mocks.walletMaybeSingle
-      .mockResolvedValueOnce({ data: null, error: null })
-      .mockResolvedValueOnce({ data: { user_id: 'customer-a', balance_coins: 0, total_purchased_coins: 0, total_spent_coins: 0 }, error: null });
-
-    const response = await GET();
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ wallet: { user_id: 'customer-a', balance_coins: 0 }, enabled: true, walletStatus: 'ready' });
-    expect(mocks.walletInitRpc).toHaveBeenCalledWith('rf_coin_get_or_create_wallet', { p_user_id: 'customer-a' });
-    expect(mocks.walletMaybeSingle).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps the wallet unavailable when safe caller-scoped initialization fails', async () => {
-    mocks.settingsMaybeSingle.mockResolvedValueOnce({ data: { enabled: true, topups_enabled: true, spending_enabled: true, centavos_per_coin: 100 }, error: null });
     mocks.walletMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
-    mocks.walletInitRpc.mockResolvedValueOnce({ data: null, error: { code: '42501' } });
 
     const response = await GET();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ wallet: null, enabled: false, walletStatus: 'incomplete', topupsEnabled: false });
+    expect(await response.json()).toMatchObject({
+      wallet: null,
+      databaseEnabled: true,
+      infrastructureReady: true,
+      fundingEnabled: false,
+      spendingEnabled: false,
+      walletStatus: 'ready',
+    });
+    expect(mocks.walletInitRpc).not.toHaveBeenCalled();
+    expect(mocks.walletMaybeSingle).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed if wallet settings exist but the wallet relation is missing', async () => {
@@ -123,6 +127,8 @@ describe('GET /api/account/wallet', () => {
     expect(await response.json()).toMatchObject({
       wallet: null,
       enabled: false,
+      infrastructureReady: false,
+      fundingEnabled: false,
       topupsEnabled: false,
       spendingEnabled: false,
       walletStatus: 'incomplete',

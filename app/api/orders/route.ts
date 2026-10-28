@@ -6,6 +6,8 @@ import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { hashOrderCapability, orderCapabilityCookieName } from '@/lib/orderCapability';
 import { validateVoucher } from '@/lib/voucher';
 import { paymentMethodLabel } from '@/lib/paymentMethods';
+import { RF_COIN_PAYMENT_METHOD } from '@/lib/rfCoins';
+import { RF_COINS_SPENDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,6 +20,12 @@ export async function POST(req: NextRequest) {
     }
     if (!paymentMethod || typeof paymentMethod !== 'string' || paymentMethod.length > 50) {
       return NextResponse.json({ error: 'Please select a valid payment method.' }, { status: 400 });
+    }
+    // The storefront control is presentation only. A database payment-config
+    // toggle or direct API request must not bypass the independent financial
+    // release lock for RF Coins spending.
+    if (paymentMethod === RF_COIN_PAYMENT_METHOD && !RF_COINS_SPENDING_RELEASE_ENABLED) {
+      return NextResponse.json({ error: 'RF Coins spending is not available in this release.' }, { status: 503 });
     }
 
     // Read the verified Auth identity from the customer session namespace

@@ -46,7 +46,7 @@ function renderGameStore(slug: string, methods = ENABLED_METHODS) {
 }
 
 describe('payment methods across the eight game stores', () => {
-  it.each(GAME_SLUGS)('renders only configured product payment methods for %s', (slug) => {
+  it.each(GAME_SLUGS)('preserves product checkout and shows one disabled wallet option for %s', (slug) => {
     const html = renderGameStore(slug);
 
     expect(html).toContain('Payment Methods');
@@ -55,13 +55,21 @@ describe('payment methods across the eight game stores', () => {
       expect(html).toContain(`value="${method.method_key}"`);
       expect(html).toContain(method.display_name);
     }
-    expect(html).not.toContain('RF Coins Wallet');
+    expect(html.match(/value="rf_coin_wallet"/g)).toHaveLength(1);
+    expect(html).toContain('RF Coins Wallet');
+    expect(html).toContain('Wallet spending is not enabled');
+    expect(html).toContain('Coming soon');
+    const walletRadio = html.match(/<input[^>]*>/g)?.find((input) => input.includes('value="rf_coin_wallet"'));
+    expect(walletRadio).toContain('disabled=""');
+    expect(html).toContain('Coins.ph');
   });
 
-  it('fails closed when the payment configuration query has no usable methods', () => {
+  it('keeps the wallet option unavailable when the payment configuration query has no usable methods', () => {
     const html = renderGameStore('pubg-mobile', []);
 
-    expect(html).toContain('No payment methods are currently available');
+    expect(html).toContain('No product payment methods are currently configured');
+    expect(html).toContain('RF Coins Wallet');
+    expect(html).toContain('Coming soon');
     expect(html).not.toContain('value="gcash"');
     expect(html).not.toContain('value="paymongo_qrph"');
   });
@@ -74,5 +82,17 @@ describe('payment methods across the eight game stores', () => {
 
     expect(html).not.toContain('value="disabled-test"');
     expect(html).not.toContain('Disabled test method');
+  });
+
+  it('does not trust an enabled database wallet method or render a duplicate option', () => {
+    const html = renderGameStore('mobile-legends', [
+      ...ENABLED_METHODS,
+      { method_key: 'rf_coin_wallet', display_name: 'RF Coins Wallet', is_enabled: true, logo_url: null },
+    ]);
+
+    expect(html.match(/value="rf_coin_wallet"/g)).toHaveLength(1);
+    const walletRadio = html.match(/<input[^>]*>/g)?.find((input) => input.includes('value="rf_coin_wallet"'));
+    expect(walletRadio).toContain('disabled=""');
+    expect(html).toContain('Coming soon');
   });
 });

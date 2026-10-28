@@ -1,22 +1,29 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { PAYMENT_METHODS, paymentMethodLabel, type PaymentMethodKey } from '@/lib/paymentMethods';
-import { formatCoins } from '@/lib/rfCoins';
+import { PAYMENT_METHODS, paymentMethodLabel } from '@/lib/paymentMethods';
+import { RF_COIN_PAYMENT_METHOD } from '@/lib/rfCoins';
 import { firstMissingTopUpField } from '@/lib/topUpValidation';
-import { ArrowLeft, BadgeCheck, ChevronDown, CircleHelp, CreditCard, Download, Info, Loader2, LockKeyhole, Mail, PackageOpen, ShieldCheck, Sparkles, Tag, Ticket, Upload, UserRound, WalletCards, X, Zap } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, CircleHelp, CreditCard, Download, Info, Loader2, LockKeyhole, Mail, PackageOpen, ShieldCheck, Sparkles, Ticket, Upload, UserRound, WalletCards, X, Zap } from 'lucide-react';
 
 import { createPortal } from 'react-dom';
 import SiteFooter from '@/components/SiteFooter';
 import CustomerAccountMenu from '@/components/CustomerAccountMenu';
 import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets';
-import { isWalletTopupReminderSnoozed, shouldShowWalletTopupReminder, WALLET_TOPUP_REMINDER_STORAGE_KEY, walletTopupReminderSnoozeUntil } from '@/lib/walletTopupReminder';
 
 type Game = { id: string; slug: string; name: string; description: string; region: string; currency: string; banner_url?: string | null; logo_url?: string | null };
 type Field = { id: string; label: string; field_key: string; placeholder: string; help_text: string; is_required: boolean };
 type Package = { id: string; name: string; amount: string; price_cents: number; original_price_cents: number | null; bonus: string | null; sort_order?: number; badge?: string | null; image_url?: string | null };
 type DbPaymentMethod = { method_key: string; display_name: string; is_enabled: boolean; logo_url: string | null };
+type ResolvedPaymentMethod = {
+  key: string;
+  name: string;
+  detail: string;
+  className: string;
+  logo_url: string | null;
+  disabled?: boolean;
+  status?: string;
+};
 
 const METHOD_STYLES: Record<string, { detail: string; className: string }> = {
   gcash: { detail: 'Pay with GCash', className: 'from-[#1262c5] to-[#0d3e91]' },
@@ -56,33 +63,7 @@ function gameBadge(name: string): string {
   return initials.length >= 2 ? initials : name.slice(0, 4).toUpperCase();
 }
 
-export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], paymentConfigAuthoritative = false, bannerUrl = null, coinPaymentEnabled = false }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; paymentConfigAuthoritative?: boolean; bannerUrl?: string | null; coinPaymentEnabled?: boolean }) {
-  const [coinWallet, setCoinWallet] = useState<{ balance: number } | null>(null);
-  const [walletTopupsAvailable, setWalletTopupsAvailable] = useState(false);
-  const [walletReminderSnoozed, setWalletReminderSnoozed] = useState(false);
-
-  useEffect(() => {
-    try {
-      setWalletReminderSnoozed(isWalletTopupReminderSnoozed(window.localStorage.getItem(WALLET_TOPUP_REMINDER_STORAGE_KEY)));
-    } catch {
-      setWalletReminderSnoozed(false);
-    }
-    if (!coinPaymentEnabled) return;
-    // Load the wallet balance only when the server has enabled coin payment.
-    void (async () => {
-      try {
-        const res = await fetch('/api/account/wallet', { cache: 'no-store' });
-        const data = await res.json().catch(() => null) as { wallet?: { balance_coins?: unknown } | null; walletStatus?: string; enabled?: boolean; spendingEnabled?: boolean; topupsEnabled?: boolean; packages?: unknown[] } | null;
-        const balance = data?.wallet?.balance_coins;
-        if (res.ok && data?.walletStatus === 'ready' && data.enabled === true && data.spendingEnabled === true && typeof balance === 'number' && Number.isSafeInteger(balance) && balance >= 0) {
-          setCoinWallet({ balance });
-          setWalletTopupsAvailable(data.topupsEnabled === true && Array.isArray(data.packages) && data.packages.length > 0);
-        }
-      } catch {
-        setCoinWallet(null);
-      }
-    })();
-  }, [coinPaymentEnabled]);
+export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [], paymentConfigAuthoritative = false, bannerUrl = null }: { game: Game; fields: Field[]; packages: Package[]; dbPaymentMethods?: DbPaymentMethod[]; paymentConfigAuthoritative?: boolean; bannerUrl?: string | null }) {
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(packages[0] || null);
   const [playerInputs, setPlayerInputs] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
@@ -170,53 +151,33 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     const normalizedName = pkg.name.toLowerCase();
     return normalizedName !== 'weekly diamond pass' && normalizedName !== 'twilight pass' && !normalizedName.includes('first top-up bonus');
   }), [packages]);
-  const displayFields = fields.length ? fields : [
+  const displayFields = useMemo(() => fields.length ? fields : [
     { id: 'user-id', label: 'User ID', field_key: 'user_id', placeholder: 'Enter your User ID', help_text: 'Find your User ID on your profile.', is_required: true },
     { id: 'zone-id', label: 'Zone ID', field_key: 'zone_id', placeholder: 'Enter your Zone ID', help_text: 'Find your Zone ID beside your User ID.', is_required: true },
-  ];
+  ], [fields]);
   const resolvedMethods = useMemo(() => {
     const base = paymentConfigAuthoritative
-      ? dbPaymentMethods.filter((method) => method.is_enabled).map((m) => {
+      ? dbPaymentMethods.filter((method) => method.is_enabled && method.method_key !== RF_COIN_PAYMENT_METHOD).map((m) => {
           const style = METHOD_STYLES[m.method_key] || DEFAULT_STYLE;
           return { key: m.method_key, name: m.display_name, detail: style.detail, className: style.className, logo_url: m.logo_url || null };
         })
       : PAYMENT_METHODS.map((m) => ({ ...m, logo_url: null as string | null }));
-    if (!coinPaymentEnabled) return base;
-    const coinsNeeded = selectedPackage ? Math.ceil(selectedPackage.price_cents / 100) : null;
     const coinMethod = {
-      key: 'rf_coin_wallet',
+      key: RF_COIN_PAYMENT_METHOD,
       name: 'RF Coins Wallet',
-      detail: coinWallet && coinsNeeded
-        ? `${formatCoins(coinWallet.balance)} RF balance · Cost: ${formatCoins(coinsNeeded)} RF · After purchase: ${formatCoins(Math.max(0, coinWallet.balance - coinsNeeded))} RF`
-        : 'Sign in and load your wallet balance before using RF Coins.',
+      detail: 'Wallet spending is not enabled. Choose another payment method to continue.',
       className: 'from-[#b45309] to-[#92400e]',
       logo_url: null as string | null,
+      disabled: true,
+      status: 'Coming soon',
     };
-    const insufficient = !coinWallet || !coinsNeeded || coinWallet.balance < coinsNeeded;
-    return [...base, { ...coinMethod, insufficient } as typeof base[number] & { insufficient?: boolean }];
-  }, [dbPaymentMethods, paymentConfigAuthoritative, coinPaymentEnabled, coinWallet, selectedPackage]);
+    return [...base, coinMethod] as ResolvedPaymentMethod[];
+  }, [dbPaymentMethods, paymentConfigAuthoritative]);
+  const hasConfiguredProductPaymentMethod = resolvedMethods.some((method) => !method.disabled);
 
   const isUidOnly = useMemo(() => displayFields.every((field) => field.field_key === 'uid'), [displayFields]);
   const emailValid = Boolean(email.trim() && email.includes('@'));
-  const coinPaymentSelected = paymentMethod === 'rf_coin_wallet';
-  const coinBalanceSufficient = !coinPaymentSelected || Boolean(
-    coinWallet && selectedPackage && coinWallet.balance >= Math.ceil(selectedPackage.price_cents / 100));
-  const coinShortfall = coinPaymentSelected && coinWallet && selectedPackage
-    ? Math.max(0, Math.ceil(selectedPackage.price_cents / 100) - coinWallet.balance)
-    : 0;
-  const showWalletTopupReminder = shouldShowWalletTopupReminder({
-    fundingAvailable: walletTopupsAvailable,
-    walletOptionSelected: coinPaymentSelected,
-    balance: coinWallet?.balance ?? null,
-    requiredCoins: selectedPackage ? Math.ceil(selectedPackage.price_cents / 100) : null,
-    snoozed: walletReminderSnoozed,
-  });
-  const isReady = Boolean(verified && selectedPackage && paymentMethod && emailValid && coinBalanceSufficient);
-
-  const snoozeWalletTopupReminder = () => {
-    try { window.localStorage.setItem(WALLET_TOPUP_REMINDER_STORAGE_KEY, walletTopupReminderSnoozeUntil()); } catch { /* The in-memory dismissal still prevents repeats on this page. */ }
-    setWalletReminderSnoozed(true);
-  };
+  const isReady = Boolean(verified && selectedPackage && paymentMethod && paymentMethod !== RF_COIN_PAYMENT_METHOD && emailValid);
 
   const subtotalCents = selectedPackage?.price_cents ?? 0;
   const finalCents = voucher ? voucher.total : subtotalCents;
@@ -318,28 +279,23 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     if (!isReady || !selectedPackage || !paymentMethod) return;
     setSubmitting(true);
     try {
-      const response = await fetch(coinPaymentSelected ? '/api/orders/coin' : '/api/orders', {
+      if (paymentMethod === RF_COIN_PAYMENT_METHOD) {
+        setError('RF Coins spending is not available yet. Please choose another payment method.');
+        setSubmitting(false);
+        return;
+      }
+      const response = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gameId: game.id, packageId: selectedPackage.id, email: email.trim(), name: 'RunFazone Customer', playerInputs, paymentMethod: paymentMethod, voucherCode: voucher?.code || '' }),
       });
-      const data = await response.json() as { reference?: string; totalCents?: number; coinsCharged?: number; balanceAfter?: number; qrData?: string | null; paymentDisplayName?: string; error?: string };
+      const data = await response.json() as { reference?: string; totalCents?: number; qrData?: string | null; paymentDisplayName?: string; error?: string };
       if (!response.ok || !data.reference) {
         setError(data.error || 'We could not create your order. Please try again.');
         setShowReview(false);
         return;
       }
       setShowReview(false);
-      if (coinPaymentSelected) {
-        window.dispatchEvent(new Event('rfz:wallet-updated'));
-        setQrModal({
-          reference: data.reference,
-          totalCents: data.totalCents ?? finalCents,
-          qrData: null,
-          displayName: `RF Coins Wallet · ${formatCoins(data.coinsCharged ?? 0)} RF used · Remaining balance: ${formatCoins(data.balanceAfter ?? 0)} RF`,
-        });
-        return;
-      }
       // For QR Ph (automated), redirect to checkout page which generates
       // a dynamic QR via PayMongo - no manual proof upload needed.
       if (paymentMethod === 'paymongo_qrph') {
@@ -396,9 +352,8 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
 
       <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Packages</h2><p className="mt-1 text-xs text-slate-500">Choose one package to continue</p></div>{packages.length === 0 ? <div role="status" className="mt-5 rounded-xl border border-dashed border-[#29405f] bg-[#080f20] p-6 text-center"><PackageOpen size={24} className="mx-auto text-slate-500" /><p className="mt-2 text-sm font-semibold text-slate-300">Packages temporarily unavailable</p><p className="mt-1 text-xs leading-5 text-slate-500">Please check back shortly. No order can be created until a valid package is available.</p></div> : <div role="radiogroup" aria-label={`${game.name} packages`}>{specialPackages.length > 0 && <div className="mt-5"><div className="mb-3 flex items-center gap-2 text-xs font-semibold text-violet-200"><Sparkles size={14} className="text-violet-300" /> Special Item</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{specialPackages.map(packageCard)}</div></div>}<div className="mt-6"><div className="mb-3 flex items-center gap-2 text-xs font-semibold text-cyan-200"><Zap size={14} className="text-cyan-300" /> Packages</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{diamondPackages.map(packageCard)}</div>{diamondPackages.length === 0 && <p className="text-xs text-slate-500">No standard packages are currently available.</p>}</div></div>}</section>
 
-      <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Payment Methods</h2><p className="mt-1 text-xs text-slate-500">Choose your preferred payment method</p></div>{resolvedMethods.length === 0 ? <div role="status" className="mt-5 rounded-xl border border-dashed border-[#29405f] bg-[#080f20] p-5 text-center text-xs text-slate-500">No payment methods are currently available. Please check back shortly.</div> : <div className="mt-5 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Payment methods">{resolvedMethods.map((method) => <label key={method.key} className={`flex min-h-16 cursor-pointer items-center gap-3 rounded-xl border p-3 text-left transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/40 ${paymentMethod === method.key ? 'border-cyan-300 bg-cyan-400/10 shadow-[0_0_18px_rgba(34,211,238,.1)]' : 'border-[#20304b] bg-[#080f20] hover:border-[#3d5c80]'}`}><input type="radio" name="payment-method" value={method.key} checked={paymentMethod === method.key} onChange={() => setPaymentMethod(method.key)} disabled={Boolean('insufficient' in method && method.insufficient)} aria-label={method.name} className="sr-only" /><span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-gradient-to-br ${method.className} text-[10px] font-bold text-white`}>{method.logo_url ? <img src={method.logo_url} alt="" className="h-full w-full object-contain bg-[#0e1a33]" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : method.key === 'gcash' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698010/gcash1_icon_f4qiy0.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'maya' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698009/maya1_icon_jlw6zs.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'coinsph' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1760245657/coinsph_icon_znsgeu.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.name[0]}</span><span><span className="block text-xs font-semibold">{method.name}</span><span className="block text-[10px] text-slate-500">{method.detail}</span></span>{paymentMethod === method.key && <BadgeCheck size={15} className="ml-auto text-cyan-300" />}</label>)}</div>}</section>
-
-      {showWalletTopupReminder ? <aside role="status" aria-live="polite" className="mt-4 flex flex-col gap-3 rounded-xl border border-amber-300/25 bg-amber-300/5 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-amber-100">You need {formatCoins(coinShortfall)} more RF Coins</p><p className="mt-1 text-xs leading-5 text-slate-400">Add funds to your wallet before choosing RF Coins for this order.</p></div><div className="flex shrink-0 items-center gap-3"><Link href="/account/wallet#add-funds" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-3 text-xs font-semibold text-white">Add Funds</Link><button type="button" onClick={snoozeWalletTopupReminder} className="min-h-10 rounded-lg px-2 text-xs text-slate-400 underline underline-offset-2 hover:text-slate-200">Remind me in 7 days</button></div></aside> : null}
+      {!hasConfiguredProductPaymentMethod && <p role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-100">No product payment methods are currently configured. RF Coins Wallet is shown separately as coming soon and cannot be selected.</p>}
+      <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Payment Methods</h2><p className="mt-1 text-xs text-slate-500">Choose your preferred payment method</p></div>{resolvedMethods.length === 0 ? <div role="status" className="mt-5 rounded-xl border border-dashed border-[#29405f] bg-[#080f20] p-5 text-center text-xs text-slate-500">No payment methods are currently available. Please check back shortly.</div> : <div className="mt-5 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Payment methods">{resolvedMethods.map((method) => <label key={method.key} aria-disabled={method.disabled || undefined} className={`flex min-h-16 items-center gap-3 rounded-xl border p-3 text-left transition ${method.disabled ? 'cursor-not-allowed border-[#26344c] bg-[#080f20]/70 opacity-70' : 'cursor-pointer border-[#20304b] bg-[#080f20] hover:border-[#3d5c80] focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/40'} ${paymentMethod === method.key ? 'border-cyan-300 bg-cyan-400/10 shadow-[0_0_18px_rgba(34,211,238,.1)]' : ''}`}><input type="radio" name="payment-method" value={method.key} checked={paymentMethod === method.key} onChange={() => setPaymentMethod(method.key)} disabled={method.disabled} aria-label={method.name} aria-describedby={method.status ? `payment-method-status-${method.key}` : undefined} className="sr-only" /><span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-gradient-to-br ${method.className} text-[10px] font-bold text-white`}>{method.logo_url ? <img src={method.logo_url} alt="" className="h-full w-full object-contain bg-[#0e1a33]" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : method.key === 'gcash' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698010/gcash1_icon_f4qiy0.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'maya' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698009/maya1_icon_jlw6zs.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'coinsph' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1760245657/coinsph_icon_znsgeu.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.name[0]}</span><span className="min-w-0"><span className="block text-xs font-semibold">{method.name}</span><span className="block text-[10px] text-slate-500">{method.detail}</span>{method.status && <span id={`payment-method-status-${method.key}`} className="mt-1 inline-flex rounded-full border border-amber-300/20 bg-amber-300/5 px-2 py-0.5 text-[9px] font-semibold text-amber-200">{method.status}</span>}</span></label>)}</div>}</section>
 
       <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Order Tracking</h2><p className="mt-1 text-xs text-slate-500">Enter your email to track order</p></div><label className="mt-5 block"><span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-300"><Mail size={13} className="text-cyan-300" /> Email Address</span><input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setMessage(''); }} placeholder="Enter your email address" className="w-full rounded-xl border border-[#233653] bg-[#080f20] px-3.5 py-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-cyan-300" /></label><div className="mt-4 flex gap-2 rounded-xl border border-emerald-400/15 bg-emerald-400/5 p-3 text-[11px] leading-5 text-slate-400"><Info size={15} className="mt-0.5 shrink-0 text-emerald-300" /><p>Your order number and payment instructions will be sent to this email address.</p></div></section>
 

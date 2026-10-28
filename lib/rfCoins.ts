@@ -39,8 +39,18 @@ export function formatCoinPrice(cents: number): string {
   return `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 }
 
-export function coinsForCents(totalCents: number, centavosPerCoin: number): number {
-  return Math.ceil(totalCents / centavosPerCoin);
+/**
+ * Compute an estimate from integer centavos and the server-configured rate.
+ * This is not an authorization/settlement input; the database settlement RPC
+ * independently recalculates against the stored final order total.
+ */
+export function coinsForCents(totalCents: number, centavosPerCoin: number): number | null {
+  if (!Number.isSafeInteger(totalCents) || totalCents <= 0
+      || !Number.isSafeInteger(centavosPerCoin) || centavosPerCoin <= 0) return null;
+
+  const coins = Math.ceil(totalCents / centavosPerCoin);
+  if (!Number.isSafeInteger(coins)) return null;
+  return coins;
 }
 
 export const RF_COIN_PAYMENT_METHOD = 'rf_coin_wallet';

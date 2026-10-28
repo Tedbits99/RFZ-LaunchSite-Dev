@@ -52,6 +52,10 @@ type WebhookSupabaseClient = ReturnType<typeof createClient<any>>;
 const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const FULFILLMENT_TIMEOUT_MS = 25000;
 const EMAIL_FUNCTION_PATH = "/functions/v1/send-transactional-email";
+// PayMongo is only a product-checkout provider. This static Edge lock prevents
+// even a correctly signed stale/forged wallet-top-up webhook from issuing RF
+// Coins while the separate direct-wallet funding flow is unreleased.
+const RF_COINS_FUNDING_RELEASE_ENABLED = false;
 
 interface OrderEmailData {
   order_id: string;
@@ -603,6 +607,9 @@ Deno.serve(async (req: Request) => {
     // ---- RF Coins top-up settlement branch (exact-once crediting) ----
     if (coinTopupId && !orderId) {
       if (result.status === "PAID") {
+        if (!RF_COINS_FUNDING_RELEASE_ENABLED) {
+          return json({ received: true, message: "RF_COIN_FUNDING_RELEASE_LOCKED" }, 200);
+        }
         const { data: topup } = await supabase
           .from("rf_coin_topups")
           .select("price_cents, status, provider_reference")

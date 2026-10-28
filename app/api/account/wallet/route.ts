@@ -3,15 +3,19 @@ import { adminSupabase } from '@/lib/supabaseAdmin';
 import { getActiveCustomerSession } from '@/lib/customerSession';
 import { rfCoinErrorMessage } from '@/lib/rfCoins';
 import { isMissingRfCoinTable } from '@/lib/rfCoinSchema';
-import { RF_COINS_FUNDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
+import { RF_COINS_FUNDING_RELEASE_ENABLED, RF_COINS_SPENDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 function unavailable(status: 'not_deployed' | 'not_configured' | 'disabled' | 'incomplete') {
   return NextResponse.json({
     wallet: null,
     packages: [],
     enabled: false,
+    databaseEnabled: false,
+    infrastructureReady: false,
+    fundingEnabled: false,
     spendingEnabled: false,
     topupsEnabled: false,
+    centavosPerCoin: null,
     walletStatus: status,
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
@@ -22,10 +26,9 @@ export async function GET() {
   if (!adminSupabase) return NextResponse.json({ error: 'Service unavailable.' }, { status: 503 });
 
   try {
-    // Settings are server-only and decide whether wallet relations should be
-    // queried at all. This safely supports a project where the wallet schema
-    // has not yet been deployed without mistaking infrastructure failures for
-    // an empty, working wallet.
+    // Settings are server-only. A missing settings relation is distinct from
+    // an installed-but-release-locked wallet; never turn either into a fake
+    // zero balance.
     const settingsRes = await adminSupabase
       .from('rf_coin_settings')
       .select('enabled, topups_enabled, spending_enabled, centavos_per_coin')
@@ -39,7 +42,10 @@ export async function GET() {
 
     const settings = settingsRes.data as { enabled: boolean; topups_enabled: boolean; spending_enabled: boolean; centavos_per_coin: number } | null;
     const enabled = Boolean(settings?.enabled);
-    if (!enabled) return unavailable(settings ? 'disabled' : 'not_configured');
+    if (!settings) return unavailable('not_configured');
+
+    const topupsAvailable = RF_COINS_FUNDING_RELEASE_ENABLED && enabled && settings.topups_enabled === true;
+    const spendingAvailable = RF_COINS_SPENDING_RELEASE_ENABLED && enabled && settings.spending_enabled === true;
 
     let walletRes = await session.client
       .from('rf_coin_wallets')
@@ -53,23 +59,26 @@ export async function GET() {
     }
 
     if (!walletRes.data) {
-      // Create a real, zero-balance wallet only for this verified active
-      // customer. The SECURITY DEFINER RPC checks auth.uid() = p_user_id;
-      // direct browser INSERT remains revoked and the follow-up read stays
-      // under the customer's own RLS session.
-      const { error: initializeError } = await session.client.rpc('rf_coin_get_or_create_wallet', {
-        p_user_id: session.user.id,
-      });
-      if (initializeError) return unavailable('incomplete');
-      walletRes = await session.client
-        .from('rf_coin_wallets')
-        .select('user_id, balance_coins, total_purchased_coins, total_spent_coins, total_manual_credited_coins, total_manual_debited_coins, total_reversed_coins')
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-      if (walletRes.error || !walletRes.data) return unavailable('incomplete');
+      // Only create a real zero wallet when a separately released operation
+      // actually needs it. Merely viewing the wallet while money features
+      // are locked must not initialize financial state.
+      if (topupsAvailable || spendingAvailable) {
+        const { error: initializeError } = await session.client.rpc('rf_coin_get_or_create_wallet', {
+          p_user_id: session.user.id,
+        });
+        if (initializeError) return unavailable('incomplete');
+        walletRes = await session.client
+          .from('rf_coin_wallets')
+          .select('user_id, balance_coins, total_purchased_coins, total_spent_coins, total_manual_credited_coins, total_manual_debited_coins, total_reversed_coins')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+        if (walletRes.error) {
+          if (isMissingRfCoinTable(walletRes.error, 'rf_coin_wallets')) return unavailable('incomplete');
+          return NextResponse.json({ error: rfCoinErrorMessage(null, 'Could not load your wallet.') }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
+        }
+      }
     }
 
-    const topupsAvailable = RF_COINS_FUNDING_RELEASE_ENABLED && enabled && Boolean(settings?.topups_enabled);
     const packagesRes = topupsAvailable
       ? await session.client
         .from('rf_coin_packages')
@@ -85,10 +94,15 @@ export async function GET() {
     return NextResponse.json({
       wallet: walletRes.data || null,
       enabled,
+      databaseEnabled: enabled,
+      infrastructureReady: true,
+      fundingEnabled: topupsAvailable,
       packages: topupsAvailable ? (packagesRes.data || []) : [],
       topupsEnabled: topupsAvailable,
-      spendingEnabled: enabled && Boolean(settings?.spending_enabled),
-      centavosPerCoin: settings?.centavos_per_coin ?? 100,
+      spendingEnabled: spendingAvailable,
+      centavosPerCoin: Number.isSafeInteger(settings.centavos_per_coin) && settings.centavos_per_coin > 0
+        ? settings.centavos_per_coin
+        : null,
       walletStatus: 'ready',
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 const functionsSql = readFileSync('supabase/migrations/20261028120100_rf_coins_functions.sql', 'utf8');
 const schemaSql = readFileSync('supabase/migrations/20261028120000_rf_coins_schema.sql', 'utf8');
 const adminCenterSql = readFileSync('supabase/migrations/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
+const orderReleaseGuard = extractFunction(schemaSql, 'public.rf_coin_block_locked_spending_order');
 
 function extractFunction(sql: string, name: string): string {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`);
@@ -60,6 +61,21 @@ describe('rf_coin_settle_order_payment', () => {
   it('keeps customer wallet spending behind a hard false release constant', () => {
     expect(fn).toContain('v_spending_release_enabled CONSTANT boolean := false');
     expect(fn).toContain("'RF_COIN_SPENDING_RELEASE_LOCKED'");
+  });
+
+  it('uses the stored final order total and database rate for settlement coins', () => {
+    expect(fn).toContain('CEIL(ord.total_cents::numeric / s.centavos_per_coin)::integer');
+    expect(fn).not.toMatch(/p_(?:total|price|coins)|price_cents\s*\/\s*100/);
+  });
+});
+
+describe('generic order creation spending release backstop', () => {
+  it('rejects wallet orders at the orders table even when payment_config is toggled on', () => {
+    expect(orderReleaseGuard).toContain("v_spending_release_enabled CONSTANT boolean := false");
+    expect(orderReleaseGuard).toContain("NEW.payment_method = 'rf_coin_wallet'");
+    expect(orderReleaseGuard).toContain("RAISE EXCEPTION 'RF_COIN_SPENDING_RELEASE_LOCKED'");
+    expect(schemaSql).toMatch(/CREATE TRIGGER rf_coin_orders_spending_release_guard\s+BEFORE INSERT OR UPDATE OF payment_method ON public\.orders/);
+    expect(schemaSql).toMatch(/REVOKE ALL ON FUNCTION public\.rf_coin_block_locked_spending_order\(\)\s+FROM PUBLIC, anon, authenticated, service_role/);
   });
 });
 
@@ -307,9 +323,17 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
   });
 
   it('claim re-checks fulfillment preconditions at claim time', () => {
+    expect(claim).toContain('v_spending_release_enabled CONSTANT boolean := false');
+    expect(claim.indexOf('IF NOT v_spending_release_enabled')).toBeLessThan(claim.indexOf('UPDATE rf_coin_fulfillment_handoffs'));
     expect(claim).toMatch(/o\.payment_status = 'VERIFIED'/);
     expect(claim).toMatch(/o\.fulfillment_status NOT IN \('PROCESSING','COMPLETED'\)/);
     expect(claim).toMatch(/st\.status IN \('submitted','success','pending'\)/);
+  });
+
+  it('does not enqueue wallet fulfillment while the spending release lock is closed', () => {
+    expect(enqueue).toContain('v_spending_release_enabled CONSTANT boolean := false');
+    expect(enqueue).toContain("'RF_COIN_SPENDING_RELEASE_LOCKED'");
+    expect(enqueue.indexOf('IF NOT v_spending_release_enabled')).toBeLessThan(enqueue.indexOf('INSERT INTO rf_coin_fulfillment_handoffs'));
   });
 
   it('claim uses FOR UPDATE SKIP LOCKED with a bounded lease', () => {

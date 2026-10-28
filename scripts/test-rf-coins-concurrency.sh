@@ -28,7 +28,7 @@ if ! grep -Fq 'RF_COINS_FUNDING_RELEASE_ENABLED = false' "$ROOT_DIR/lib/rfCoinFu
   exit 1
 fi
 
-docker run --rm -d --network none --name "$CONTAINER" -e POSTGRES_PASSWORD=local_test_only postgres:16 >/dev/null
+docker run --rm -d --network none --name "$CONTAINER" -e POSTGRES_PASSWORD=local_test_only postgres:17 >/dev/null
 ready=false
 for _ in $(seq 1 60); do
   if docker exec "$CONTAINER" psql -X -qAt -U postgres -d postgres -c 'SELECT 1' >/dev/null 2>&1; then ready=true; break; fi
@@ -136,9 +136,24 @@ INSERT INTO packages (id, game_id, name, price_cents) VALUES ('$CATALOG_PACKAGE'
 INSERT INTO rf_coin_packages (id, name, coins, bonus_coins, price_cents, is_active)
   VALUES ('$COIN_PACKAGE', 'Disposable 100 RF', 100, 10, 10000, true);
 UPDATE rf_coin_settings SET enabled = true, topups_enabled = true, spending_enabled = true WHERE id = 1;
+UPDATE payment_config SET is_enabled = true WHERE method_key = 'rf_coin_wallet';
+DO \$\$
+BEGIN
+  INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
+      subtotal_cents, total_cents, payment_method, customer_user_id)
+    VALUES ('86000000-0000-4000-8000-000000000002', 'RF-LOCK-GUARD',
+      'concurrency-customer@example.invalid', 'Synthetic Customer', '$GAME',
+      '$CATALOG_PACKAGE', 5000, 5000, 'rf_coin_wallet', '$CUSTOMER');
+  RAISE EXCEPTION 'RF_COIN_SPENDING_RELEASE_LOCK_WAS_BYPASSED';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLERRM <> 'RF_COIN_SPENDING_RELEASE_LOCKED' THEN RAISE; END IF;
+END
+\$\$;
+ALTER TABLE orders DISABLE TRIGGER rf_coin_orders_spending_release_guard;
 INSERT INTO orders (id, reference, email, customer_name, game_id, package_id, subtotal_cents, total_cents, payment_method, customer_user_id)
   VALUES ('86000000-0000-4000-8000-000000000001', 'RF-CONCURRENT-ORDER', 'concurrency-customer@example.invalid',
     'Synthetic Customer', '$GAME', '$CATALOG_PACKAGE', 5000, 5000, 'rf_coin_wallet', '$CUSTOMER');
+ALTER TABLE orders ENABLE TRIGGER rf_coin_orders_spending_release_guard;
 SQL
 
 wallet_sql="SET ROLE authenticated; SELECT set_config('request.jwt.claims', '{\"sub\":\"$CUSTOMER\",\"role\":\"authenticated\"}', false); SELECT user_id FROM rf_coin_get_or_create_wallet('$CUSTOMER');"

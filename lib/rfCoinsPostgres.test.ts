@@ -68,19 +68,30 @@ async function insertOrder(opts: {
   paymentStatus?: string;
   totalCents?: number;
 }) {
-  await sql(
-    `INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
-       player_inputs, quantity, subtotal_cents, discount_cents, total_cents,
-       payment_method, status, payment_status, fulfillment_status, customer_user_id)
-     VALUES ($1, $2, 'cust@example.invalid', 'Customer', $3, $4, '{}'::jsonb, 1,
-       $5, 0, $5, $6, $7, $8, 'NOT_STARTED', $9)`,
-    [opts.id, 'RF-' + opts.id.slice(-12), GAME, PACKAGE,
-     opts.totalCents ?? 50000,
-     opts.method ?? 'rf_coin_wallet',
-     opts.status ?? 'WAITING_PAYMENT',
-     opts.paymentStatus ?? 'UNPAID',
-     opts.userId ?? null],
-  );
+  // The behavioral suite later substitutes the release constants to test
+  // future settlement mechanics in this disposable database. Seed these
+  // artificial pre-existing paid-method orders with the table owner so the
+  // independently tested production trigger does not prevent its own test
+  // fixtures from representing a pre-release row.
+  await resetRole();
+  await db.exec('ALTER TABLE orders DISABLE TRIGGER rf_coin_orders_spending_release_guard');
+  try {
+    await sql(
+      `INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
+         player_inputs, quantity, subtotal_cents, discount_cents, total_cents,
+         payment_method, status, payment_status, fulfillment_status, customer_user_id)
+       VALUES ($1, $2, 'cust@example.invalid', 'Customer', $3, $4, '{}'::jsonb, 1,
+         $5, 0, $5, $6, $7, $8, 'NOT_STARTED', $9)`,
+      [opts.id, 'RF-' + opts.id.slice(-12), GAME, PACKAGE,
+       opts.totalCents ?? 50000,
+       opts.method ?? 'rf_coin_wallet',
+       opts.status ?? 'WAITING_PAYMENT',
+       opts.paymentStatus ?? 'UNPAID',
+       opts.userId ?? null],
+    );
+  } finally {
+    await db.exec('ALTER TABLE orders ENABLE TRIGGER rf_coin_orders_spending_release_guard');
+  }
 }
 
 async function createWallet(userId: string, balance: number) {
@@ -322,6 +333,29 @@ describe('rf coins real SQL behavior', () => {
     await createWallet(CUSTOMER, 1000);
     const activePackage = await sql<{ id: string }>(`SELECT id FROM rf_coin_packages LIMIT 1`);
 
+    // A DB/admin payment-config toggle is not a financial release approval.
+    await sql(`UPDATE payment_config SET is_enabled = true WHERE method_key = 'rf_coin_wallet'`);
+    await expect(sql(
+      `INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
+         subtotal_cents, total_cents, payment_method, customer_user_id)
+       VALUES ('aaaaaaaa-0000-0000-0000-0000000000f2', 'RF-RELEASE-LOCK',
+         'cust@example.invalid', 'Customer', '${GAME}'::uuid, '${PACKAGE}'::uuid,
+         50000, 50000, 'rf_coin_wallet', '${CUSTOMER}'::uuid)`,
+    )).rejects.toThrow(/RF_COIN_SPENDING_RELEASE_LOCKED/);
+    const rejectedWalletOrders = await sql<{ count: string }>(
+      `SELECT count(*) AS count FROM orders WHERE reference = 'RF-RELEASE-LOCK'`);
+    expect(Number(rejectedWalletOrders[0].count)).toBe(0);
+    await sql(`UPDATE payment_config SET is_enabled = false WHERE method_key = 'rf_coin_wallet'`);
+
+    const methodChangeOrder = 'aaaaaaaa-0000-0000-0000-0000000000f3';
+    await insertOrder({ id: methodChangeOrder, userId: CUSTOMER, method: 'paymongo_qrph' });
+    await expect(sql(`UPDATE orders SET payment_method = 'rf_coin_wallet' WHERE id = $1`, [methodChangeOrder]))
+      .rejects.toThrow(/RF_COIN_SPENDING_RELEASE_LOCKED/);
+    const unchangedMethod = await sql<{ payment_method: string }>(
+      `SELECT payment_method FROM orders WHERE id = $1`, [methodChangeOrder]);
+    expect(unchangedMethod[0].payment_method).toBe('paymongo_qrph');
+    await sql(`DELETE FROM orders WHERE id = $1`, [methodChangeOrder]);
+
     await asRole('authenticated', CUSTOMER);
     const topup = await sql<{ out_error: string }>(
       `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, activePackage[0].id]);
@@ -346,6 +380,22 @@ describe('rf coins real SQL behavior', () => {
     await resetRole();
     expect(creditAttempt[0].out_credited).toBe(false);
     expect(creditAttempt[0].out_error).toBe('RF_COIN_FUNDING_RELEASE_LOCKED');
+
+    // Even a privileged pre-existing eligible queue row cannot be claimed by
+    // the static-locked fulfillment RPC, so it cannot reach supplier code.
+    await sql(`UPDATE orders SET status = 'PAYMENT_VERIFIED', payment_status = 'VERIFIED'
+      WHERE id = $1`, [orderId]);
+    await sql(`INSERT INTO rf_coin_fulfillment_handoffs (order_id, idempotency_key)
+      VALUES ($1::uuid, 'rf-coin-fulfillment:' || $1::uuid::text)`, [orderId]);
+    await asRole('service_role');
+    const claims = await sql(`SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    await resetRole();
+    expect(claims).toHaveLength(0);
+    const preservedQueue = await sql<{ status: string; lease_token: string | null }>(
+      `SELECT status, lease_token FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    expect(preservedQueue[0]).toEqual({ status: 'PENDING', lease_token: null });
+    await sql(`DELETE FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    await sql(`UPDATE orders SET status = 'WAITING_PAYMENT', payment_status = 'UNPAID' WHERE id = $1`, [orderId]);
 
     const order = await sql<{ status: string }>(`SELECT status FROM orders WHERE id = $1`, [orderId]);
     const wallet = await sql<{ balance_coins: string }>(`SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
@@ -1234,5 +1284,24 @@ describe('rf coins real SQL behavior', () => {
     await resetRole();
     expect(ack[0].out_status).toBe('DONE');
     expect(badAck[0].out_status).toBe('rejected');
+  });
+
+  it('uses the stored discounted final order total and non-default centavos rate', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+    await sql(`UPDATE rf_coin_settings SET centavos_per_coin = 250 WHERE id = 1`);
+    // totalCents is the post-voucher final total (₱109.99), not the package
+    // subtotal. 10,999 / 250 rounds upward to 44 coins.
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 10_999 });
+    await createWallet(CUSTOMER, 100);
+
+    await asRole('authenticated', CUSTOMER);
+    const result = await sql<{ out_coins: number; out_error: string | null }>(
+      `SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
+    await resetRole();
+    expect(result[0]).toMatchObject({ out_coins: 44, out_error: null });
+    const balance = await sql<{ balance_coins: string }>(
+      `SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
+    expect(Number(balance[0].balance_coins)).toBe(56);
+    await sql(`UPDATE rf_coin_settings SET centavos_per_coin = 100 WHERE id = 1`);
   });
 });

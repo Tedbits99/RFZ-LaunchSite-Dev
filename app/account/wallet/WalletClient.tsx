@@ -10,9 +10,12 @@ type WalletResponse = {
   wallet: RfCoinWallet | null;
   packages: RfCoinPackage[];
   enabled?: boolean;
+  databaseEnabled?: boolean;
+  infrastructureReady?: boolean;
+  fundingEnabled?: boolean;
   spendingEnabled?: boolean;
   topupsEnabled?: boolean;
-  centavosPerCoin?: number;
+  centavosPerCoin?: number | null;
   walletStatus?: RfCoinWalletStatus;
 };
 
@@ -31,7 +34,7 @@ export default function WalletClient() {
   const [wallet, setWallet] = useState<RfCoinWallet | null>(null);
   const [packages, setPackages] = useState<RfCoinPackage[]>([]);
   const [ledger, setLedger] = useState<RfCoinLedgerEntry[]>([]);
-  const [settings, setSettings] = useState({ enabled: false, spendingEnabled: false, topupsEnabled: false, centavosPerCoin: 100 });
+  const [settings, setSettings] = useState({ databaseEnabled: false, fundingEnabled: false, spendingEnabled: false, topupsEnabled: false, centavosPerCoin: null as number | null });
   const [walletStatus, setWalletStatus] = useState<WalletResponse['walletStatus']>('disabled');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -56,15 +59,17 @@ export default function WalletClient() {
       const resolvedWalletStatus = data.walletStatus || (data.enabled ? 'ready' : 'disabled');
       setWalletStatus(resolvedWalletStatus);
       setSettings({
-        enabled: Boolean(data.enabled),
+        databaseEnabled: Boolean(data.databaseEnabled ?? data.enabled),
+        fundingEnabled: Boolean(data.fundingEnabled),
         spendingEnabled: Boolean(data.spendingEnabled),
         topupsEnabled: Boolean(data.topupsEnabled),
-        centavosPerCoin: Number(data.centavosPerCoin || 100),
+        centavosPerCoin: Number.isSafeInteger(data.centavosPerCoin) && (data.centavosPerCoin || 0) > 0
+          ? data.centavosPerCoin as number
+          : null,
       });
-      if (!shouldLoadRfCoinLedger(Boolean(data.enabled), resolvedWalletStatus)) {
-        // Do not query an absent or disabled RF Coins schema. The wallet API
-        // already returned the authoritative unavailable state; a ledger
-        // request here would create a predictable 500 and a false failure.
+      if (!shouldLoadRfCoinLedger(data.infrastructureReady === true, resolvedWalletStatus) || !data.wallet) {
+        // Do not query an absent, incomplete, or uninitialized wallet. A true
+        // zero is shown only when the server returned an actual wallet row.
         setLedger([]);
         setLedgerError('');
         setError('');
@@ -177,7 +182,7 @@ export default function WalletClient() {
     );
   }
 
-  if (!settings.enabled) {
+  if (walletStatus !== 'ready') {
     const message = walletStatus === 'not_deployed'
       ? 'RF Coins wallet setup has not been deployed to this environment yet. No balance or payment is being presented as active.'
       : walletStatus === 'not_configured'
@@ -198,9 +203,7 @@ export default function WalletClient() {
               <Coins size={30} className="text-amber-300" />
               {wallet ? formatCoins(wallet.balance_coins) : '—'}
             </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {settings.centavosPerCoin === 100 ? '1 RF Coin = ₱1.00' : `1 RF Coin = ₱${(settings.centavosPerCoin / 100).toFixed(2)}`}
-            </p>
+            {settings.centavosPerCoin !== null && <p className="mt-1 text-xs text-slate-500">1 RF Coin = ₱{(settings.centavosPerCoin / 100).toFixed(2)}</p>}
           </div>
           <button
             type="button"
@@ -212,6 +215,13 @@ export default function WalletClient() {
           </button>
         </div>
       </div>
+
+      {!settings.fundingEnabled || !settings.spendingEnabled ? (
+        <div role="status" className="rounded-xl border border-amber-400/25 bg-amber-400/5 p-4 text-sm text-amber-100">
+          Wallet infrastructure is installed. The database feature switch is {settings.databaseEnabled ? 'on' : 'off'}; funding is {settings.fundingEnabled ? 'available' : 'release-locked'} and spending is {settings.spendingEnabled ? 'available' : 'release-locked'}. No locked Add Funds or checkout action is active.
+          {!wallet && <span className="block mt-1 text-xs text-amber-100/75">This account has no initialized wallet record; a balance is not being presumed.</span>}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
