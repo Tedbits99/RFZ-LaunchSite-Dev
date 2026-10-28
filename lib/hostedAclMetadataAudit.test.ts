@@ -36,6 +36,8 @@ describe('trusted hosted ACL metadata audit', () => {
       .replace(/^\s*\\(?:gset|if|else|endif).*$/gm, '');
     expect(executableSql).not.toMatch(/^\s*(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|TRUNCATE|GRANT|REVOKE|COPY|CALL|DO)\b/im);
     expect(executableSql).not.toMatch(/FROM\s+(?:public\.(?:orders|customers|profiles|payment_transactions)|auth\.users)\b/i);
+    expect(query).toContain('configuration_keys');
+    expect(query).not.toContain("'configuration', p.proconfig");
     for (const required of [
       "'section', 'database'",
       "'section', 'tables'",
@@ -141,13 +143,13 @@ describe('trusted hosted ACL metadata audit', () => {
       const functions = section('public_functions') as Array<{
         identity: string;
         security_definer: boolean;
-        configuration: string[];
+        configuration_keys: string[];
       }>;
       expect(functions).toEqual(expect.arrayContaining([
         expect.objectContaining({
           identity: 'audit_acl_contract_probe()',
           security_definer: true,
-          configuration: ['search_path=public'],
+          configuration_keys: ['search_path'],
         }),
       ]));
     } finally {

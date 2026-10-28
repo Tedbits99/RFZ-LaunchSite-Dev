@@ -210,7 +210,10 @@ SELECT jsonb_build_object(
     'owner', pg_catalog.pg_get_userbyid(p.proowner),
     'kind', p.prokind,
     'security_definer', p.prosecdef,
-    'configuration', p.proconfig,
+    'configuration_keys', COALESCE((
+      SELECT jsonb_agg(split_part(setting, '=', 1) ORDER BY split_part(setting, '=', 1))
+      FROM unnest(p.proconfig) AS config(setting)
+    ), '[]'::jsonb),
     'anon_execute', has_function_privilege('anon', p.oid, 'EXECUTE'),
     'authenticated_execute', has_function_privilege('authenticated', p.oid, 'EXECUTE'),
     'service_role_execute', has_function_privilege('service_role', p.oid, 'EXECUTE')
