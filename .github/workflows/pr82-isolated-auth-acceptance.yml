@@ -217,7 +217,7 @@ jobs:
             `SUPABASE_SERVICE_ROLE_KEY=${service}`,
             `RFZ_RECOVERY_PROOF_HMAC_SECRET=${hmac}`,
             `RFZ_CUSTOMER_CONFIRMATION_RESEND_HMAC_SECRET=${hmac}`,
-            `E2E_MAILPIT_URL=http://127.0.0.1:54324`,
+            `E2E_INBUCKET_URL=http://127.0.0.1:54324`,
           ];
           for (const secret of [anon, service, hmac]) process.stdout.write(`::add-mask::${secret}\n`);
           fs.appendFileSync(githubEnvPath, `${lines.join('\n')}\n`);
