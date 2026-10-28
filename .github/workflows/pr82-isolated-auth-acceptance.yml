@@ -253,23 +253,20 @@ jobs:
 
           const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
           const restResults = await Promise.all(tableNames.map(async (table) => {
-            const { error } = await client.from(table).select('*', { head: true, count: 'exact' }).limit(0);
-            return { table, code: error?.code ?? null };
+            const { data, error, status } = await client.from(table).select('*').limit(1);
+            return { table, code: error?.code ?? null, status, rows: Array.isArray(data) ? data.length : null };
           }));
-          if (expected && restResults.some((result) => result.code !== null)) {
+          if (expected && restResults.some((result) => result.code !== null || result.status !== 200)) {
             throw new Error(`Installed RF Coins tables are not all available through local PostgREST: ${JSON.stringify(restResults)}.`);
           }
-          if (!expected && restResults.some((result) => !['PGRST205', '42P01'].includes(result.code ?? ''))) {
+          if (!expected && restResults.some((result) => !['PGRST205', '42P01'].includes(result.code ?? '') || result.status !== 404)) {
             throw new Error(`Absent RF Coins schema returned an unexpected local PostgREST result: ${JSON.stringify(restResults)}.`);
-          }
-          if (!expected && restResults.some((result) => result.code === null)) {
-            throw new Error('PostgREST exposes an RF Coins table in the absent-schema test mode.');
           }
           if (expected) {
             const { data, error } = await client.from('rf_coin_settings').select('enabled,topups_enabled,spending_enabled').eq('id', 1).single();
             if (error || data.enabled || data.topups_enabled || data.spending_enabled) throw new Error('RF Coins default release locks are not all off.');
           }
-          console.log(`LOCAL_POSTGREST_SCHEMA_PASS mode=${process.env.MODE} wallet_tables=${expected ? 'installed-locked' : 'absent'} error_codes=${restResults.map((result) => `${result.table}:${result.code ?? 'available'}`).join(',')}`);
+          console.log(`LOCAL_POSTGREST_SCHEMA_PASS mode=${process.env.MODE} wallet_tables=${expected ? 'installed-locked' : 'absent'} results=${restResults.map((result) => `${result.table}:http${result.status}:${result.code ?? `${result.rows}-rows`}`).join(',')}`);
           NODE
 
       - name: Install Chromium for Playwright
