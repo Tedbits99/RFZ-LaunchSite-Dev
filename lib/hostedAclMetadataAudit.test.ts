@@ -168,6 +168,7 @@ describe('trusted hosted ACL metadata audit', () => {
     expect(runner).toContain('GITHUB_REF:-');
     expect(runner).toContain('SOURCE_SHA" = "$GITHUB_SHA');
     expect(runner).toContain('4194304');
+    expect(runner).toContain('head -c 4194305');
     expect(runner).toContain('record_count" -eq 9');
     expect(runner).toContain('effective_acl_inventory_incomplete');
     expect(runner).toContain('direct_acl_inventory_incomplete');

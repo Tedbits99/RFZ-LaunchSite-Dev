@@ -61,7 +61,8 @@ if ! PGPASSWORD="$SUPABASE_DB_PASSWORD" \
   PGOPTIONS='-c statement_timeout=30000 -c lock_timeout=5000' \
   psql "$db_connection" --no-psqlrc --quiet --tuples-only --no-align \
     --set ON_ERROR_STOP=1 --file "$query_file" \
-    > "$audit_tmp/records.jsonl" 2> "$audit_tmp/query-error.log"; then
+    2> "$audit_tmp/query-error.log" \
+  | head -c 4194305 > "$audit_tmp/records.jsonl"; then
   echo 'HOSTED_ACL_METADATA_AUDIT_FAIL=postgres_metadata_query' >&2
   exit 1
 fi
@@ -74,7 +75,7 @@ record_bytes="$(wc -c < "$audit_tmp/records.jsonl" | tr -d '[:space:]')"
 }
 
 captured_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-jq -s -e \
+if ! jq -s -e \
   --arg source_sha "$SOURCE_SHA" \
   --arg run_id "$GITHUB_RUN_ID" \
   --arg run_attempt "${GITHUB_RUN_ATTEMPT:-1}" \
@@ -160,7 +161,11 @@ jq -s -e \
       then error("function_security_inventory_incomplete") else . end
     | if ((.scheduled_jobs.cron_relation_present | type) != "boolean"
           or (.scheduled_jobs.job_count | type) != "number") then error("scheduled_job_inventory_incomplete") else . end
-  ' "$audit_tmp/records.jsonl" > "$artifact_file"
+  ' "$audit_tmp/records.jsonl" | head -c 4194305 > "$artifact_file"; then
+  rm -f -- "$artifact_file"
+  echo 'HOSTED_ACL_METADATA_AUDIT_FAIL=metadata_validation_or_size_limit' >&2
+  exit 1
+fi
 
 test -s "$artifact_file" || {
   echo 'HOSTED_ACL_METADATA_AUDIT_FAIL=artifact_missing' >&2
