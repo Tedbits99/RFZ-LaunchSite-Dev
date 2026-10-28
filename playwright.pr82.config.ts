@@ -31,6 +31,9 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     stdout: 'ignore',
-    stderr: 'ignore',
+    // Keep the local server's allow-listed auth_flow_failure diagnostics in
+    // the test job log so a real Auth failure can be classified without
+    // returning provider details to the browser.
+    stderr: 'pipe',
   },
 });

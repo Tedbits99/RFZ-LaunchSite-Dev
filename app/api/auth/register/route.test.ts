@@ -88,15 +88,25 @@ describe('customer registration route', () => {
   });
 
   it('returns a generic server error for Auth failures without leaking details', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.signUp.mockResolvedValue({
       data: { user: null, session: null },
-      error: { status: 500, message: 'secret provider detail' },
+      error: { status: 500, code: 'private_provider_code', message: 'secret provider detail' },
     });
     const response = await POST(request(validInput));
     expect(response.status).toBe(503);
     const body = await response.text();
     expect(body).not.toContain('secret provider detail');
     expect(body).not.toContain(validInput.password);
+    expect(warn).toHaveBeenCalledWith('auth_flow_failure', expect.objectContaining({
+      flow: 'customer_registration',
+      stage: 'supabase_signup',
+      category: 'upstream_unavailable',
+      http_status: 500,
+    }));
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(validInput.email);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret provider detail');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private_provider_code');
   });
 
   it('fails closed when Auth returns a session before email confirmation', async () => {

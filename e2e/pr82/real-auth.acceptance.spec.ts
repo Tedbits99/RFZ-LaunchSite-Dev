@@ -122,6 +122,26 @@ function recordTrace(observations: Observation, event: string, urlValue: string,
   });
 }
 
+function writeRegistrationDiagnostic(testInfo: TestInfo, status: number | null, category: string) {
+  const directory = process.env.E2E_EVIDENCE_DIR;
+  assert(directory, 'registration diagnostic directory is configured');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, `${schemaMode}-${testInfo.project.name}-registration-diagnostic.json`), JSON.stringify({
+    candidate_sha: candidateSha,
+    schema_mode: schemaMode,
+    viewport: testInfo.project.name,
+    test_identity: 'synthetic local-only identities',
+    step: 'customer_registration',
+    route: '/api/auth/register',
+    method: 'POST',
+    http_status: status,
+    category,
+    timestamp_utc: new Date().toISOString(),
+    request_body_included: false,
+    response_body_included: false,
+  }, null, 2));
+}
+
 function observePage(page: Page, observations: Observation) {
   page.on('response', (response) => {
     const local = localService(response.url());
@@ -370,8 +390,31 @@ async function registerCustomer(page: Page, email: string, name: string, testInf
   await page.getByLabel('Full name').fill(name);
   await page.getByLabel('Email').fill(email);
   await page.locator('input[autocomplete="new-password"]').fill(oldPassword);
+  const registerResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.origin === baseURL && url.pathname === '/api/auth/register' && response.request().method() === 'POST';
+  }, { timeout: 30_000 });
   await page.getByRole('button', { name: 'Create Account' }).click();
-  await expect(page.getByRole('heading', { name: 'Almost there' })).toBeVisible();
+  let response: Awaited<typeof registerResponse>;
+  try {
+    response = await registerResponse;
+  } catch {
+    writeRegistrationDiagnostic(testInfo, null, 'request_no_response');
+    throw new Error('PR82 registration failed: no HTTP response was observed.');
+  }
+  const status = response.status();
+  recordTrace(observations, 'customer_registration_response', response.url(), { method: 'POST', status });
+  if (status !== 202) {
+    const category = status === 400 ? 'request_rejected' : status === 503 ? 'temporarily_unavailable' : 'unexpected_status';
+    writeRegistrationDiagnostic(testInfo, status, category);
+    throw new Error(`PR82 registration failed: http_status=${status} category=${category}.`);
+  }
+  try {
+    await expect(page.getByRole('heading', { name: 'Almost there' })).toBeVisible();
+  } catch {
+    writeRegistrationDiagnostic(testInfo, status, 'accepted_response_ui_state_missing');
+    throw new Error(`PR82 registration failed: http_status=${status} category=accepted_response_ui_state_missing.`);
+  }
   const link = await capturedLink(email, initialCount + 1, 'signup');
   await gotoMailLink(page, link, 'signup confirmation');
   await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
