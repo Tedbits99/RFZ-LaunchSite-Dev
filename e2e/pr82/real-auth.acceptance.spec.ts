@@ -1026,8 +1026,17 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       );
       await gotoPath(adminPage, '/admin', 'ordinary staff dashboard after privileged route denial');
       await expect(adminPage.getByRole('heading', { name: 'Overview' })).toBeVisible();
+      const staffLogoutResponse = adminPage.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === baseURL && url.pathname === '/api/auth/admin-logout' && response.request().method() === 'POST';
+      });
       await adminPage.getByRole('button', { name: 'Log out of admin dashboard' }).click();
+      assert((await staffLogoutResponse).status() === 200, 'staff server logout succeeds');
       await expect(adminPage.getByRole('heading', { name: 'Admin sign in' })).toBeVisible();
+      assert(safePath(adminPage) === '/secure-admin-login', 'staff logout reaches the login boundary');
+      const staffSessionRemains = (await adminPage.context().cookies())
+        .some((cookie) => cookie.name === 'rfz-admin-auth' || cookie.name.startsWith('rfz-admin-auth.'));
+      assert(!staffSessionRemains, 'staff logout removes all admin session cookie chunks');
 
       await gotoPath(adminPage, '/secure-admin-login', 'revoked administrator denial');
       await adminPage.getByLabel('Email').fill(revokedEmail);

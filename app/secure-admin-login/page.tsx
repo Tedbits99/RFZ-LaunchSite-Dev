@@ -18,20 +18,26 @@ export default function SecureAdminLoginPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    // Render the form after hydration even if the optional session lookup is
+    // slow. A logout return must not wait on, or redirect from, stale browser
+    // session state. Protected pages still authorize on the server.
+    setReady(true)
+    if (new URLSearchParams(window.location.search).get('from') === 'logout') return
+    let active = true
     let supabase
     try {
       supabase = createAdminBrowserClient()
     } catch {
-      setReady(true)
       return
     }
     supabase.auth.getSession().then(({ data }: { data: { session: unknown | null } }) => {
-      if (data?.session) {
+      if (active && data?.session) {
         router.replace('/admin')
-      } else {
-        setReady(true)
       }
-    }).catch(() => setReady(true))
+    }).catch((error: unknown) => {
+      if (active) logAuthFlowFailure('admin_login', 'initial_session_lookup', error)
+    })
+    return () => { active = false }
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
