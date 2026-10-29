@@ -73,15 +73,18 @@ export async function POST(req: NextRequest) {
 
     const { data: packageRecord, error: packageError } = await client
       .from('packages')
-      .select('id, game_id, price_cents, is_active, games!inner(slug)')
+      .select('id, game_id, price_cents, is_active, catalog_status, games!inner(slug, catalog_status)')
       .eq('id', packageId)
       .eq('game_id', gameId)
       .maybeSingle();
-    if (packageError || !packageRecord || !packageRecord.is_active || packageRecord.price_cents <= 0) {
+    if (packageError || !packageRecord || !packageRecord.is_active || (packageRecord.catalog_status !== undefined && packageRecord.catalog_status !== 'PUBLISHED') || packageRecord.price_cents <= 0) {
+      return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
+    }
+    const packageGame = Array.isArray(packageRecord.games) ? packageRecord.games[0] : packageRecord.games;
+    if (packageGame?.catalog_status !== undefined && packageGame.catalog_status !== 'PUBLISHED') {
       return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
     }
 
-    const packageGame = Array.isArray(packageRecord.games) ? packageRecord.games[0] : packageRecord.games;
     if (packageGame?.slug === 'mobile-legends' || packageGame?.slug === 'mlbb') {
       if (!adminSupabase) {
         return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });

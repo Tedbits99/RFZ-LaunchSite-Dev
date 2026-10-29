@@ -31,6 +31,7 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     .select('id, slug, name, description, region, currency, banner_url, logo_url')
     .eq('slug', slug)
     .eq('is_active', true)
+    .eq('catalog_status', 'PUBLISHED')
     .maybeSingle();
   if (!game) notFound();
   const { data: fields } = await supabase.from('game_input_fields').select('*').eq('game_id', game.id).order('sort_order');
@@ -39,6 +40,7 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     .select('id, name, amount, price_cents, original_price_cents, bonus, sort_order, badge, image_url')
     .eq('game_id', game.id)
     .eq('is_active', true)
+    .eq('catalog_status', 'PUBLISHED')
     .gt('price_cents', 0)
     .order('sort_order');
   const { data: payConfigs } = await supabase.from('payment_config').select('method_key, display_name, is_enabled, logo_url').eq('is_enabled', true).order('sort_order');

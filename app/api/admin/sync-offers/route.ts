@@ -39,6 +39,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const categoryId = (body.category_id as string) || ML_CATEGORY_ID;
+    if (categoryId !== ML_CATEGORY_ID) {
+      return NextResponse.json({ error: 'Only the approved Mobile Legends supplier category can be synced.' }, { status: 400 });
+    }
 
     if (!SUPABASE_URL || !ANON_KEY) {
       return NextResponse.json({ error: 'Server not configured' }, { status: 503 });
@@ -55,7 +58,17 @@ export async function POST(req: NextRequest) {
     }
 
     const data = json.data as OffersResponse;
-    const offers = data.offers || [];
+    const rawOffers = Array.isArray(data?.offers) ? data.offers : null;
+    if (!rawOffers) return NextResponse.json({ error: 'Supplier response did not contain a complete offers list' }, { status: 502 });
+    const seenOfferIds = new Set<string>();
+    for (const offer of rawOffers) {
+      if (!offer || typeof offer.offer_id !== 'string' || !offer.offer_id.trim() || typeof offer.name !== 'string' || !offer.name.trim()) {
+        return NextResponse.json({ error: 'Supplier response contains an invalid offer.' }, { status: 502 });
+      }
+      if (seenOfferIds.has(offer.offer_id)) return NextResponse.json({ error: 'Supplier response contains duplicate offer IDs.' }, { status: 409 });
+      seenOfferIds.add(offer.offer_id);
+    }
+    const offers = rawOffers;
     if (offers.length === 0) {
       return NextResponse.json({ error: 'No offers found for this category' }, { status: 404 });
     }
@@ -118,6 +131,8 @@ export async function POST(req: NextRequest) {
             supplier_offer_id: offer.offer_id,
             supplier_category_id: categoryId,
             supplier_cost_usd: Number.isFinite(cost) ? cost : null,
+            supplier_last_seen_at: new Date().toISOString(),
+            supplier_review_required: false,
           })
           .eq('id', match.id);
         if (error) {
@@ -140,6 +155,9 @@ export async function POST(req: NextRequest) {
           supplier_offer_id: offer.offer_id,
           supplier_category_id: categoryId,
           supplier_cost_usd: Number.isFinite(cost) ? cost : null,
+          catalog_status: 'DRAFT',
+          supplier_last_seen_at: new Date().toISOString(),
+          supplier_review_required: false,
           badge: null,
         });
         if (error) {
@@ -189,16 +207,16 @@ export async function POST(req: NextRequest) {
     const mappedPackageIds = new Set((existingMappings || []).map((m) => m.package_id));
 
     let mappingsCreated = 0;
-    let packagesDeactivated = 0;
+    let packagesFlagged = 0;
 
     const syncedOfferIds = new Set(offers.map((offer) => offer.offer_id));
     for (const pkg of linkedPackages || []) {
       if (pkg.supplier_offer_id && !syncedOfferIds.has(pkg.supplier_offer_id)) {
-        const { error: deactivateError } = await db
+        const { error: reviewError } = await db
           .from('packages')
-          .update({ is_active: false })
+          .update({ supplier_review_required: true })
           .eq('id', pkg.id);
-        if (!deactivateError) packagesDeactivated++;
+        if (!reviewError) packagesFlagged++;
       }
     }
     for (const pkg of linkedPackages || []) {
@@ -231,7 +249,7 @@ export async function POST(req: NextRequest) {
       packages_failed: failed,
       failures,
       mappings_created: mappingsCreated,
-      packages_deactivated: packagesDeactivated,
+      packages_flagged_for_review: packagesFlagged,
       skipped: 0,
     });
   } catch (err) {

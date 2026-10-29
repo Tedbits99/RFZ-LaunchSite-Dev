@@ -1,9 +1,10 @@
 import { createAdminServerClient } from '@/lib/authSessionClients'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
-import { Gamepad2, Plus, Package as PackageIcon } from 'lucide-react'
+import { Gamepad2, Package as PackageIcon } from 'lucide-react'
 import Link from 'next/link'
 import GameToggle from './GameToggle'
+import GameCatalogActions from './GameCatalogActions'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +16,7 @@ type Game = {
   description: string
   region: string
   is_active: boolean
+  catalog_status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
   is_featured: boolean
   sort_order: number
   package_count: number
@@ -46,9 +48,7 @@ export default async function AdminGamesPage() {
         title="Games Catalog"
         subtitle="Manage your game catalog"
         action={
-          <button className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white">
-            <Plus size={16} /> Add Game
-          </button>
+          <GameCatalogActions />
         }
       />
 
@@ -92,12 +92,15 @@ export default async function AdminGamesPage() {
                   <td className="p-4">{g.is_featured ? <span className="text-[10px] text-cyan-300">Featured</span> : <span className="text-[10px] text-slate-600">—</span>}</td>
                   <td className="p-4 text-slate-500">{g.sort_order}</td>
                   <td className="p-4">
+                    <div className="flex flex-wrap items-center gap-1">
+                    <GameCatalogActions game={{ id: g.id, name: g.name, slug: g.slug, description: g.description, region: g.region, is_active: g.is_active, catalog_status: g.catalog_status || (g.is_active ? 'PUBLISHED' : 'DRAFT') }} />
                     <Link
                       href={`/admin/games/${g.id}/packages`}
                       className="inline-flex items-center gap-1 rounded-lg border border-[#22314d] px-2.5 py-1 text-[11px] text-cyan-300 hover:border-cyan-400/50 hover:bg-cyan-400/5"
                     >
                       <PackageIcon size={12} /> Packages
                     </Link>
+                    </div>
                   </td>
                 </tr>
               ))}

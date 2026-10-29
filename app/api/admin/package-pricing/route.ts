@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest) {
 
     const { data: current, error: currentError } = await db
       .from('packages')
-      .select('id, price_cents, is_active, supplier_offer_id, supplier_category_id, supplier_cost_usd, markup_percent, games!inner(slug)')
+      .select('id, price_cents, is_active, catalog_status, supplier_offer_id, supplier_category_id, supplier_cost_usd, markup_percent, games!inner(slug)')
       .eq('id', id)
       .maybeSingle();
     if (currentError) return NextResponse.json({ error: currentError.message }, { status: 500 });
@@ -80,6 +80,7 @@ export async function PATCH(req: NextRequest) {
     const game = Array.isArray(current.games) ? current.games[0] : current.games;
 
     if (nextActive && (game?.slug === 'mobile-legends' || game?.slug === 'mlbb')) {
+      if (nextPrice <= 0) return NextResponse.json({ error: 'An active package must have a positive selling price.' }, { status: 400 });
       if (!current.supplier_offer_id || current.supplier_category_id !== 'mobile_legends_philippines') {
         return NextResponse.json({ error: 'This package has no valid Mobile Legends FazerCards offer.' }, { status: 400 });
       }
@@ -101,6 +102,11 @@ export async function PATCH(req: NextRequest) {
         .eq('supplier_product_id', current.supplier_offer_id)
         .maybeSingle();
       if (!mapping) return NextResponse.json({ error: 'Configure the FazerCards mapping before activating this package.' }, { status: 400 });
+    }
+
+    if (typeof is_active === 'boolean') {
+      updates.catalog_status = nextActive ? 'PUBLISHED' : 'DRAFT';
+      if (nextActive) updates.published_at = new Date().toISOString();
     }
 
     const { data: updatedRows, error } = await db
