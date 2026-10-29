@@ -5,17 +5,9 @@ import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import portPolicy from './isolated-auth-port-policy.cjs';
 
-export const PORT_NAMES = ['API', 'DB', 'SHADOW', 'MAILPIT', 'SMTP', 'POP3'];
-
-/** @param {Record<string, string | undefined>} environment */
-export function validateIsolatedPorts(environment) {
-  const ports = PORT_NAMES.map((name) => environment[`E2E_LOCAL_${name}_PORT`]);
-  assert(ports.every((port) => typeof port === 'string' && /^[1-9][0-9]{3,4}$/.test(port)
-    && Number(port) >= 1024 && Number(port) <= 65535 && Number(port) !== 3000), 'invalid isolated service port');
-  assert(new Set(ports).size === PORT_NAMES.length, 'isolated service ports must be distinct');
-  return ports;
-}
+export const { PORT_NAMES, validateIsolatedPorts } = portPolicy;
 
 /** @param {string} run @param {string} attempt @param {string} mode */
 export function isolatedProjectId(run, attempt, mode) {

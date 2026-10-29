@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
-import { validateIsolatedPorts } from '../../scripts/isolated-auth-stack.mjs';
+import { validateIsolatedPorts } from '../../scripts/isolated-auth-port-policy.cjs';
 import path from 'node:path';
 
 type MailSummary = { id: string; date?: string };

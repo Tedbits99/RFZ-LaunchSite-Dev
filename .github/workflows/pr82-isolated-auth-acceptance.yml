@@ -61,6 +61,9 @@ jobs:
       - name: Install application and browser-test dependencies
         run: npm ci
 
+      - name: Collect both browser acceptance projects before starting containers
+        run: npx playwright test --config=playwright.pr82.config.ts --list
+
       - name: Install pinned Supabase CLI
         uses: supabase/setup-cli@v3
         with:
