@@ -863,10 +863,10 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         assert(await walletMethod.count() === 1, `${slug} renders RF Coins Wallet exactly once`);
         await expect(walletMethod).toBeDisabled();
         assert(await anonymousPage.locator('input[name="payment-method"]:not(:disabled)').count() > 0, `${slug} retains an ordinary product checkout method`);
-        if (slug === 'mobile-legends') await evidence(anonymousPage, testInfo, observations, 'storefront-payment-methods');
+        const width = await anonymousPage.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
+        assert(width.document <= width.viewport + 1, `${slug} has no horizontal page overflow at ${testInfo.project.name}`);
+        await evidence(anonymousPage, testInfo, observations, `storefront-${slug}-payment-methods`);
       }
-      const width = await anonymousPage.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
-      if (testInfo.project.name.startsWith('mobile')) assert(width.document <= width.viewport + 1, 'mobile storefront has no horizontal page overflow');
     });
 
     await test.step('verify active Super Admin, dashboard session isolation, reporting and role boundaries', async () => {

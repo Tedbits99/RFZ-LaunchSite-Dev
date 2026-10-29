@@ -112,7 +112,7 @@ export async function fazercardsCreateOrder(
   idempotencyKey: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SupplierOutcome> {
-  if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled') {
+  if (!isSupplierFulfillmentReleased(process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE)) {
     return { kind: 'confirmed-failure', error: 'Supplier fulfillment is disabled', rawResponse: null };
   }
   const controller = new AbortController();
@@ -176,7 +176,7 @@ export async function runFulfillmentForOrder(
   orderId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ success: boolean; error: string | null; ambiguous: boolean }> {
-  if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled') {
+  if (!isSupplierFulfillmentReleased(process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE)) {
     return { success: false, error: 'Supplier fulfillment is disabled', ambiguous: false };
   }
   try {
@@ -418,7 +418,7 @@ export async function processFulfillmentHandoffBatch(
   db: SupabaseClient,
   fetchImpl: typeof fetch = fetch,
 ): Promise<BatchResult> {
-  if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled') {
+  if (!isSupplierFulfillmentReleased(process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE)) {
     return { claimed: 0, fulfilled: 0, failed: 0, rejected: 0 };
   }
   const { data: claimed, error: claimError } = await db.rpc('rf_coin_claim_fulfillment_handoffs', {
