@@ -25,6 +25,13 @@ describe('customer wallet header summary', () => {
     expect(resolveCustomerWalletSummary(401, { wallet: { balance_coins: 1250 } })).toEqual({ kind: 'anonymous' });
   });
 
+  it('does not advertise a stored zero balance as active while the wallet master setting is disabled', () => {
+    expect(resolveCustomerWalletSummary(200, {
+      enabled: false, walletStatus: 'ready', wallet: { balance_coins: 0 },
+      topupsEnabled: false, packages: [],
+    })).toEqual({ kind: 'unavailable', message: 'Wallet unavailable. No balance is being presented as active.' });
+  });
+
   it('offers Add Funds only when the server enables funding and returns an active package', () => {
     const ready = (packages: unknown[]) => resolveCustomerWalletSummary(200, {
       enabled: true, walletStatus: 'ready', wallet: { balance_coins: 1250 }, topupsEnabled: true, packages,

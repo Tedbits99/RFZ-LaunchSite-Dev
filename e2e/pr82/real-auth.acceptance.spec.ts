@@ -847,6 +847,8 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
         await expect(page.getByText(/funding is release-locked/i)).toBeVisible();
         const response = await sameOriginJson(page, '/api/account/wallet');
         assert(response.status === 200 && response.payload?.walletStatus === 'ready' && Number(response.payload?.wallet?.balance_coins) === 0, 'initialized Customer A wallet displays the actual synthetic zero row');
+        assert(response.payload?.enabled === false && response.payload?.topupsEnabled === false && response.payload?.spendingEnabled === false,
+          'installed wallet fixture keeps master, funding and spending disabled');
         const ledger = await sameOriginJson(page, '/api/account/wallet/ledger');
         assert(ledger.status === 200 && Array.isArray(ledger.payload?.entries) && ledger.payload.entries.length === 0, 'zero-balance wallet has no fabricated ledger entries');
       }
@@ -854,7 +856,7 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       assert(topup.status === 503, 'wallet funding endpoint remains server-side release-locked');
 
       const walletTrigger = page.getByRole('button', {
-        name: schemaMode === 'absent' ? 'RF Coins wallet unavailable' : 'RF Coins balance: 0 RF',
+        name: 'RF Coins wallet unavailable',
         exact: true,
       });
       await expect(walletTrigger).toBeVisible();
