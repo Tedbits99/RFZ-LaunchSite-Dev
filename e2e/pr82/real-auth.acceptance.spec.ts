@@ -200,6 +200,7 @@ async function evidence(page: Page, testInfo: TestInfo, observations: Observatio
   fs.mkdirSync(directory, { recursive: true });
   const filename = `${schemaMode}-${testInfo.project.name}-${name}`;
   const screenshot = path.join(directory, `${filename}.png`);
+  await expect(page.getByRole('status', { name: 'Loading RF Coins wallet' })).toHaveCount(0);
   try {
     await page.screenshot({
       path: screenshot,
@@ -851,6 +852,28 @@ test('real customer and admin journeys, isolation, wallet locks and all eight st
       }
       const topup = await sameOriginJson(page, '/api/account/wallet/topup', 'POST', { packageId: '00000000-0000-4000-8000-000000000001' });
       assert(topup.status === 503, 'wallet funding endpoint remains server-side release-locked');
+
+      const walletTrigger = page.getByRole('button', {
+        name: schemaMode === 'absent' ? 'RF Coins wallet unavailable' : 'RF Coins balance: 0 RF',
+        exact: true,
+      });
+      await expect(walletTrigger).toBeVisible();
+      await walletTrigger.focus();
+      await walletTrigger.press('Enter');
+      const popover = page.getByRole('dialog', { name: 'RF Coins wallet', exact: true });
+      await expect(popover).toBeVisible();
+      await expect(popover.getByRole('link', { name: 'View Wallet', exact: true })).toBeFocused();
+      await expect(popover.getByRole('link', { name: 'Add Funds', exact: true })).toHaveCount(0);
+      const popoverBounds = await popover.boundingBox();
+      const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+      assert(popoverBounds && popoverBounds.x >= 0 && popoverBounds.y >= 0
+        && popoverBounds.x + popoverBounds.width <= viewport.width + 1
+        && popoverBounds.y + popoverBounds.height <= viewport.height + 1,
+      'keyboard-opened wallet popover stays within the viewport');
+      await evidence(page, testInfo, observations, 'wallet-header-keyboard-popover');
+      await page.keyboard.press('Escape');
+      await expect(popover).toHaveCount(0);
+      await expect(walletTrigger).toBeFocused();
       await evidence(page, testInfo, observations, 'customer-wallet-safe-state');
     });
 
