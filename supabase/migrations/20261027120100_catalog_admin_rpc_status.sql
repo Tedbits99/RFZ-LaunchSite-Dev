@@ -1,5 +1,26 @@
 -- Keep the existing admin catalog RPC useful after lifecycle status was added.
 -- This is additive and does not alter any existing data or hosted environment.
+CREATE OR REPLACE FUNCTION public.is_catalog_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (NULLIF(current_setting('request.jwt.claims', true), '')::json ->> 'role') = 'service_role',
+    false
+  ) OR EXISTS (
+    SELECT 1 FROM public.admins a
+    WHERE a.id = auth.uid()
+      AND a.is_active IS TRUE
+      AND a.role IN ('ADMIN', 'SUPER_ADMIN')
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.is_catalog_admin() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_catalog_admin() TO authenticated, service_role;
+
 DROP FUNCTION IF EXISTS public.admin_get_games_with_package_counts();
 
 CREATE FUNCTION public.admin_get_games_with_package_counts()
@@ -59,7 +80,7 @@ DECLARE
   v_count integer;
   v_distinct integer;
 BEGIN
-  IF NOT public.is_payment_operator() THEN RAISE EXCEPTION 'not authorized'; END IF;
+  IF NOT public.is_catalog_admin() THEN RAISE EXCEPTION 'not authorized'; END IF;
   IF jsonb_typeof(p_game) <> 'object' OR jsonb_typeof(p_fields) <> 'array' THEN RAISE EXCEPTION 'invalid catalog payload'; END IF;
   IF COALESCE(p_game->>'slug', '') !~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'
      OR length(COALESCE(p_game->>'name', '')) = 0 OR length(p_game->>'name') > 120
@@ -104,7 +125,7 @@ DECLARE
   v_count integer;
   v_distinct integer;
 BEGIN
-  IF NOT public.is_payment_operator() THEN RAISE EXCEPTION 'not authorized'; END IF;
+  IF NOT public.is_catalog_admin() THEN RAISE EXCEPTION 'not authorized'; END IF;
   PERFORM 1 FROM public.games WHERE id = p_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'game not found'; END IF;
   IF jsonb_typeof(p_updates) <> 'object' OR (p_fields IS NOT NULL AND jsonb_typeof(p_fields) <> 'array') THEN RAISE EXCEPTION 'invalid catalog payload'; END IF;
@@ -147,3 +168,60 @@ REVOKE EXECUTE ON FUNCTION public.admin_create_catalog_game(jsonb, jsonb) FROM P
 REVOKE EXECUTE ON FUNCTION public.admin_update_catalog_game(uuid, jsonb, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_create_catalog_game(jsonb, jsonb) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_update_catalog_game(uuid, jsonb, jsonb) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_update_catalog_pricing_assumptions(
+  p_fx_rate numeric DEFAULT NULL,
+  p_fee_reserve_bps integer DEFAULT NULL,
+  p_fixed_fee_cents integer DEFAULT NULL
+)
+RETURNS TABLE (
+  out_fx_rate numeric,
+  out_fee_reserve_bps integer,
+  out_fixed_fee_cents integer,
+  out_supplier_packages_for_review integer
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_current public.app_settings%ROWTYPE;
+  v_changed boolean;
+  v_review_count integer := 0;
+BEGIN
+  IF NOT public.is_catalog_admin() THEN RAISE EXCEPTION 'not authorized'; END IF;
+  IF p_fx_rate IS NOT NULL AND (p_fx_rate <= 0 OR p_fx_rate > 1000) THEN RAISE EXCEPTION 'invalid FX rate'; END IF;
+  IF p_fee_reserve_bps IS NOT NULL AND p_fee_reserve_bps NOT BETWEEN 0 AND 9999 THEN RAISE EXCEPTION 'invalid payment fee reserve'; END IF;
+  IF p_fixed_fee_cents IS NOT NULL AND p_fixed_fee_cents < 0 THEN RAISE EXCEPTION 'invalid fixed payment fee'; END IF;
+
+  SELECT * INTO v_current FROM public.app_settings WHERE id = 1 FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'pricing assumptions are not initialized'; END IF;
+  v_changed := (p_fx_rate IS NOT NULL AND p_fx_rate <> v_current.reference_usd_php_rate)
+    OR (p_fee_reserve_bps IS NOT NULL AND p_fee_reserve_bps IS DISTINCT FROM v_current.payment_fee_reserve_bps)
+    OR (p_fixed_fee_cents IS NOT NULL AND p_fixed_fee_cents IS DISTINCT FROM v_current.payment_fee_fixed_cents);
+
+  UPDATE public.app_settings SET
+    reference_usd_php_rate = COALESCE(p_fx_rate, reference_usd_php_rate),
+    payment_fee_reserve_bps = COALESCE(p_fee_reserve_bps, payment_fee_reserve_bps),
+    payment_fee_fixed_cents = COALESCE(p_fixed_fee_cents, payment_fee_fixed_cents),
+    updated_at = now()
+  WHERE id = 1;
+
+  IF v_changed THEN
+    UPDATE public.packages SET
+      is_active = false,
+      catalog_status = 'DRAFT',
+      published_at = NULL,
+      supplier_review_required = true
+    WHERE supplier_offer_id IS NOT NULL OR supplier_category_id IS NOT NULL;
+    GET DIAGNOSTICS v_review_count = ROW_COUNT;
+  END IF;
+
+  RETURN QUERY SELECT a.reference_usd_php_rate, a.payment_fee_reserve_bps,
+    a.payment_fee_fixed_cents, v_review_count
+  FROM public.app_settings a WHERE a.id = 1;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.admin_update_catalog_pricing_assumptions(numeric, integer, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_update_catalog_pricing_assumptions(numeric, integer, integer) TO authenticated, service_role;

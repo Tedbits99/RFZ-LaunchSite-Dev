@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireCatalogAdmin } from '@/lib/catalogAdminGuard';
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ALLOWED_IMAGE = /^https:\/\//;
@@ -51,7 +51,7 @@ function normalizeFields(value: unknown): GameField[] {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCatalogAdmin(req);
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   const query = new URL(req.url).searchParams.get('q')?.trim() || '';
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCatalogAdmin(req);
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   const body = await req.json().catch(() => null) as Record<string, unknown> | null;

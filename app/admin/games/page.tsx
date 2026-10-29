@@ -3,7 +3,6 @@ import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Gamepad2, Package as PackageIcon } from 'lucide-react'
 import Link from 'next/link'
-import GameToggle from './GameToggle'
 import GameCatalogActions from './GameCatalogActions'
 
 export const dynamic = 'force-dynamic'
@@ -66,7 +65,7 @@ export default async function AdminGamesPage() {
                 <th className="p-4 font-medium">Name</th>
                 <th className="p-4 font-medium">Region</th>
                 <th className="p-4 font-medium">Packages</th>
-                <th className="p-4 font-medium">Status / Toggle</th>
+                <th className="p-4 font-medium">Status</th>
                 <th className="p-4 font-medium">Featured</th>
                 <th className="p-4 font-medium">Sort</th>
                 <th className="p-4 font-medium">Actions</th>
@@ -88,7 +87,7 @@ export default async function AdminGamesPage() {
                   </td>
                   <td className="p-4 text-slate-400">{g.region}</td>
                   <td className="p-4 text-slate-400">{g.package_count || 0}</td>
-                  <td className="p-4"><GameToggle id={g.id} name={g.name} is_active={g.is_active} /></td>
+                  <td className="p-4"><span className={`rounded-full px-2 py-1 text-[10px] ${g.catalog_status === 'PUBLISHED' ? 'bg-emerald-500/10 text-emerald-300' : g.catalog_status === 'ARCHIVED' ? 'bg-rose-500/10 text-rose-300' : 'bg-slate-500/10 text-slate-300'}`}>{g.catalog_status || (g.is_active ? 'PUBLISHED' : 'DRAFT')}</span></td>
                   <td className="p-4">{g.is_featured ? <span className="text-[10px] text-cyan-300">Featured</span> : <span className="text-[10px] text-slate-600">—</span>}</td>
                   <td className="p-4 text-slate-500">{g.sort_order}</td>
                   <td className="p-4">

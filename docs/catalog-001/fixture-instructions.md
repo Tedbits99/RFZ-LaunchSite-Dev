@@ -1,20 +1,55 @@
-# CATALOG-001 disposable fixtures
+# CATALOG-001 disposable integration environment
 
-These commands are local-only. They do not contact Supabase, suppliers, payment providers, or email services.
+Run the complete local-only acceptance stack from the repository root:
 
 ```sh
-scripts/catalog-001/disposable-postgres.sh start
-# Run the selected migration/contract harness against:
-# postgresql://postgres:synthetic-only@127.0.0.1:55432/runfazone
-scripts/catalog-001/disposable-postgres.sh stop
+npx playwright install chromium
+scripts/catalog-001/run-local-acceptance.sh
 ```
 
-The implementation requires synthetic Auth identities for admin, staff, and customer roles. The current cloud workspace has Docker/PostgreSQL but no Supabase CLI or local Auth service, so those identities remain a CI/local-Supabase prerequisite. Do not point this fixture at a hosted URL or supply production credentials.
+Requirements: Node.js 22, npm dependencies from the lockfile, Docker, and the
+Supabase CLI 2.121.0. The runner verifies the canonical migration manifest,
+copies only the reviewed migrations into a fresh temporary Supabase project,
+allocates distinct loopback ports, starts PostgreSQL 17 + GoTrue + PostgREST +
+local Inbucket, resets only that local project, provisions synthetic identities,
+and runs the database-backed contract and desktop/mobile browser suites. It
+always calls `supabase stop --no-backup` and removes only its uniquely created
+`/tmp/rfz-catalog-001.*` directory, including on interruption.
 
-Required synthetic identities:
+The command intentionally has no persistent `start` mode. Setup, test, and
+teardown are one reproducible operation so that a reset cannot accidentally
+target an existing or linked project. The script removes inherited
+`SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, project-ref, and DB URL
+overrides from every CLI invocation, rejects linked project metadata, and
+requires the reported API and PostgreSQL endpoints to be loopback and match the
+ports selected for that run. The project ID is unique per run/attempt. No
+hosted Supabase project or migration endpoint is used.
 
-- `admin@example.invalid`: catalog lifecycle and package-management checks.
-- `staff@example.invalid`: authorization-denial checks for admin routes.
-- `customer@example.invalid`: storefront and checkout visibility checks.
+Synthetic Auth identities use `admin@example.invalid`, `staff@example.invalid`,
+and `customer@example.invalid`. Passwords are random per run, stay in the
+temporary test environment, and are not printed. The admin row has role
+`ADMIN`, the staff row has role `STAFF`, and the customer receives an active
+synthetic customer profile through the admin status RPC. GoTrue email is
+confirmed locally and uses only the in-container Inbucket SMTP binding; no
+email is delivered externally.
 
-Seed data must use deterministic UUIDs and offer IDs, with at least one draft game, one published game, one archived game, a positive-price package, a zero-price package, duplicate supplier offers, and a disappeared upstream offer. Teardown is `scripts/catalog-001/disposable-postgres.sh stop`; no hosted migration is part of setup or teardown.
+Deterministic seed records are `catalog-001-seed-draft`,
+`catalog-001-seed-published`, and `catalog-001-seed-archived`, with matching
+synthetic packages. The acceptance fixtures add run-tagged, uniquely keyed
+games and offers so desktop/mobile projects cannot collide. Every database
+write is to the disposable local stack. A clean reset removes all fixture rows.
+
+The snapshot importer currently supports only the approved Mobile Legends
+category `mobile_legends_philippines`; it does not claim general supplier
+category importing. It performs no provider request. `/api/admin/sync-offers`
+remains release-locked, FazerCards is seeded disabled, payment runs in mock
+mode, supplier fulfillment remains disabled in both app and database settings,
+and RF Coins flags/payment method remain false. No payment, supplier purchase,
+or hosted email operation is part of this suite.
+
+For manual cleanup after a forced machine shutdown, find the exact project ID
+reported by the runner and run `supabase --workdir <that-run's-temp-stack>
+stop --no-backup`; do not use `supabase stop --all`. A normal run performs this
+cleanup automatically. Temporary Auth keys and generated passwords are not
+production secrets and must never be copied into repository files or hosted
+configuration.

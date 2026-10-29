@@ -1,0 +1,98 @@
+name: CATALOG-001 disposable acceptance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-001-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  catalog-001-disposable-acceptance:
+    if: github.event.pull_request.number == 93
+    name: Catalog PostgreSQL 17, Auth, and browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      CATALOG_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      CATALOG_RUN_TAG: catalog-${{ github.run_id }}-${{ github.run_attempt }}
+      NEXT_TELEMETRY_DISABLED: "1"
+      PAYMENT_MODE: mock
+      PAYMENT_PROVIDER: mock
+
+    steps:
+      - name: Check out the exact PR #93 head without persisting credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify branch, PR, and exact candidate SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" == 93 ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf 'CATALOG_CANDIDATE_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install pinned local Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.121.0
+
+      - name: Verify fail-closed migration selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version | grep -Fx '2.121.0'
+          supabase start --help | grep -q -- '--exclude'
+          supabase db reset --help | grep -q -- '--local'
+          bash scripts/verify-deployable-migrations.sh --self-test
+          bash scripts/verify-deployable-migrations.sh
+
+      - name: Install Chromium for the two acceptance projects
+        run: npx playwright install --with-deps chromium
+
+      - name: Run relevant application test suite
+        run: npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
+
+      - name: Run TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run isolated PostgreSQL 17, Auth, supplier-contract, and browser matrix
+        shell: bash
+        env:
+          CATALOG_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          CATALOG_RUN_TAG: catalog-${{ github.run_id }}-${{ github.run_attempt }}
+        run: scripts/catalog-001/run-local-acceptance.sh
+
+      - name: Upload sanitized synthetic catalog evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-001-sanitized-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/catalog-001/test-output/
+          if-no-files-found: warn
+          retention-days: 7

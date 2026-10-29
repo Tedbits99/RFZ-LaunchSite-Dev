@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireCatalogAdmin } from '@/lib/catalogAdminGuard';
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireCatalogAdmin(req);
   if (!session.ok) return session.response;
+  if (!adminSupabase) return NextResponse.json({ error: 'Server-side catalog database access is not configured.' }, { status: 503 });
 
   try {
     const body = await req.json();
@@ -14,11 +15,15 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Package id is required' }, { status: 400 });
     }
 
-    const db = adminSupabase || session.client;
+    const db = adminSupabase;
+
+    if (typeof is_active === 'boolean') {
+      return NextResponse.json({ error: 'Direct publication toggles are disabled. Use the catalog lifecycle endpoint.' }, { status: 409 });
+    }
 
     const { data: current, error: currentError } = await db
       .from('packages')
-      .select('id, price_cents, is_active, catalog_status, supplier_offer_id, supplier_category_id, supplier_cost_usd, markup_percent, games!inner(slug)')
+      .select('id, price_cents, original_price_cents, is_active, catalog_status, supplier_offer_id, supplier_category_id, supplier_cost_usd, supplier_review_required, markup_percent, games!inner(slug)')
       .eq('id', id)
       .maybeSingle();
     if (currentError) return NextResponse.json({ error: currentError.message }, { status: 500 });
@@ -26,21 +31,15 @@ export async function PATCH(req: NextRequest) {
 
     const updates: Record<string, unknown> = {};
 
-    if (typeof price_cents === 'number' && price_cents >= 0) {
-      updates.price_cents = price_cents;
-    }
-    if (typeof is_active === 'boolean') {
-      updates.is_active = is_active;
-    }
-    if (typeof sort_order === 'number') {
-      updates.sort_order = sort_order;
-    }
+    if (price_cents !== undefined && (!Number.isSafeInteger(price_cents) || price_cents < 0)) return NextResponse.json({ error: 'price_cents must be a non-negative integer.' }, { status: 400 });
+    if (price_cents !== undefined) updates.price_cents = price_cents;
+    if (sort_order !== undefined && (!Number.isSafeInteger(sort_order) || sort_order < 0)) return NextResponse.json({ error: 'sort_order must be a non-negative integer.' }, { status: 400 });
+    if (sort_order !== undefined) updates.sort_order = sort_order;
     if (badge !== undefined) {
       updates.badge = badge || null;
     }
-    if (typeof original_price_cents === 'number') {
-      updates.original_price_cents = original_price_cents || null;
-    }
+    if (original_price_cents !== undefined && original_price_cents !== null && (!Number.isSafeInteger(original_price_cents) || original_price_cents < 0)) return NextResponse.json({ error: 'original_price_cents must be null or a non-negative integer.' }, { status: 400 });
+    if (original_price_cents !== undefined) updates.original_price_cents = original_price_cents;
     if (image_url !== undefined) {
       const trimmed = typeof image_url === 'string' ? image_url.trim() : '';
       updates.image_url = trimmed.startsWith('https://') ? trimmed : null;
@@ -76,37 +75,13 @@ export async function PATCH(req: NextRequest) {
     }
 
     const nextPrice = typeof updates.price_cents === 'number' ? updates.price_cents : current.price_cents;
-    const nextActive = typeof updates.is_active === 'boolean' ? updates.is_active : current.is_active;
-    const game = Array.isArray(current.games) ? current.games[0] : current.games;
-
-    if (nextActive && (game?.slug === 'mobile-legends' || game?.slug === 'mlbb')) {
-      if (nextPrice <= 0) return NextResponse.json({ error: 'An active package must have a positive selling price.' }, { status: 400 });
-      if (!current.supplier_offer_id || current.supplier_category_id !== 'mobile_legends_philippines') {
-        return NextResponse.json({ error: 'This package has no valid Mobile Legends FazerCards offer.' }, { status: 400 });
-      }
-
-      const { data: supplier } = await db
-        .from('suppliers')
-        .select('id')
-        .eq('code', 'fazercards')
-        .eq('enabled', true)
-        .maybeSingle();
-      if (!supplier) return NextResponse.json({ error: 'FazerCards supplier is not enabled.' }, { status: 400 });
-
-      const { data: mapping } = await db
-        .from('supplier_package_mappings')
-        .select('id')
-        .eq('package_id', id)
-        .eq('supplier_id', supplier.id)
-        .eq('enabled', true)
-        .eq('supplier_product_id', current.supplier_offer_id)
-        .maybeSingle();
-      if (!mapping) return NextResponse.json({ error: 'Configure the FazerCards mapping before activating this package.' }, { status: 400 });
-    }
-
-    if (typeof is_active === 'boolean') {
-      updates.catalog_status = nextActive ? 'PUBLISHED' : 'DRAFT';
-      if (nextActive) updates.published_at = new Date().toISOString();
+    const nextOriginalPrice = updates.original_price_cents === null ? null : typeof updates.original_price_cents === 'number' ? updates.original_price_cents : current.original_price_cents;
+    if (nextOriginalPrice !== null && nextOriginalPrice < nextPrice) return NextResponse.json({ error: 'original_price_cents cannot be below price_cents.' }, { status: 400 });
+    if (typeof updates.price_cents === 'number' && updates.price_cents !== current.price_cents) {
+      updates.catalog_status = 'DRAFT';
+      updates.is_active = false;
+      updates.published_at = null;
+      if (current.supplier_offer_id || current.supplier_category_id) updates.supplier_review_required = true;
     }
 
     const { data: updatedRows, error } = await db
