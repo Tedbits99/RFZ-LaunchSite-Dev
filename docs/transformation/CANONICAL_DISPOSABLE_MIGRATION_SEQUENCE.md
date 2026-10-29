@@ -142,6 +142,8 @@
 | 103 | INCLUDE | `20261028120000_rf_coins_schema.sql` | `26ba5f74bf096e2649f22c006b7a4893ef3d9c161b2d42fbe17b15f1e4192536` | 102. 20261028115900_grant_service_role_supplier_transactions_select.sql | additive wallet schema; RLS on; master/top-up/spending flags false; RF Coins payment method inserted/kept disabled; hard-false orders-table guard blocks wallet payment even if payment_config is toggled; no outbound calls, jobs, or secrets |
 | 104 | INCLUDE | `20261028120100_rf_coins_functions.sql` | `b19f7bb48b434c9c049ac0ad1375ddefbc4fd25cefb6c3a859ff083e30115351` | 103. 20261028120000_rf_coins_schema.sql | constrained SECURITY DEFINER RPCs and explicit grants; funding/spending and wallet-fulfillment enqueue/claim release constants false; no provider or supplier calls |
 | 105 | INCLUDE | `20261028120200_rf_coin_admin_center_read.sql` | `9ce49de1c1fada9e051648cddfc33fd50f0e98da43dba013a653ec6bdec688f1` | 104. 20261028120100_rf_coins_functions.sql | bounded active-SUPER_ADMIN reports/export audit; no payment, supplier, email, or scheduler side effects |
+| 106 | INCLUDE | `20261027120000_catalog_lifecycle.sql` | `259ac3fb4beb0c01baa6b649db56849399ffd1036ccbc44153c9e25ad2f189d0` | 100. 20261027110000_grant_public_catalog_columns.sql | additive catalog lifecycle/status columns; no outbound target; run in isolated disposable DB |
+| 107 | INCLUDE | `20261027120100_catalog_admin_rpc_status.sql` | `f622cf01eb53428822ef3f20ce32e1945e59384417787995337043f48c9d751d` | 106. 20261027120000_catalog_lifecycle.sql | status-aware admin catalog RPC; no outbound target; run in isolated disposable DB |
 
 ## Execution gates
 
