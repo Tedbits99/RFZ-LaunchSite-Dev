@@ -144,7 +144,7 @@
 | 105 | INCLUDE | `20261028120200_rf_coin_admin_center_read.sql` | `9ce49de1c1fada9e051648cddfc33fd50f0e98da43dba013a653ec6bdec688f1` | 104. 20261028120100_rf_coins_functions.sql | bounded active-SUPER_ADMIN reports/export audit; no payment, supplier, email, or scheduler side effects |
 | 106 | INCLUDE | `20261027120000_catalog_lifecycle.sql` | `5a6b641fcf2a85d00399f90bdc3d8f7653621faec0d5a69309a99ef5cd648d06` | 100. 20261027110000_grant_public_catalog_columns.sql | additive catalog lifecycle/status columns and saleability-based legacy backfill; no outbound target; run in isolated disposable DB |
 | 107 | INCLUDE | `20261027120100_catalog_admin_rpc_status.sql` | `38004fd89e6d5ff7892e8859b36a4e12e5938b8a93df490a2ef5ff866e029f48` | 106. 20261027120000_catalog_lifecycle.sql | status-aware admin catalog RPCs with catalog-admin role guard; no outbound target; run in isolated disposable DB |
-| 108 | INCLUDE | `20261027120200_catalog_order_saleability_guard.sql` | `497b7dfbae6b8669a72a47ce0d199115b07df91a4a0f2cee312080ca1a2f38c6` | 107. 20261027120100_catalog_admin_rpc_status.sql | database guard rejects new orders for hidden, archived, invalid-price, or release-locked supplier catalog rows; browser-role catalog DML revoked; no outbound target |
+| 108 | INCLUDE | `20261027120200_catalog_order_saleability_guard.sql` | `73849c4f224fb599d8100e38647a51d652c5637f34eb94baffb0e099112bbfea` | 107. 20261027120100_catalog_admin_rpc_status.sql | database guard rejects new orders for hidden, archived, invalid-price, or release-locked supplier catalog rows; browser-role catalog DML revoked; no outbound target |
 
 ## Execution gates
 

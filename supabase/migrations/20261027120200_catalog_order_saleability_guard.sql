@@ -78,7 +78,7 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.guard_order_catalog_saleability() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.guard_order_catalog_saleability() FROM PUBLIC, anon, authenticated, service_role;
 
 -- Catalog writes are routed through the narrow SECURITY DEFINER game RPCs or
 -- authenticated server APIs using service_role. Remove direct browser-role DML
