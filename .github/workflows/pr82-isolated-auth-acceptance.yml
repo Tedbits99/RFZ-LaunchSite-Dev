@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr82-isolated-auth-${{ github.event.pull_request.head.sha }}
+  group: pr82-isolated-auth-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -83,28 +83,10 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/verify-deployable-migrations.sh
-          stack_root="$RUNNER_TEMP/rfz-pr82-${MODE}"
+          stack_root="$RUNNER_TEMP/rfz-pr82-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${MODE}"
           mkdir -p "$stack_root/supabase/migrations"
           cp supabase/e2e/config.toml "$stack_root/supabase/config.toml"
-          case "$MODE" in
-            absent) port_offset=0 ;;
-            installed-locked) port_offset=1000 ;;
-            *) echo 'Unknown isolated wallet-schema mode.' >&2; exit 1 ;;
-          esac
-          api_port=$((54321 + port_offset))
-          db_port=$((54322 + port_offset))
-          shadow_port=$((54320 + port_offset))
-          mailpit_port=$((54324 + port_offset))
-          smtp_port=$((54325 + port_offset))
-          pop3_port=$((54326 + port_offset))
-          sed -i \
-            -e "s/^port = 54321$/port = ${api_port}/" \
-            -e "s/^port = 54322$/port = ${db_port}/" \
-            -e "s/^shadow_port = 54320$/shadow_port = ${shadow_port}/" \
-            -e "s/^port = 54324$/port = ${mailpit_port}/" \
-            -e "s/^smtp_port = 54325$/smtp_port = ${smtp_port}/" \
-            -e "s/^pop3_port = 54326$/pop3_port = ${pop3_port}/" \
-            "$stack_root/supabase/config.toml"
+          node scripts/isolated-auth-stack.mjs "$stack_root/supabase/config.toml" "$GITHUB_ENV"
           expected_wallet_files=(
             20261028120000_rf_coins_schema.sql
             20261028120100_rf_coins_functions.sql
@@ -133,15 +115,14 @@ jobs:
             echo 'Refusing a linked local Supabase project.' >&2
             exit 1
           fi
-          printf 'RFZ_STACK_ROOT=%s\nRFZ_MIGRATION_FILE_COUNT=%s\nE2E_LOCAL_API_PORT=%s\nE2E_LOCAL_DB_PORT=%s\nE2E_LOCAL_MAILPIT_PORT=%s\n' \
-            "$stack_root" "$copied" "$api_port" "$db_port" "$mailpit_port" >> "$GITHUB_ENV"
+          printf 'RFZ_STACK_ROOT=%s\nRFZ_MIGRATION_FILE_COUNT=%s\n' "$stack_root" "$copied" >> "$GITHUB_ENV"
           printf 'ISOLATED_MIGRATION_MODE=%s files=%s candidate=%s\n' "$MODE" "$copied" "$EXPECTED_SHA"
 
       - name: Start disposable PostgreSQL 17, GoTrue, PostgREST and local email catcher
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(sed -n 's/^project_id = "\([^"]*\)"$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")" == runfazone-pr82-isolated-auth ]]
+          [[ "$(sed -n 's/^project_id = "\([^"]*\)"$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")" == "$RFZ_STACK_PROJECT_ID" ]]
           [[ ! -e "$RFZ_STACK_ROOT/supabase/.temp/project-ref" ]]
           refresh_reuse_interval="$(sed -n 's/^refresh_token_reuse_interval = \([0-9][0-9]*\)$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")"
           [[ "$refresh_reuse_interval" == 10 ]] || {
@@ -180,12 +161,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t auth_containers < <(docker ps --format '{{.Names}}' | awk '/^supabase_auth_.*runfazone-pr82-isolated-auth$/')
-          [[ "${#auth_containers[@]}" == 1 ]] || {
+          auth_container="supabase_auth_${RFZ_STACK_PROJECT_ID}"
+          [[ "$(docker inspect --format '{{.State.Running}}' "$auth_container")" == true ]] || {
             echo 'BLOCKED: isolated Auth container was not uniquely identified.' >&2
             exit 1
           }
-          auth_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${auth_containers[0]}")"
+          auth_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$auth_container")"
           smtp_host="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_HOST=//p')"
           smtp_port="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_SMTP_PORT=//p')"
           email_rate_limit="$(printf '%s\n' "$auth_environment" | sed -n 's/^GOTRUE_RATE_LIMIT_EMAIL_SENT=//p')"
@@ -247,7 +228,7 @@ jobs:
           for (const secret of [anon, service, hmac]) process.stdout.write(`::add-mask::${secret}\n`);
           fs.appendFileSync(githubEnvPath, `${lines.join('\n')}\n`);
           fs.unlinkSync(statusPath);
-          console.log(`LOCAL_SUPABASE_BINDING_PASS origin=${parsed.origin} project=runfazone-pr82-isolated-auth`);
+          console.log(`LOCAL_SUPABASE_BINDING_PASS origin=${parsed.origin} project=${process.env.RFZ_STACK_PROJECT_ID}`);
           NODE
 
       - name: Verify disposable migration state and release locks

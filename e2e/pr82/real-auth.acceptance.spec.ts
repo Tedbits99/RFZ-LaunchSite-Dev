@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
+import { validateIsolatedPorts } from '../../scripts/isolated-auth-stack.mjs';
 import path from 'node:path';
 
 type MailSummary = { id: string; date?: string };
@@ -28,9 +29,8 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const mailpitURL = process.env.E2E_MAILPIT_URL;
 const schemaMode = process.env.E2E_WALLET_SCHEMA_MODE;
-const localApiPort = schemaMode === 'installed-locked' ? '55321' : '54321';
-const localDbPort = schemaMode === 'installed-locked' ? '55322' : '54322';
-const localMailpitPort = schemaMode === 'installed-locked' ? '55324' : '54324';
+const localApiPort = process.env.E2E_LOCAL_API_PORT || '';
+const localMailpitPort = process.env.E2E_LOCAL_MAILPIT_PORT || '';
 const candidateSha = process.env.E2E_CANDIDATE_SHA;
 const oldPassword = 'Disposable-Old-42!abc';
 const newPassword = 'Disposable-New-84!xyz';
@@ -43,7 +43,7 @@ function assert(condition: unknown, label: string): asserts condition {
 function requireLocalConfiguration() {
   assert(supabaseUrl && anonKey && serviceKey && mailpitURL, 'local Auth services are configured');
   assert(schemaMode === 'absent' || schemaMode === 'installed-locked', 'wallet schema test mode is explicit');
-  assert(process.env.E2E_LOCAL_API_PORT === localApiPort && process.env.E2E_LOCAL_DB_PORT === localDbPort && process.env.E2E_LOCAL_MAILPIT_PORT === localMailpitPort, 'isolated local service ports match the selected schema mode');
+  validateIsolatedPorts(process.env);
   assert(candidateSha && /^[0-9a-f]{40}$/.test(candidateSha), 'candidate SHA is exact');
   const url = new URL(supabaseUrl);
   assert(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === localApiPort, 'Supabase URL is loopback only');
