@@ -69,7 +69,7 @@ async function adminCookie() {
     email: requiredEnv('CATALOG_ADMIN_EMAIL'), password: requiredEnv('CATALOG_ADMIN_PASSWORD'),
   });
   if (error || !data.session) throw new Error('Synthetic admin could not authenticate to local Supabase Auth.');
-  const value = `base64url-${Buffer.from(JSON.stringify(data.session)).toString('base64url')}`;
+  const value = `base64-${Buffer.from(JSON.stringify(data.session)).toString('base64url')}`;
   return `rfz-admin-auth=${value}`;
 }
 

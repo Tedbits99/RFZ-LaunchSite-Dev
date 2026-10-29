@@ -147,7 +147,7 @@ export async function loginStaff(page: Page) {
   const staff = await identityDb(process.env.CATALOG_STAFF_EMAIL || '', process.env.CATALOG_STAFF_PASSWORD || '')
   const { data: { session } } = await staff.auth.getSession()
   if (!session) throw new Error('Synthetic staff identity did not receive a local Auth session.')
-  const value = `base64url-${Buffer.from(JSON.stringify(session)).toString('base64url')}`
+  const value = `base64-${Buffer.from(JSON.stringify(session)).toString('base64url')}`
   await page.context().addCookies([{
     name: 'rfz-admin-auth', value, url: 'http://127.0.0.1:3000', sameSite: 'Lax',
   }])
