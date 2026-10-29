@@ -84,17 +84,13 @@ export async function POST(req: NextRequest) {
     is_active: false, is_featured: body.is_featured === true, sort_order: typeof body.sort_order === 'number' ? Math.round(body.sort_order) : 100,
     catalog_status: 'DRAFT',
   };
-  const { data: game, error } = await db.from('games').insert(row).select().single();
+  const { data: gameId, error } = await db.rpc('admin_create_catalog_game', { p_game: row, p_fields: fields });
   if (error) {
-    if (error.code === '23505') return NextResponse.json({ error: 'A game with this slug already exists.' }, { status: 409 });
+    if (error.code === '23505' || /duplicate|unique/i.test(error.message)) return NextResponse.json({ error: 'A game with this slug already exists.' }, { status: 409 });
+    if (/invalid|field/i.test(error.message)) return NextResponse.json({ error: 'Game fields could not be created.' }, { status: 400 });
     return NextResponse.json({ error: 'Game could not be created.' }, { status: 500 });
   }
-  if (fields.length) {
-    const { error: fieldError } = await db.from('game_input_fields').insert(fields.map((field) => ({ ...field, game_id: game.id })));
-    if (fieldError) {
-      await db.from('games').delete().eq('id', game.id);
-      return NextResponse.json({ error: 'Game fields could not be created.' }, { status: 400 });
-    }
-  }
+  const { data: game, error: readError } = await db.from('games').select('*, game_input_fields(*)').eq('id', gameId).single();
+  if (readError || !game) return NextResponse.json({ error: 'Game was created but could not be read back.' }, { status: 500 });
   return NextResponse.json({ data: game }, { status: 201 });
 }

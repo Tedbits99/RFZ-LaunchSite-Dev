@@ -4,6 +4,24 @@ import { requireAdmin } from '@/lib/adminGuard';
 
 const ALLOWED_IMAGE = /^https:\/\//;
 
+function normalizeFields(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const fields = value.map((field, index) => {
+    const row = field as Record<string, unknown>;
+    return {
+      label: typeof row.label === 'string' ? row.label.trim() : '',
+      field_key: typeof row.field_key === 'string' ? row.field_key.trim().toLowerCase() : '',
+      placeholder: typeof row.placeholder === 'string' ? row.placeholder.trim() : '',
+      help_text: typeof row.help_text === 'string' ? row.help_text.trim() : '',
+      is_required: row.is_required !== false,
+      sort_order: typeof row.sort_order === 'number' ? Math.round(row.sort_order) : index,
+    };
+  });
+  if (fields.some((field) => !field.label || !/^[a-z][a-z0-9_]*$/.test(field.field_key))) return null;
+  if (new Set(fields.map((field) => field.field_key)).size !== fields.length) return null;
+  return fields;
+}
+
 function validImage(value: unknown): boolean {
   return value === null || value === '' || (typeof value === 'string' && ALLOWED_IMAGE.test(value));
 }
@@ -50,18 +68,15 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
   if (typeof body.sort_order === 'number') updates.sort_order = Math.round(body.sort_order);
   if (typeof body.is_featured === 'boolean') updates.is_featured = body.is_featured;
   if (!Object.keys(updates).length && body.fields === undefined) return NextResponse.json({ error: 'No fields to update.' }, { status: 400 });
-  if (Object.keys(updates).length) {
-    const { data, error } = await db.from('games').update(updates).eq('id', id).select().single();
-    if (error) return NextResponse.json({ error: 'Game could not be updated.' }, { status: 500 });
-    if (body.fields === undefined) return NextResponse.json({ data });
+  const fields = body.fields === undefined ? undefined : normalizeFields(body.fields);
+  if (body.fields !== undefined && fields === null) return NextResponse.json({ error: 'Every player field needs a valid, unique label and field key.' }, { status: 400 });
+  const { error: updateError } = await db.rpc('admin_update_catalog_game', { p_id: id, p_updates: updates, p_fields: fields ?? null });
+  if (updateError) {
+    if (/not found/i.test(updateError.message)) return NextResponse.json({ error: 'Game not found.' }, { status: 404 });
+    if (/invalid|field/i.test(updateError.message)) return NextResponse.json({ error: 'Player fields could not be updated.' }, { status: 400 });
+    return NextResponse.json({ error: 'Game could not be updated.' }, { status: 500 });
   }
-  if (body.fields !== undefined) {
-    if (!Array.isArray(body.fields)) return NextResponse.json({ error: 'fields must be an array.' }, { status: 400 });
-    const fields = body.fields.map((field, index) => ({ ...(field as Record<string, unknown>), game_id: id, sort_order: typeof (field as Record<string, unknown>).sort_order === 'number' ? Math.round((field as Record<string, unknown>).sort_order as number) : index }));
-    await db.from('game_input_fields').delete().eq('game_id', id);
-    const { error } = fields.length ? await db.from('game_input_fields').insert(fields) : { error: null };
-    if (error) return NextResponse.json({ error: 'Player fields could not be updated.' }, { status: 400 });
-  }
-  const { data } = await db.from('games').select('*, game_input_fields(*)').eq('id', id).single();
+  const { data, error: readError } = await db.from('games').select('*, game_input_fields(*)').eq('id', id).single();
+  if (readError) return NextResponse.json({ error: 'Game could not be read after update.' }, { status: 500 });
   return NextResponse.json({ data });
 }
