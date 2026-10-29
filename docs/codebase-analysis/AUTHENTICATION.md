@@ -1,22 +1,56 @@
 # Authentication and authorization
 
-## Customer
+Reviewed for the PR #82 recovery on 2026-10-29. This describes the reviewed source; it does not assert that the candidate or its pending migrations have been deployed. See [owner acceptance](../../OWNER_ACCEPTANCE.md) for candidate-bound validation and remaining gates.
 
-The verified customer-facing checkout and tracking flows are guest/email based. Order lookup requires reference plus email in API routes. Supabase browser Auth is available and the secure admin login uses `signInWithPassword`, but the ordinary login/register pages post to `/api/auth`, and no matching route was found in the inspected tree. The account pages therefore do not constitute a verified authenticated customer area.
+## Components and trust boundaries
 
-## Admin
+| Component | Responsibility |
+| --- | --- |
+| [Session configuration](../../lib/authSessionConfig.ts) | Separate customer, admin and recovery cookie names. |
+| [Browser clients](../../lib/authSessionBrowserClients.ts) and [server clients](../../lib/authSessionClients.ts) | Supabase SSR clients using the matching namespace; browser instances are not singletons. |
+| [Next.js proxy](../../proxy.ts) | Refresh existing customer/admin and legacy sessions and forward refreshed cookies to the same request and response. It does not authorize access. Recovery is handled by its dedicated flow. |
+| [Customer session guard](../../lib/customerSession.ts) | Require a provider-verified Auth user, confirmed email and an active RLS-backed customer profile. It never substitutes the service-role client for customer ownership checks. |
+| [Admin guard](../../lib/adminGuard.ts) | Verify the admin Auth session and require an active `admins` mapping; privileged surfaces additionally enforce the required role. |
+| [Recovery proof](../../lib/recoveryProof.ts) | Bind password-reset completion to a verified recovery user and session with a short-lived signed cookie. |
+| [Server privileged client](../../lib/supabaseAdmin.ts) | Privileged database access after the caller's authorization checks. Its credential is not a browser credential or a substitute for authenticating the caller. |
 
-`middleware.ts` refreshes Supabase Auth cookies. `requireAdmin` calls `auth.getUser`, looks up the user ID in `admins`, and returns 401/403/500 as appropriate. Admin pages use the admin layout/guarding conventions, and most admin APIs call the same guard. Current exceptions include the orders list route and supplier CRUD/actions routes, which do not call `requireAdmin` directly and must be treated as authorization gaps until verified through effective RLS/deployment configuration. `hasRole` exists, but most guarded route handlers only require an admin row; route-level role enforcement was not broadly evidenced.
+The namespaces are `rfz-customer-auth`, `rfz-admin-auth` and `rfz-recovery-auth`. The signed completion proof is `rfz-recovery-proof`. Customer login/logout and password recovery must not silently overwrite or sign out the admin namespace, and a customer Auth identity alone is not an admin authorization grant.
 
-## Secrets
+## Customer request flow
 
-The browser receives only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Service role, payment, supplier, SMTP, and webhook secrets are intended for server/Edge environments. Supabase Vault is used by later migrations for supplier credentials. Secret values were not read or reproduced.
+1. Registration posts to [`/api/auth/register`](../../app/api/auth/register/route.ts), validates input and delegates password handling to Supabase Auth. Duplicate registrations receive a generic acceptance response. An unexpected pre-confirmation session fails closed.
+2. Confirmation reaches [`/auth/callback`](../../app/auth/callback/route.ts). The callback uses the configured application origin and the appropriate token-hash or PKCE exchange. Confirmed customers activate through the constrained customer-profile flow; a browser-supplied identity does not establish ownership.
+3. Login posts to [`/api/auth/login`](../../app/api/auth/login/route.ts). It requires the configured request Origin, validates credentials with `signInWithPassword`, verifies the resulting user with `getUser`, checks confirmation/profile state and rejects suspended or deactivated accounts. Session writes stay in the customer namespace.
+4. Account pages/APIs call `getActiveCustomerSession`. For example, [`/account/orders`](../../app/account/orders/page.tsx) filters by immutable `customer_user_id = session.user.id` through the customer's RLS-backed client. Supplying another email in the URL does not authorize another customer's account history.
+5. Subsequent requests carry the namespace cookie. The proxy forwards any refresh changes into the current request as well as the response. The protected route still verifies the session and authorization; cookie presence or a decoded JWT alone is insufficient.
 
-## Confirmed security concerns
+Guest order tracking/recovery is a separate, constrained reference-and-proof flow. It is not customer-account authentication, and old guest orders are not automatically claimed solely because their email matches a newly authenticated account.
 
-- [supabase/migrations/20260927063133_runfazone_vouchers_promos.sql](/workspaces/RFZ-LaunchSite/supabase/migrations/20260927063133_runfazone_vouchers_promos.sql:123) defines “own” support-ticket reads using only `length(email) > 3`, without comparing the caller to the ticket email; notifications use `USING (true)`. Later migration state may supersede this, but it must be verified in the live database.
-- The initial supplier schema grants anon/authenticated broad CRUD policies ([20260928103235... schema](/workspaces/RFZ-LaunchSite/supabase/migrations/20260928103235_supplier_management_schema.sql:110)); later hardening adds admin policies but the inspected files do not prove every earlier broad policy was dropped.
-- Edge Functions have `verify_jwt = false` in [supabase/config.toml](/workspaces/RFZ-LaunchSite/supabase/config.toml:1); webhook signatures and function-specific authorization are therefore critical deployment controls.
-- `/account/orders?email=` is an email-only history lookup in [app/account/orders/page.tsx](/workspaces/RFZ-LaunchSite/app/account/orders/page.tsx:34). This is a privacy risk unless live RLS/service-client behavior and threat model explicitly accept it.
+## Admin request flow
 
-These are findings to validate and fix in a separate authorized change; no remediation was made during this analysis.
+[`/secure-admin-login`](../../app/secure-admin-login/page.tsx) signs in through the admin browser client, then [the admin login flow](../../lib/adminLoginFlow.ts) checks the active mapping and allowed role. [The admin layout](../../app/admin/layout.tsx) and API guards recheck authorization server-side. Customer cookies are not accepted as admin cookies. The hydrated sign-in form does not wait for its optional session probe, and logout-return URLs skip that optimization; this affects navigation only and grants no authorization. The RF Coins Admin Center requires active Super Admin authorization; nonprivileged staff/customer denial is tested independently.
+
+Most admin APIs use `requireAdmin`; reviewed supplier CRUD/action and order-list routes now invoke it. A role returned by browser state is not authoritative. Privileged database clients may bypass RLS where permitted, so guards must precede their use. Database table privileges still apply: `service_role` lacking SELECT can produce SQLSTATE 42501 even when it bypasses RLS.
+
+## Password recovery and token handling
+
+The recovery flow uses its own Supabase namespace and PKCE storage. A successful recovery callback verifies the user, then issues an HMAC-SHA256 completion proof. It binds the verified user, password-reset purpose, absolute expiry and a SHA-256 fingerprint of the stable Supabase `session_id` claim. Binding to the stable session allows legitimate JWT refresh without authorizing a different session. The JWT is verified with Supabase before its claim is used for this binding.
+
+The proof cookie is HttpOnly, Secure, SameSite=Lax, scoped to `/auth/reset-password` and limited to ten minutes. It contains signed claims, not a password, bearer JWT, PKCE verifier or signing secret. The signing secret `RFZ_RECOVERY_PROOF_HMAC_SECRET` stays server-side and must be at least 32 bytes. The proof grants nothing without the matching verified recovery session.
+
+[`/auth/reset-password/complete`](../../app/auth/reset-password/complete/route.ts) checks origin, recovery session/user and the proof before calling Auth `updateUser`. Completion clears the recovery state; one-time-link reuse, missing proof, different-user/session proofs and old-password login are rejected. Normal customer/admin sessions remain separate.
+
+Supabase SSR sessions use base64url cookie encoding; encoding is not encryption. Do not assume that every Auth cookie is HttpOnly merely because the separate recovery-proof cookie is HttpOnly. Browser-side Auth uses its namespace session, while server handlers validate it. Do not copy tokens into application logs, URL diagnostics, screenshots, downloadable traces or storage-state artifacts.
+
+## Credentials and Edge Functions
+
+- Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are public browser configuration. The public key identifies the project/API context; it is not proof of an authenticated user or admin role.
+- Passwords are submitted for Supabase Auth verification; the application does not maintain a separate password table. Service-role, recovery-signing, supplier, payment, SMTP and webhook secrets remain server/Edge configuration and must never appear in browser bundles.
+- [`supabase/config.toml`](../../supabase/config.toml) disables gateway JWT verification for several Edge Functions. Those handlers therefore depend on explicit webhook signatures or dedicated authorization/cron secrets. Do not infer that an exposed route is authorized merely because it exists.
+- The reviewed `fazercards-test` handler is permanently disabled and makes no provider requests. Other purchase-capable source paths have an independent supplier release lock; no Auth role alone releases financial features. RF Coins funding/spending remain source-locked off.
+
+## Verification and remaining limits
+
+The isolated real-Auth workflow exercises disposable PostgreSQL 17, GoTrue, PostgREST and a local mail catcher on desktop/mobile, using synthetic identities. It covers confirmation/resend, login/logout, recovery and link reuse, customer/admin isolation, cross-account order and wallet/ledger RLS, privileged CSV audit and financial release locks. [Owner acceptance](../../OWNER_ACCEPTANCE.md) and the PR's current checks identify the reviewed candidate and artifacts; historical green runs do not transfer automatically to a new SHA.
+
+These results are not hosted Auth configuration or owner UX approval. Hosted password-recovery `internal_failure` needs its application stage and runtime logs for attribution; the bounded diagnostic category alone does not identify a database error. The supplier incident and historical exposed-key revocation remain [unresolved](../FAZERCARDS_INCIDENT.md). No live provider call, hosted migration or credential change is authorized by this document. Historical policy concerns in older audits must be assessed against the full migration chain and actual deployed privileges, rather than treated as either current or resolved from one old migration file.
