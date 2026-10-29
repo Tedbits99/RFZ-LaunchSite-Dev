@@ -18,8 +18,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Verify auto-merge discovery safety cases
-        run: bash scripts/discover-codex-pr.sh --self-test
+      - name: Enforce owner-controlled manual PR merging
+        run: bash scripts/verify-manual-merge-only.sh
       - name: Guard Cloudflare CSS and JavaScript deployment order
         run: node scripts/verify-preview-static-assets.mjs
       - uses: actions/setup-node@v4
