@@ -15,14 +15,15 @@ try {
   assert(Number(version) >= 170000 && Number(version) < 180000, 'catalog disposable database is not PostgreSQL 17');
 
   const rpcNames = [
-    ['admin_get_games_with_package_counts', ''],
-    ['is_catalog_admin', ''],
-    ['admin_create_catalog_game', 'jsonb, jsonb'],
-    ['admin_update_catalog_game', 'uuid, jsonb, jsonb'],
-    ['admin_update_catalog_pricing_assumptions', 'numeric, integer, integer'],
-    ['guard_order_catalog_saleability', ''],
+    ['admin_get_games_with_package_counts', []],
+    ['is_catalog_admin', []],
+    ['admin_create_catalog_game', ['jsonb', 'jsonb']],
+    ['admin_update_catalog_game', ['uuid', 'jsonb', 'jsonb']],
+    ['admin_update_catalog_pricing_assumptions', ['numeric', 'integer', 'integer']],
+    ['guard_order_catalog_saleability', []],
   ];
-  for (const [name, identity] of rpcNames) {
+  for (const [name, argumentTypes] of rpcNames) {
+    const functionIdentity = `public.${name}(${argumentTypes.join(',')})`;
     const rows = await sql`
       select p.oid::regprocedure::text as identity, p.prosecdef, p.proconfig,
         has_function_privilege('anon', p.oid, 'EXECUTE') as anon_exec,
@@ -35,9 +36,9 @@ try {
         pg_get_functiondef(p.oid) as definition
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'public' and p.proname = ${name}
-        and pg_get_function_identity_arguments(p.oid) = ${identity}
+        and p.oid = to_regprocedure(${functionIdentity})
     `;
-    assert(rows.length === 1, `expected exactly one ${name} function identity`);
+    assert(rows.length === 1, `expected exactly one ${functionIdentity} function identity`);
     const fn = rows[0];
     assert(fn.prosecdef === true, `${name} must remain SECURITY DEFINER`);
     assert(Array.isArray(fn.proconfig) && fn.proconfig.includes('search_path=public'), `${name} must use fixed public search_path`);
