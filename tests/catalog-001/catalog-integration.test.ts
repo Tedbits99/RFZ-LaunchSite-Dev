@@ -176,6 +176,10 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
 
   it('removed upstream offers deactivate safely without deleting historical packages', async () => {
     const game = await gameFixture('historical-offer');
+    const publishedGame = await serviceDb().from('games').update({
+      is_active: true, catalog_status: 'PUBLISHED', published_at: new Date().toISOString(),
+    }).eq('id', game.id);
+    expect(publishedGame.error).toBeNull();
     const offerId = `${runTag}-removed-${randomUUID().slice(0, 6)}`;
     const pkg = await packageFixture(game.id, { sku: `${runTag}-history`, priceCents: 1000, status: 'PUBLISHED', active: true });
     const reference = `${runTag}-${randomUUID().slice(0, 8)}`;
@@ -240,7 +244,7 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const offerId = `${runTag}-negative-margin-${randomUUID().slice(0, 6)}`;
     const pkg = await packageFixture(game.id, { offerId, costUsd: 1, priceCents: 5500, status: 'DRAFT', active: false, review: false });
     const { response, body } = await appRequest(`/api/admin/catalog/packages/${pkg.id}`, { action: 'publish', price_cents: 5500 });
-    expect(response.status).toBe(409);
+    expect(response.status, JSON.stringify(body)).toBe(409);
     expect(body.error).toMatch(/supplier cost plus.*fee reserve/i);
     const { data } = await serviceDb().from('packages').select('is_active,catalog_status').eq('id', pkg.id).single();
     expect(data).toMatchObject({ is_active: false, catalog_status: 'DRAFT' });
@@ -252,7 +256,7 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const pkg = await packageFixture(game.id, { offerId, costUsd: 1, priceCents: 5650, status: 'DRAFT', active: false, review: false });
     expect(minimumSalePriceCents(1, 56, 250, 25)).toBe(5770);
     const { response, body } = await appRequest(`/api/admin/catalog/packages/${pkg.id}`, { action: 'publish', price_cents: 5650 });
-    expect(response.status).toBe(409);
+    expect(response.status, JSON.stringify(body)).toBe(409);
     expect(body.error).toMatch(/fee reserve/i);
     const { data } = await serviceDb().from('packages').select('is_active,catalog_status').eq('id', pkg.id).single();
     expect(data).toMatchObject({ is_active: false, catalog_status: 'DRAFT' });
@@ -316,7 +320,7 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const offerId = `${runTag}-fx-review-${randomUUID().slice(0, 6)}`;
     const pkg = await packageFixture(game.id, { offerId, costUsd: 1, priceCents: 10_000, status: 'PUBLISHED', active: true, review: false });
     const { response, body } = await appRequest('/api/admin/settings', { reference_usd_php_rate: 57 });
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(body)).toBe(200);
     expect(body).toMatchObject({ success: true, recalculated: 0 });
     const { data, error } = await serviceDb().from('packages').select('price_cents,is_active,catalog_status,supplier_review_required').eq('id', pkg.id).single();
     expect(error).toBeNull();
@@ -348,7 +352,8 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const response = await fetch(new URL('/api/admin/sync-offers', assertLoopback('CATALOG_APP_URL', requiredEnv('CATALOG_APP_URL'))), {
       method: 'POST', headers: { cookie: await adminCookie(), origin: requiredEnv('CATALOG_APP_URL') },
     });
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: expect.stringMatching(/disabled|not available|release/i) });
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(503);
+    expect(body).toMatchObject({ error: expect.stringMatching(/disabled|not available|release/i) });
   });
 });

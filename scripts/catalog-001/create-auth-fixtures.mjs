@@ -20,9 +20,7 @@ const adminClient = createClient(api, serviceKey, { auth: { autoRefreshToken: fa
 const anonKey = process.env.CATALOG_ANON_KEY || '';
 assert(anonKey, 'disposable anonymous key is missing');
 const definitions = [
-  // The customer-profile status RPC deliberately requires SUPER_ADMIN. This
-  // identity exists only in the disposable fixture and matches that guard.
-  { key: 'ADMIN', email: 'admin@example.invalid', name: 'Synthetic Catalog Admin', role: 'SUPER_ADMIN' },
+  { key: 'ADMIN', email: 'admin@example.invalid', name: 'Synthetic Catalog Admin', role: 'ADMIN' },
   { key: 'STAFF', email: 'staff@example.invalid', name: 'Synthetic Catalog Staff', role: 'STAFF' },
   { key: 'CUSTOMER', email: 'customer@example.invalid', name: 'Synthetic Catalog Customer', role: null },
 ];
@@ -60,19 +58,17 @@ const adminRows = definitions.filter((definition) => definition.role).map((defin
 const { error: adminError } = await adminClient.from('admins').upsert(adminRows, { onConflict: 'id' });
 if (adminError) throw new Error('Could not provision synthetic catalog authorization roles.');
 
-const authenticatedAdmin = createClient(api, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
-const adminLogin = await authenticatedAdmin.auth.signInWithPassword(credentials.ADMIN);
-if (adminLogin.error || !adminLogin.data.session) throw new Error('Synthetic admin could not sign in to the disposable Auth service.');
-const activated = await authenticatedAdmin.rpc('admin_set_customer_profile_status', {
-  p_user_id: ids.CUSTOMER, p_status: 'active',
-});
+const authenticatedCustomer = createClient(api, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
+const customerLogin = await authenticatedCustomer.auth.signInWithPassword(credentials.CUSTOMER);
+if (customerLogin.error || !customerLogin.data.session) throw new Error('Synthetic customer could not sign in to the disposable Auth service.');
+const activated = await authenticatedCustomer.rpc('activate_customer_profile');
 const activationRows = activated.data;
 if (activated.error || !Array.isArray(activationRows) || activationRows.length !== 1
   || activationRows[0]?.out_status !== 'active' || activationRows[0]?.out_error !== null) {
   const detail = activated.error ? `RPC error ${activated.error.code || 'unknown'}` : 'unexpected RPC result';
-  throw new Error(`Could not activate the synthetic customer profile through the admin RPC (${detail}).`);
+  throw new Error(`Could not activate the synthetic customer profile through self-activation (${detail}).`);
 }
-await authenticatedAdmin.auth.signOut({ scope: 'local' });
+await authenticatedCustomer.auth.signOut({ scope: 'local' });
 
 const runTag = process.env.CATALOG_RUN_TAG || `local-${Date.now()}`;
 assert(/^[a-zA-Z0-9-]{1,64}$/.test(runTag), 'catalog run tag is malformed');
