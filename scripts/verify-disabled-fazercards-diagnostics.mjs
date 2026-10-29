@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
+import console from 'node:console';
+import process from 'node:process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
