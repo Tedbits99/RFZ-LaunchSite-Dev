@@ -5,16 +5,21 @@
 
 BEGIN;
 
-INSERT INTO public.games (id, slug, name, short_name, description, region, currency, is_active, sort_order)
+INSERT INTO public.games (
+  id, slug, name, short_name, description, region, currency, is_active, sort_order, catalog_status, published_at
+)
 VALUES (
   '00000000-0000-0000-0000-000000000402', 'receipt-outbox-game', 'Receipt Outbox Game', 'ROG',
-  'Disposable fixture', 'Test', 'PHP', true, 2402
+  'Disposable fixture', 'Test', 'PHP', true, 2402, 'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 );
 
-INSERT INTO public.packages (id, game_id, name, sku, amount, price_cents, sort_order)
+INSERT INTO public.packages (
+  id, game_id, name, sku, amount, price_cents, sort_order, is_active, catalog_status, published_at
+)
 VALUES (
   '00000000-0000-0000-0000-000000000403', '00000000-0000-0000-0000-000000000402',
-  'Receipt Outbox Package', 'RECEIPT-OUTBOX-PACKAGE', '1', 12345, 2402
+  'Receipt Outbox Package', 'RECEIPT-OUTBOX-PACKAGE', '1', 12345, 2402, true,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 );
 
 INSERT INTO public.suppliers (id, name, code, adapter, enabled, environment)

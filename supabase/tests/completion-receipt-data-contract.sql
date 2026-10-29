@@ -3,16 +3,21 @@
 -- Disposable-only authoritative completion-receipt data contract assertions.
 BEGIN;
 
-INSERT INTO public.games (id, slug, name, short_name, description, region, currency, is_active, sort_order)
+INSERT INTO public.games (
+  id, slug, name, short_name, description, region, currency, is_active, sort_order, catalog_status, published_at
+)
 VALUES (
   '00000000-0000-0000-0000-000000000502', 'receipt-contract-game', 'Contract Game', 'CG',
-  'Disposable fixture', 'Test', 'PHP', true, 2502
+  'Disposable fixture', 'Test', 'PHP', true, 2502, 'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 );
 
-INSERT INTO public.packages (id, game_id, name, sku, amount, price_cents, sort_order)
+INSERT INTO public.packages (
+  id, game_id, name, sku, amount, price_cents, sort_order, is_active, catalog_status, published_at
+)
 VALUES (
   '00000000-0000-0000-0000-000000000503', '00000000-0000-0000-0000-000000000502',
-  'Contract Package', 'RECEIPT-CONTRACT-PACKAGE', '1', 23456, 2502
+  'Contract Package', 'RECEIPT-CONTRACT-PACKAGE', '1', 23456, 2502, true,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 );
 
 INSERT INTO public.suppliers (id, name, code, adapter, enabled, environment)

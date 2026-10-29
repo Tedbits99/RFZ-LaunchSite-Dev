@@ -66,13 +66,27 @@ END $$;
 -- supplier, payment, or outbound HTTP call is made by these assertions.
 BEGIN;
 
-INSERT INTO public.games (id, slug, name, short_name, description, region, currency, is_active, sort_order)
-VALUES ('00000000-0000-0000-0000-000000000701', 'upgrade-test-game', 'Upgrade Test Game', 'UPG', 'Disposable fixture', 'Test', 'PHP', true, 2701)
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.games AS existing_game (
+  id, slug, name, short_name, description, region, currency, is_active, sort_order, catalog_status, published_at
+)
+VALUES (
+  '00000000-0000-0000-0000-000000000701', 'upgrade-test-game', 'Upgrade Test Game', 'UPG', 'Disposable fixture', 'Test', 'PHP', true, 2701,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
+)
+ON CONFLICT (id) DO UPDATE SET
+  is_active = true, catalog_status = 'PUBLISHED',
+  published_at = COALESCE(existing_game.published_at, EXCLUDED.published_at);
 
-INSERT INTO public.packages (id, game_id, name, sku, amount, price_cents, sort_order)
-VALUES ('00000000-0000-0000-0000-000000000702', '00000000-0000-0000-0000-000000000701', 'Upgrade Test Package', 'UPGRADE-TEST-PACKAGE', '1', 1, 2701)
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.packages AS existing_package (
+  id, game_id, name, sku, amount, price_cents, sort_order, is_active, catalog_status, published_at
+)
+VALUES (
+  '00000000-0000-0000-0000-000000000702', '00000000-0000-0000-0000-000000000701', 'Upgrade Test Package', 'UPGRADE-TEST-PACKAGE', '1', 1, 2701, true,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
+)
+ON CONFLICT (id) DO UPDATE SET
+  is_active = true, catalog_status = 'PUBLISHED',
+  published_at = COALESCE(existing_package.published_at, EXCLUDED.published_at);
 
 INSERT INTO public.suppliers (id, name, code, adapter, enabled, environment)
 VALUES ('00000000-0000-0000-0000-000000000703', 'Upgrade Test Supplier', 'fazercards', 'custom', true, 'sandbox')
