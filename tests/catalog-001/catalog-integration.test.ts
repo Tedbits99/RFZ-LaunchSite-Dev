@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { minimumSalePriceCents } from '@/lib/catalogPricing';
@@ -185,7 +185,8 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const reference = `${runTag}-${randomUUID().slice(0, 8)}`;
     const insertedOrder = await serviceDb().from('orders').insert({
       reference, email: `${reference}@example.invalid`, customer_name: 'Synthetic historical customer',
-      game_id: game.id, package_id: pkg.id, player_inputs: { player_id: 'synthetic' },
+      game_id: game.id, package_id: pkg.id,
+      player_inputs: { player_id: 'synthetic', __rfz_order_access_hash: randomBytes(32).toString('hex') },
       subtotal_cents: 1000, discount_cents: 0, total_cents: 1000, payment_method: 'manual', status: 'WAITING_PAYMENT',
     }).select('id').single();
     expect(insertedOrder.error).toBeNull();
