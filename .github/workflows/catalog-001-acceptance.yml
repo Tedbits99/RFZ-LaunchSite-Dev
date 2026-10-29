@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify branch, PR, and exact candidate SHA
@@ -81,11 +81,47 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Check out the exact PR #92 acceptance head for disposable integration
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: 3c6c1ba315ff482acd5eefd4f62ab190b813ef3e
+          path: .catalog-001-pr92-acceptance
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build the temporary PR #93 + PR #92 integration worktree
+        shell: bash
+        env:
+          IMPLEMENTATION_SHA: ${{ github.event.pull_request.head.sha }}
+          ACCEPTANCE_SHA: 3c6c1ba315ff482acd5eefd4f62ab190b813ef3e
+        run: |
+          set -euo pipefail
+          contract_checkout="$GITHUB_WORKSPACE/.catalog-001-pr92-acceptance"
+          integration="$RUNNER_TEMP/catalog-001-integration"
+          [[ "$(git rev-parse HEAD)" == "$IMPLEMENTATION_SHA" ]]
+          [[ "$(git -C "$contract_checkout" rev-parse HEAD)" == "$ACCEPTANCE_SHA" ]]
+          [[ ! -e "$integration" ]]
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add -b codex/catalog-001-integration-verification "$integration" "$IMPLEMENTATION_SHA"
+          git -C "$integration" fetch --no-tags "$contract_checkout" "$ACCEPTANCE_SHA"
+          [[ "$(git -C "$integration" rev-parse FETCH_HEAD)" == "$ACCEPTANCE_SHA" ]]
+          git -C "$integration" merge --no-edit --no-ff FETCH_HEAD
+          git -C "$integration" merge-base --is-ancestor "$IMPLEMENTATION_SHA" HEAD
+          git -C "$integration" merge-base --is-ancestor "$ACCEPTANCE_SHA" HEAD
+          mv "$contract_checkout" "$RUNNER_TEMP/catalog-001-pr92-source"
+          node "$GITHUB_WORKSPACE/scripts/catalog-001/activate-companion-tests.mjs" "$integration"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$integration/node_modules"
+          printf 'CATALOG_INTEGRATION_WORKTREE=%s\n' "$integration"
+          printf 'CATALOG_IMPLEMENTATION_SHA=%s\nCATALOG_ACCEPTANCE_SHA=%s\n' "$IMPLEMENTATION_SHA" "$ACCEPTANCE_SHA"
+
       - name: Run isolated PostgreSQL 17, Auth, supplier-contract, and browser matrix
         shell: bash
         env:
           CATALOG_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
           CATALOG_RUN_TAG: catalog-${{ github.run_id }}-${{ github.run_attempt }}
+        working-directory: ${{ runner.temp }}/catalog-001-integration
         run: scripts/catalog-001/run-local-acceptance.sh
 
       - name: Upload sanitized synthetic catalog evidence
@@ -93,6 +129,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: catalog-001-sanitized-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/catalog-001/test-output/
+          path: |
+            ${{ runner.temp }}/catalog-001-integration/artifacts/catalog-001/test-output/
+            ${{ runner.temp }}/catalog-001-integration/artifacts/catalog-acceptance/test-output/
           if-no-files-found: warn
           retention-days: 7

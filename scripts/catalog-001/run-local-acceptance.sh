@@ -45,6 +45,7 @@ set +a
 [[ ! -e "$RFZ_STACK_ROOT/supabase/.temp/project-ref" ]]
 [[ "$(sed -n 's/^project_id = "\([^"]*\)"$/\1/p' "$RFZ_STACK_ROOT/supabase/config.toml")" == "$RFZ_STACK_PROJECT_ID" ]]
 [[ "$RFZ_MIGRATION_FILE_COUNT" -gt 0 ]]
+printf 'CATALOG_DISPOSABLE_STACK_PATH=%s\n' "$RFZ_STACK_ROOT"
 
 stack_started=1
 if ! run_cli start --exclude studio,storage-api,imgproxy,realtime,edge-runtime,logflare,vector,postgres-meta,supavisor >"$cli_log" 2>&1; then
@@ -85,6 +86,11 @@ if [[ "$ready" != 1 ]]; then
   exit 1
 fi
 
-CATALOG_INTEGRATION_RUN=1 npm test -- --run tests/catalog-001/catalog-integration.test.ts --reporter=verbose
-CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts --reporter=list
+if [[ -f tests/catalog-contract/catalog-contract.test.ts ]]; then
+  CATALOG_INTEGRATION_RUN=1 npm test -- --run tests/catalog-contract/catalog-contract.test.ts --reporter=verbose
+  CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=e2e/catalog-acceptance/playwright.config.ts --reporter=list
+else
+  CATALOG_INTEGRATION_RUN=1 npm test -- --run tests/catalog-001/catalog-integration.test.ts --reporter=verbose
+  CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts --reporter=list
+fi
 printf 'CATALOG_LOCAL_ACCEPTANCE_PASS migration_files=%s browser_projects=2 supplier_release=off\n' "$RFZ_MIGRATION_FILE_COUNT"

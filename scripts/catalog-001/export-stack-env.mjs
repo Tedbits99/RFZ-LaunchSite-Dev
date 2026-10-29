@@ -40,8 +40,10 @@ function jwtRole(token) {
 assert(jwtRole(anon) === 'anon' && jwtRole(service) === 'service_role', 'local Supabase JWT roles do not match the expected isolated roles');
 
 for (const forbidden of [
-  'PAYMONGO_SECRET_KEY', 'PAYMENT_PAYMONGO_SECRET_KEY', 'FAZERCARDS_API_KEY',
-  'SUPPLIER_FAZERCARDS_API_KEY', 'SMTP_PASSWORD', 'CRYPTO_PROVIDER_SECRET',
+  'PAYMONGO_SECRET_KEY', 'PAYMENT_PAYMONGO_SECRET_KEY', 'PAYMENT_PAYMONGO_WEBHOOK_SECRET',
+  'FAZERCARDS_API_KEY', 'SUPPLIER_FAZERCARDS_API_KEY', 'FAZERCARDS_WEBHOOK_SECRET',
+  'SMTP_PASSWORD', 'SMTP_USER', 'CRYPTO_PROVIDER_SECRET', 'SUPABASE_ACCESS_TOKEN',
+  'SUPABASE_DB_PASSWORD', 'SUPABASE_PROJECT_REF', 'SUPABASE_DB_URL', 'SUPABASE_SERVICE_ROLE_KEY',
 ]) assert(!process.env[forbidden], 'provider credentials are not permitted in catalog acceptance');
 
 const candidateSha = process.env.CATALOG_CANDIDATE_SHA || process.env.GITHUB_SHA || 'LOCAL_UNCOMMITTED';

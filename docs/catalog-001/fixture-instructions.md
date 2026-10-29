@@ -25,6 +25,15 @@ requires the reported API and PostgreSQL endpoints to be loopback and match the
 ports selected for that run. The project ID is unique per run/attempt. No
 hosted Supabase project or migration endpoint is used.
 
+The PR #93 GitHub acceptance job creates a temporary integration worktree from
+the exact PR #93 candidate SHA and companion acceptance SHA
+`3c6c1ba315ff482acd5eefd4f62ab190b813ef3e`. It activates the nine companion
+Vitest contracts against the database-backed suite and executes the 16 real
+admin/storefront browser scenarios in desktop and mobile projects (32 runs).
+The worktree exists only on the CI runner; neither agent branch is changed.
+Running this script from the PR #93 checkout alone uses the same real catalog
+integration and browser suites, but does not import PR #92's companion files.
+
 Synthetic Auth identities use `admin@example.invalid`, `staff@example.invalid`,
 and `customer@example.invalid`. Passwords are random per run, stay in the
 temporary test environment, and are not printed. The admin row has role
@@ -48,8 +57,8 @@ and RF Coins flags/payment method remain false. No payment, supplier purchase,
 or hosted email operation is part of this suite.
 
 For manual cleanup after a forced machine shutdown, find the exact project ID
-reported by the runner and run `supabase --workdir <that-run's-temp-stack>
-stop --no-backup`; do not use `supabase stop --all`. A normal run performs this
-cleanup automatically. Temporary Auth keys and generated passwords are not
-production secrets and must never be copied into repository files or hosted
-configuration.
+and `CATALOG_DISPOSABLE_STACK_PATH` reported by the runner, then run
+`supabase --workdir <exact-reported-stack-path> stop --no-backup`; do not use
+`supabase stop --all`. A normal run performs this cleanup automatically.
+Temporary Auth keys and generated passwords are not production secrets and must
+never be copied into repository files or hosted configuration.
