@@ -1,0 +1,37 @@
+name: Sync Titan SMTP to Supabase
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-development-smtp:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: runfazone-preview
+    timeout-minutes: 10
+    steps:
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Set Titan SMTP Edge Function secrets
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo 'BLOCKED: SUPABASE_ACCESS_TOKEN secret unavailable'; exit 1; }
+          test -n "$SMTP_PASSWORD" || { echo 'BLOCKED: SMTP_PASSWORD secret unavailable'; exit 1; }
+          [[ "$SMTP_HOST" == 'smtp.titan.email' && "$SMTP_PORT" == '465' && "$SMTP_USER" == 'orders@runfazone.com' ]] || {
+            echo 'BLOCKED: Titan SMTP host/port/sender metadata do not match expected configuration'; exit 1;
+          }
+          supabase secrets set --project-ref ketdhcmwowzztcdlmris \
+            SMTP_HOST='smtp.titan.email' SMTP_PORT='465' SMTP_USER='orders@runfazone.com' \
+            "SMTP_PASSWORD=$SMTP_PASSWORD" >/dev/null
+          echo 'Titan SMTP Edge Function secret configuration synchronized (values redacted).'

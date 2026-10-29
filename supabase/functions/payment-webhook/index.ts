@@ -48,6 +48,15 @@ const FAZERCARDS_BASE = "https://api.fzr.cards/api/v2";
 const FULFILLMENT_TIMEOUT_MS = 25000;
 const EMAIL_FUNCTION_PATH = "/functions/v1/send-transactional-email";
 
+// Supabase Edge Functions can stop untracked background promises after the
+// webhook response. Register email sends so the runtime lets them finish.
+declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
+function trackTransactionalEmail(task: Promise<unknown>): void {
+  EdgeRuntime.waitUntil(task.catch(() => {
+    console.error("transactional email background task failed");
+  }));
+}
+
 interface OrderEmailData {
   order_id: string;
   to: string;
@@ -488,7 +497,7 @@ async function pollSupplierImmediately(
       const result = Array.isArray(finalization) ? finalization[0] : finalization;
       if (!finalizationError && ["applied", "already-finalized"].includes(result?.out_outcome)) {
         // Send fulfillment-failed email (fire-and-forget, duplicate-guarded).
-        sendFulfillmentFailedEmail(supabase, orderId, `Supplier reported failure: ${polled.failReason}`).catch(() => {});
+        trackTransactionalEmail(sendFulfillmentFailedEmail(supabase, orderId, `Supplier reported failure: ${polled.failReason}`));
       }
       return;
     }
@@ -727,7 +736,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // Send payment-success email (fire-and-forget, duplicate-guarded by email_sent_log).
-      sendPaymentSuccessEmail(supabase, orderId).catch(() => {});
+      trackTransactionalEmail(sendPaymentSuccessEmail(supabase, orderId));
 
       await triggerFulfillment(supabase, orderId);
 
@@ -739,7 +748,7 @@ Deno.serve(async (req: Request) => {
         .eq("id", orderId)
         .maybeSingle();
       if ((postFulfill as any)?.fulfillment_status === "FAILED") {
-        sendFulfillmentFailedEmail(supabase, orderId, "Supplier fulfillment failed during initial attempt").catch(() => {});
+        trackTransactionalEmail(sendFulfillmentFailedEmail(supabase, orderId, "Supplier fulfillment failed during initial attempt"));
       }
 
       // Fire-and-forget immediate polling so supplier completion propagates

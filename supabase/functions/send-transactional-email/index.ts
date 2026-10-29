@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import nodemailer from "npm:nodemailer@10.2.0";
 import { hasAuthorizedTransactionalEmailRequest } from "../_shared/transactionalEmailAuth.ts";
 
 /*
@@ -159,132 +160,51 @@ function buildGuestAccessText(r: EmailRequest): string {
   return `Verify guest order access\n\nUse this one-time code to access order ${r.order_reference}:\n\n${r.access_code || ''}\n\nThe code expires in 15 minutes and can be used once. If you did not request it, ignore this email.`;
 }
 
+/**
+ * Titan SMTP implicit TLS on port 465 (587 is blocked by Supabase Edge).
+ * Nodemailer handles the SMTP protocol, international text and MIME safely.
+ */
 async function sendSmtp(
-  smtpHost: string,
-  smtpPort: number,
-  smtpUser: string,
-  smtpPass: string,
-  from: string,
-  to: string,
-  subject: string,
-  html: string,
-  text: string,
+  smtpHost: string, smtpPort: number, smtpUser: string, smtpPass: string,
+  from: string, to: string, subject: string, html: string, text: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const dateHeader = new Date().toUTCString();
-  const messageId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@runfazone.com>`;
-  const boundary = "----=_Part_" + Math.random().toString(36).slice(2);
-
-  const mime = [
-    `From: RunFazone <${from}>`,
-    `To: <${to}>`,
-    `Subject: ${subject}`,
-    `MIME-Version: 1.0`,
-    `Date: ${dateHeader}`,
-    `Message-ID: ${messageId}`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/plain; charset=utf-8`,
-    `Content-Transfer-Encoding: 7bit`,
-    ``,
-    text,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=utf-8`,
-    `Content-Transfer-Encoding: 7bit`,
-    ``,
-    html,
-    ``,
-    `--${boundary}--`,
-    ``,
-  ].join("\r\n");
-
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const msgBytes = encoder.encode(mime);
-
-  let tlsConn: Deno.TlsConn;
-  try {
-    const conn = await Deno.connect({ hostname: smtpHost, port: smtpPort });
-    tlsConn = await Deno.startTls(conn, { hostname: smtpHost });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { success: false, error: `TLS connection to ${smtpHost}:${smtpPort} failed: ${msg}` };
+  if (smtpPort !== 465 || !smtpHost || !smtpUser || !smtpPass) {
+    return { success: false, error: "invalid_smtp_configuration" };
   }
-
+  const transport = nodemailer.createTransport({
+    host: smtpHost,
+    port: 465,
+    secure: true,
+    requireTLS: true,
+    tls: { minVersion: "TLSv1.2", servername: smtpHost },
+    auth: { user: smtpUser, pass: smtpPass },
+    pool: false,
+    connectionTimeout: 12000,
+    greetingTimeout: 12000,
+    socketTimeout: 20000,
+    disableFileAccess: true,
+    disableUrlAccess: true,
+  });
   try {
-    const reader = tlsConn.readable.getReader();
-    const writer = tlsConn.writable.getWriter();
-
-    async function readResponse(): Promise<string> {
-      const chunks: string[] = [];
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(decoder.decode(value));
-        const text = chunks.join("");
-        const lines = text.split("\r\n");
-        const last = lines[lines.length - 1];
-        if (last.length >= 4 && last[3] === " ") return text;
-        if (last.length === 0 && lines.length > 1) return text;
-      }
-      return chunks.join("");
+    const info = await transport.sendMail({
+      from: { name: "RunFazone", address: from },
+      to, subject, html, text,
+      envelope: { from, to },
+    });
+    const accepted = (info.accepted ?? []).map((address: string) => address.toLowerCase());
+    if ((info.rejected?.length ?? 0) > 0 || !accepted.includes(to.toLowerCase())) {
+      return { success: false, error: "recipient_rejected" };
     }
-
-    async function sendCommand(cmd: string): Promise<string> {
-      await writer.write(encoder.encode(cmd + "\r\n"));
-      return readResponse();
-    }
-
-    // 1. Read server greeting
-    await readResponse();
-
-    // 2. EHLO
-    await sendCommand("EHLO runfazone.com");
-
-    // 3. AUTH LOGIN
-    await sendCommand("AUTH LOGIN");
-    await sendCommand(btoa(smtpUser));
-    const authResult = await sendCommand(btoa(smtpPass));
-    if (!authResult.startsWith("235")) {
-      return { success: false, error: `SMTP auth failed: ${authResult.trim()}` };
-    }
-
-    // 4. MAIL FROM
-    const mailFrom = await sendCommand(`MAIL FROM:<${from}>`);
-    if (!mailFrom.startsWith("250")) {
-      return { success: false, error: `MAIL FROM rejected: ${mailFrom.trim()}` };
-    }
-
-    // 5. RCPT TO
-    const rcptTo = await sendCommand(`RCPT TO:<${to}>`);
-    if (!rcptTo.startsWith("250")) {
-      return { success: false, error: `RCPT TO rejected: ${rcptTo.trim()}` };
-    }
-
-    // 6. DATA
-    const dataResp = await sendCommand("DATA");
-    if (!dataResp.startsWith("354")) {
-      return { success: false, error: `DATA not accepted: ${dataResp.trim()}` };
-    }
-    await writer.write(msgBytes);
-    const dataEnd = await sendCommand("\r\n.");
-
-    if (!dataEnd.startsWith("250")) {
-      return { success: false, error: `SMTP data rejected: ${dataEnd.trim()}` };
-    }
-
-    // 7. QUIT
-    await sendCommand("QUIT");
-
-    reader.releaseLock();
-    writer.releaseLock();
     return { success: true };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { success: false, error: `SMTP communication error: ${msg}` };
+  } catch (error) {
+    // Never return Titan's raw SMTP reply; it can contain private data.
+    const code = (error as { code?: string })?.code;
+    return { success: false, error:
+      code === "EAUTH" ? "smtp_authentication_failed"
+      : code === "ETIMEDOUT" || code === "ESOCKET" ? "smtp_connection_failed"
+      : "smtp_delivery_failed" };
   } finally {
-    try { tlsConn.close(); } catch { /* ignore */ }
+    transport.close();
   }
 }
 
@@ -311,8 +231,8 @@ Deno.serve(async (req: Request) => {
     if (!hasAuthorizedTransactionalEmailRequest(req, SERVICE_KEY)) {
       return json({ error: "Unauthorized" }, 401);
     }
-    if (!SMTP_USER || !SMTP_PASSWORD) {
-      return json({ error: "SMTP credentials not configured" }, 503);
+    if (!SMTP_USER || !SMTP_PASSWORD || SMTP_USER.trim().toLowerCase() !== "orders@runfazone.com" || SMTP_PORT !== 465) {
+      return json({ error: "Titan SMTP settings missing or invalid" }, 503);
     }
 
     const body = await req.json() as EmailRequest;
@@ -348,10 +268,11 @@ Deno.serve(async (req: Request) => {
       if (msg.includes("duplicate key") || msg.includes("unique") || msg.includes("violates")) {
         return json({ received: true, message: "Email already sent for this order and template" }, 200);
       }
-      console.error("email_sent_log insert error:", msg);
+      console.error("email_sent_log insert failed");
+      return json({ error: "Email delivery tracking unavailable" }, 503);
     }
 
-    const from = SMTP_USER.includes("@") ? SMTP_USER : "orders@runfazone.com";
+    const from = "orders@runfazone.com";
     const subject = body.template === "payment_success"
       ? `Payment Confirmed — Order ${body.order_reference}`
       : body.template === "guest_order_access"
@@ -382,13 +303,12 @@ Deno.serve(async (req: Request) => {
         .eq("template", body.template);
 
       console.error("SMTP send failed:", result.error);
-      return json({ error: "Failed to send email", detail: result.error }, 500);
+      return json({ error: "Failed to send email", reason: result.error }, 502);
     }
 
     return json({ success: true, template: body.template, recipient: body.to }, 200);
   } catch (err) {
-    console.error("send-transactional-email error:", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    return json({ error: "Email service error", detail: msg }, 500);
+    console.error("send-transactional-email failed");
+    return json({ error: "Email service error" }, 500);
   }
 });
