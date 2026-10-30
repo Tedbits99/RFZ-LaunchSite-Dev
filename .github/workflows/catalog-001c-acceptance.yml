@@ -134,6 +134,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: catalog-001c-sanitized-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/catalog-001c-integration/artifacts/catalog-001/test-output/
+          path: |
+            ${{ runner.temp }}/catalog-001c-integration/artifacts/catalog-001/test-output/
+            ${{ runner.temp }}/catalog-001c-integration/e2e/catalog-001/artifacts/catalog-001/test-output/
+            ${{ runner.temp }}/catalog-001c-integration/artifacts/catalog-acceptance/test-output/
+            ${{ runner.temp }}/catalog-001c-integration/e2e/catalog-acceptance/artifacts/catalog-acceptance/test-output/
           if-no-files-found: warn
           retention-days: 7

@@ -400,7 +400,7 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     }
 
     await page.goto(`/games/${genshin.slug}`)
-    const supplierPackage = page.getByRole('radio', { name: /60 Genesis Crystals.*Currently unavailable/ })
+    const supplierPackage = page.getByRole('radio', { name: /60 Genesis Crystals.*Currently unavailable/i })
     await expect(supplierPackage).toBeVisible()
     await expect(supplierPackage).toBeDisabled()
     await expect(page.getByRole('button', { name: 'Review Order' })).toBeDisabled()
