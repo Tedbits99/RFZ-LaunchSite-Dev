@@ -37,8 +37,8 @@ try {
   assert(Number(version) >= 170000 && Number(version) < 180000, 'security fixture must use PostgreSQL 17');
 
   const tables = [
-    'promotion_campaigns', 'promotion_campaign_games', 'promotion_campaign_packages',
-    'promotion_campaign_audit', 'voucher_usages',
+    'vouchers', 'voucher_usages', 'promotion_campaigns', 'promotion_campaign_games',
+    'promotion_campaign_packages', 'promotion_campaign_audit',
   ];
   for (const table of tables) {
     const rows = await sql`

@@ -110,7 +110,7 @@ REVOKE ALL ON public.promotion_campaigns, public.promotion_campaign_games,
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.promotion_campaigns, public.promotion_campaign_games,
   public.promotion_campaign_packages, public.promotion_campaign_audit TO service_role;
-REVOKE INSERT, UPDATE, DELETE ON public.vouchers, public.voucher_usages
+REVOKE ALL ON public.vouchers, public.voucher_usages
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.vouchers, public.voucher_usages TO service_role;
 REVOKE ALL ON public.promotion_campaign_audit FROM PUBLIC, anon, authenticated, service_role;

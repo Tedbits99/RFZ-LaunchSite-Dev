@@ -146,7 +146,7 @@
 | 107 | INCLUDE | `20261027120100_catalog_admin_rpc_status.sql` | `38004fd89e6d5ff7892e8859b36a4e12e5938b8a93df490a2ef5ff866e029f48` | 106. 20261027120000_catalog_lifecycle.sql | status-aware admin catalog RPCs with catalog-admin role guard; no outbound target; run in isolated disposable DB |
 | 108 | INCLUDE | `20261027120200_catalog_order_saleability_guard.sql` | `73849c4f224fb599d8100e38647a51d652c5637f34eb94baffb0e099112bbfea` | 107. 20261027120100_catalog_admin_rpc_status.sql | database guard rejects new orders for hidden, archived, invalid-price, or release-locked supplier catalog rows; browser-role catalog DML revoked; no outbound target |
 | 109 | INCLUDE | `20261030122423_supplier_catalog_multigame_import.sql` | `2b913e8d024e30dd01331dc5d0b692d50c337f70a6450211b05387d36dac24be` | 108. 20261027120200_catalog_order_saleability_guard.sql | append-only sanitized import audit, service-role-only SECURITY INVOKER RPC, and supplier/category/offer uniqueness; synthetic fixtures only; no provider calls |
-| 110 | INCLUDE | `20261030135332_vouchers_001_campaign_engine.sql` | `959d630d237df5230a97f3e37fbf469ce8a30e16caa5b63e931fe3b2ab8169b6` | 109. 20261030122423_supplier_catalog_multigame_import.sql | additive campaign and redemption accounting; locked transactional usage, bounded hashed rate limiting and service-only idempotency; no outbound or scheduled activity |
+| 110 | INCLUDE | `20261030135332_vouchers_001_campaign_engine.sql` | `f50d35975099bf20a3ae7d8109e13e65c93910088c23fe23edd884c2b5b70e51` | 109. 20261030122423_supplier_catalog_multigame_import.sql | additive campaign and redemption accounting; locked transactional usage, bounded hashed rate limiting and service-only idempotency; no outbound or scheduled activity |
 
 ## Execution gates
 

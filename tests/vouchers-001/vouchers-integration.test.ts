@@ -463,9 +463,17 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     const anonymous = anonDb();
     const tableRead = await anonymous.from('promotion_campaigns').select('id').limit(1);
     expect(tableRead.error).not.toBeNull();
+    const anonymousVoucherRead = await anonymous.from('vouchers').select('id,code').limit(1);
+    const anonymousUsageRead = await anonymous.from('voucher_usages').select('id').limit(1);
+    expect(anonymousVoucherRead.error).not.toBeNull();
+    expect(anonymousUsageRead.error).not.toBeNull();
     const customer = await identityDb(requiredEnv('CATALOG_CUSTOMER_EMAIL'), requiredEnv('CATALOG_CUSTOMER_PASSWORD'));
     const customerRead = await customer.from('promotion_campaigns').select('id').limit(1);
     expect(customerRead.error).not.toBeNull();
+    const customerVoucherRead = await customer.from('vouchers').select('id,code').limit(1);
+    const customerUsageRead = await customer.from('voucher_usages').select('id').limit(1);
+    expect(customerVoucherRead.error).not.toBeNull();
+    expect(customerUsageRead.error).not.toBeNull();
     const directMutation = await anonymous.rpc('admin_create_promotion_campaign', {
       p_actor_id: adminId, p_data: campaignPayload(),
     });
