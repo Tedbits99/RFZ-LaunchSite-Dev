@@ -209,7 +209,7 @@ describe('rf_coin_release_order_payment', () => {
 });
 
 describe('grants and schema', () => {
-  it('orders RF Coins migrations at the end of the canonical deployable sequence', () => {
+  it('keeps the RF Coins migration block ordered before the follow-on catalog migration', () => {
     const currentVersions = readdirSync('supabase/migrations')
       .filter((name) => name.endsWith('.sql'))
       .map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
@@ -222,10 +222,15 @@ describe('grants and schema', () => {
     const pendingDirectory = 'supabase/migrations-pending';
     const pendingNames = existsSync(pendingDirectory) ? readdirSync(pendingDirectory) : [];
     const walletVersions = walletNames.map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
-    const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version));
+    const catalogImportName = '20261030122423_supplier_catalog_multigame_import.sql';
+    const catalogImportVersion = Number(catalogImportName.match(/^([0-9]{14})_/)?.[1] || 0);
+    const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version) && version !== catalogImportVersion);
     const latestNonWalletVersion = Math.max(...nonWalletVersions);
 
     expect(walletVersions.every((version) => version > latestNonWalletVersion)).toBe(true);
+    expect(currentVersions).toContain(catalogImportVersion);
+    expect(catalogImportVersion).toBeGreaterThan(Math.max(...walletVersions));
+    expect(manifest).toContain(`| INCLUDE | \`${catalogImportName}\` |`);
     for (const name of walletNames) {
       expect(currentVersions).toContain(Number(name.slice(0, 14)));
       expect(manifest).toContain(`| INCLUDE | \`${name}\` |`);

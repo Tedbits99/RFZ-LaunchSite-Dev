@@ -12,6 +12,13 @@ const key = process.env.CATALOG_SERVICE_ROLE_KEY || '';
 assert(JSON.parse(Buffer.from(key.split('.')[1] || '', 'base64url').toString('utf8')).role === 'service_role', 'catalog seed requires the disposable service role');
 const db = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 
+const { error: supplierError } = await db.from('suppliers').upsert({
+  name: 'Synthetic FazerCards fixture', code: 'fazercards', adapter: 'fazercards',
+  api_url: '', sandbox_api_url: null, environment: 'sandbox', enabled: false,
+  auth_config: {}, metadata: { fixture: 'catalog-001', live_access: 'disabled' },
+}, { onConflict: 'code' });
+if (supplierError) throw new Error(`Catalog supplier fixture failed (SQLSTATE ${supplierError.code}).`);
+
 const games = [
   { id: 'c0010000-0000-4000-8000-000000000001', slug: 'catalog-001-seed-draft', name: 'Synthetic Seed Draft', catalog_status: 'DRAFT', is_active: false, published_at: null, archived_at: null },
   { id: 'c0010000-0000-4000-8000-000000000002', slug: 'catalog-001-seed-published', name: 'Synthetic Seed Published', catalog_status: 'PUBLISHED', is_active: true, published_at: new Date(0).toISOString(), archived_at: null },

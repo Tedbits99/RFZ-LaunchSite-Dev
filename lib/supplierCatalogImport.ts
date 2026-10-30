@@ -1,10 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { minimumSalePriceCents } from './catalogPricing';
+import type { CatalogField, CatalogOffer } from './suppliers/fazercardsCatalog';
 
+// Retained as a named constant for older catalog and fulfillment contracts.
+// Import eligibility is no longer hard-coded to this one category.
 export const MOBILE_LEGENDS_CATEGORY_ID = 'mobile_legends_philippines';
 
 export type SupplierOfferInput = { offer_id: unknown; name: unknown; price_usd: unknown };
-export type ParsedSupplierOffer = { offer_id: string; name: string; price_usd: number };
+export type ParsedSupplierOffer = CatalogOffer;
+
+const VALID_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/;
 
 export function validateSupplierOffers(input: unknown): { offers?: ParsedSupplierOffer[]; error?: string } {
   if (!Array.isArray(input) || input.length === 0 || input.length > 2000) return { error: 'Offer list must contain 1 to 2000 items.' };
@@ -16,28 +20,32 @@ export function validateSupplierOffers(input: unknown): { offers?: ParsedSupplie
     const offerId = typeof row.offer_id === 'string' ? row.offer_id.trim() : '';
     const name = typeof row.name === 'string' ? row.name.trim() : '';
     const price = typeof row.price_usd === 'number' ? row.price_usd : typeof row.price_usd === 'string' ? Number(row.price_usd) : Number.NaN;
-    if (!offerId || offerId.length > 180 || !name || name.length > 180 || !Number.isFinite(price) || price <= 0) {
+    if (!VALID_ID.test(offerId) || !name || name.length > 180 || !Number.isFinite(price) || price <= 0 || price > 1_000_000) {
       return { error: 'Offer list contains an invalid ID, name, or positive USD cost.' };
     }
     if (ids.has(offerId)) return { error: 'Offer list contains duplicate offer IDs.' };
     ids.add(offerId);
-    offers.push({ offer_id: offerId, name, price_usd: price });
+    offers.push({ offer_id: offerId, name, price_usd: Math.round(price * 10_000) / 10_000 });
   }
   return { offers };
 }
 
-type ImportOptions = {
+export type ImportOptions = {
   gameId: string;
   supplierId: string;
   categoryId: string;
-  completeSnapshot: boolean;
   offers: ParsedSupplierOffer[];
-  fxRate: number;
-  feeReserveBps: number | null;
-  fixedFeeCents: number | null;
+  fields?: CatalogField[];
+  region?: string | null;
+  currency?: string;
+  completeSnapshot: boolean;
+  actorId?: string | null;
+  source?: 'live_provider' | 'synthetic_fixture';
 };
 
 export type ImportResult = {
+  run_id: string | null;
+  status: 'complete' | 'partial' | 'failed';
   created: number;
   updated: number;
   deactivated: number;
@@ -47,116 +55,70 @@ export type ImportResult = {
   error?: string;
 };
 
+const emptyResult = (error: string): ImportResult => ({
+  run_id: null, status: 'failed', created: 0, updated: 0, deactivated: 0,
+  failed: 0, requires_review: 0, failed_offer_ids: [], error,
+});
+
+function parseResult(value: unknown): ImportResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (!['complete', 'partial', 'failed'].includes(String(row.status))) return null;
+  const number = (key: string) => Number.isSafeInteger(row[key]) && Number(row[key]) >= 0 ? Number(row[key]) : null;
+  const created = number('created');
+  const updated = number('updated');
+  const deactivated = number('deactivated');
+  const failed = number('failed');
+  const requiresReview = number('requires_review');
+  if ([created, updated, deactivated, failed, requiresReview].some((count) => count === null)) return null;
+  return {
+    run_id: typeof row.run_id === 'string' ? row.run_id : null,
+    status: row.status as ImportResult['status'],
+    created: created!, updated: updated!, deactivated: deactivated!, failed: failed!,
+    requires_review: requiresReview!,
+    failed_offer_ids: Array.isArray(row.failed_offer_ids)
+      ? row.failed_offer_ids.filter((id): id is string => typeof id === 'string')
+      : [],
+  };
+}
+
+/**
+ * The caller must pass offers resolved from the trusted server catalog source.
+ * All package/mapping/field writes are performed in the database RPC so each
+ * offer is all-or-nothing, snapshots are audited, and reimports serialize.
+ */
 export async function importSupplierOffers(db: SupabaseClient, options: ImportOptions): Promise<ImportResult> {
-  const empty: ImportResult = { created: 0, updated: 0, deactivated: 0, failed: 0, requires_review: 0, failed_offer_ids: [] };
-  if (options.categoryId !== MOBILE_LEGENDS_CATEGORY_ID) return { ...empty, error: 'Only the approved Mobile Legends category can be imported.' };
-  if (options.offers.length === 0) return { ...empty, error: 'Offer list is empty.' };
-
-  const [targetRows, allLinkedRows] = await Promise.all([
-    db.from('packages').select('id,game_id,name,sku,amount,price_cents,is_active,catalog_status,published_at,supplier_offer_id,supplier_category_id,supplier_cost_usd,supplier_review_required').eq('game_id', options.gameId),
-    db.from('packages').select('id,game_id,supplier_offer_id,supplier_category_id').eq('supplier_category_id', options.categoryId).not('supplier_offer_id', 'is', null),
-  ]);
-  if (targetRows.error || allLinkedRows.error) return { ...empty, error: 'Could not read the current catalog.' };
-  const target = targetRows.data || [];
-  const allLinked = allLinkedRows.data || [];
-  const targetByOffer = new Map<string, typeof target[number]>();
-  const targetBySku = new Map<string, typeof target[number]>();
-  for (const pkg of target) {
-    if (pkg.supplier_offer_id && pkg.supplier_category_id === options.categoryId) {
-      if (targetByOffer.has(pkg.supplier_offer_id)) return { ...empty, error: 'Catalog contains duplicate supplier offer mappings.' };
-      targetByOffer.set(pkg.supplier_offer_id, pkg);
-    }
-    if (typeof pkg.sku === 'string') targetBySku.set(pkg.sku, pkg);
+  const validation = validateSupplierOffers(options.offers);
+  if (validation.error || !validation.offers) return emptyResult(validation.error || 'Offer list is invalid.');
+  if (!VALID_ID.test(options.categoryId)) return emptyResult('Supplier category ID is invalid.');
+  if (options.fields && (options.fields.length > 32 || new Set(options.fields.map((field) => field.key)).size !== options.fields.length)) {
+    return emptyResult('Supplier player-field metadata is invalid.');
   }
-
-  const foreignOffers = new Set(allLinked.filter((pkg) => pkg.game_id !== options.gameId).map((pkg) => pkg.supplier_offer_id));
-  if (options.offers.some((offer) => foreignOffers.has(offer.offer_id))) return { ...empty, error: 'An offer is already assigned to a different game.' };
-  const mappings = await db.from('supplier_package_mappings')
-    .select('package_id,supplier_product_id')
-    .eq('supplier_id', options.supplierId)
-    .in('supplier_product_id', options.offers.map((offer) => offer.offer_id));
-  if (mappings.error) return { ...empty, error: 'Could not validate supplier mappings.' };
-  const mappingPackageIds = Array.from(new Set((mappings.data || []).map((mapping) => mapping.package_id)));
-  if (mappingPackageIds.length) {
-    const mappedPackages = await db.from('packages').select('id,game_id,supplier_category_id,supplier_offer_id').in('id', mappingPackageIds);
-    if (mappedPackages.error) return { ...empty, error: 'Could not validate supplier mappings.' };
-    const packageById = new Map((mappedPackages.data || []).map((pkg) => [pkg.id, pkg]));
-    for (const mapping of mappings.data || []) {
-      const pkg = packageById.get(mapping.package_id);
-      if (!pkg || pkg.game_id !== options.gameId || pkg.supplier_category_id !== options.categoryId || pkg.supplier_offer_id !== mapping.supplier_product_id) {
-        return { ...empty, error: 'A supplier mapping belongs to a different game or offer.' };
-      }
-    }
+  const { data, error } = await db.rpc('admin_import_supplier_catalog', {
+    p_supplier_id: options.supplierId,
+    p_game_id: options.gameId,
+    p_category_id: options.categoryId,
+    p_offers: validation.offers,
+    p_fields: (options.fields || []).map((field, index) => ({
+      field_key: field.key,
+      label: field.label,
+      placeholder: field.placeholder,
+      help_text: field.help_text,
+      is_required: field.required,
+      sort_order: index,
+    })),
+    p_region: options.region || null,
+    p_currency: options.currency || 'USD',
+    p_complete_snapshot: options.completeSnapshot,
+    p_actor_id: options.actorId || null,
+    p_source: options.source || 'synthetic_fixture',
+  });
+  if (error) {
+    if (error.code === '22023') return emptyResult('Supplier offers or player fields failed database validation.');
+    if (error.code === '23503') return emptyResult('The target game or supplier is unavailable.');
+    if (error.code === '23505') return emptyResult('An offer identity is already assigned to a different package or game.');
+    return emptyResult('The supplier catalog import could not be committed.');
   }
-
-  const seen = new Set<string>();
-  const failures: string[] = [];
-  for (const offer of options.offers) {
-    seen.add(offer.offer_id);
-    const sku = `FC-${options.categoryId}-${offer.offer_id}`;
-    const byOffer = targetByOffer.get(offer.offer_id);
-    const bySku = targetBySku.get(sku);
-    if (byOffer && bySku && byOffer.id !== bySku.id) return { ...empty, error: 'Offer SKU conflicts with a different catalog package.' };
-    const existing = byOffer || bySku;
-    if (existing && existing.game_id !== options.gameId) return { ...empty, error: 'Offer SKU is already assigned to a different game.' };
-    if (existing && (existing.supplier_offer_id !== offer.offer_id || existing.supplier_category_id !== options.categoryId)) {
-      return { ...empty, error: 'Offer SKU conflicts with an existing manual or differently mapped package.' };
-    }
-    const minimum = options.feeReserveBps === null || options.fixedFeeCents === null ? null : minimumSalePriceCents(offer.price_usd, options.fxRate, options.feeReserveBps, options.fixedFeeCents);
-    const needsReview = minimum === null || (existing?.price_cents ?? 0) < minimum;
-    const supplierReview = Boolean(existing?.supplier_review_required) || needsReview;
-    if (existing) {
-      const patch: Record<string, unknown> = {
-        supplier_offer_id: offer.offer_id,
-        supplier_category_id: options.categoryId,
-        supplier_cost_usd: offer.price_usd,
-        supplier_last_seen_at: new Date().toISOString(),
-        supplier_review_required: supplierReview,
-      };
-      if (needsReview) {
-        patch.is_active = false;
-        patch.catalog_status = 'DRAFT';
-        patch.published_at = null;
-      }
-      const result = await db.from('packages').update(patch).eq('id', existing.id);
-      if (result.error) failures.push(offer.offer_id);
-      else {
-        empty.updated++;
-        if (supplierReview) empty.requires_review++;
-      }
-    } else {
-      const result = await db.from('packages').insert({
-        game_id: options.gameId,
-        name: offer.name,
-        amount: offer.name,
-        sku,
-        price_cents: 0,
-        is_active: false,
-        catalog_status: 'DRAFT',
-        supplier_offer_id: offer.offer_id,
-        supplier_category_id: options.categoryId,
-        supplier_cost_usd: offer.price_usd,
-        supplier_last_seen_at: new Date().toISOString(),
-        supplier_review_required: true,
-      });
-      if (result.error) failures.push(offer.offer_id);
-      else {
-        empty.created++;
-        empty.requires_review++;
-      }
-    }
-  }
-  empty.failed = failures.length;
-  empty.failed_offer_ids = failures;
-
-  // A snapshot only proves removal when every requested write succeeded.
-  if (options.completeSnapshot && failures.length === 0) {
-    const removed = target.filter((pkg) => pkg.supplier_category_id === options.categoryId && pkg.supplier_offer_id && !seen.has(pkg.supplier_offer_id));
-    for (const pkg of removed) {
-      const result = await db.from('packages').update({ is_active: false, catalog_status: 'DRAFT', published_at: null, supplier_review_required: true }).eq('id', pkg.id);
-      if (result.error) empty.failed++;
-      else { empty.deactivated++; empty.requires_review++; }
-    }
-  }
-  return empty;
+  const result = parseResult(data);
+  return result || emptyResult('The database returned an invalid catalog import result.');
 }

@@ -297,4 +297,121 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     await customer.auth.signOut()
     await writeEvidence(page, testInfo, { action: 'anonymous_customer_denial', anonymous_status: anonymousResponse.status(), customer_status: customerResponse.status(), rpc_denied: Boolean(rpc.error), created_rows: data?.length })
   })
+
+  test('admin imports three supplier game categories through the UI and previews a locked customer storefront', async ({ page }, testInfo) => {
+    const run = (process.env.CATALOG_RUN_TAG || 'local-multigame').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 28)
+    const findGame = async (slug: string) => {
+      const existing = await serviceDb().from('games').select('id,slug,name,catalog_status').eq('slug', slug).maybeSingle()
+      expect(existing.error).toBeNull()
+      return existing.data
+    }
+
+    const pubgSlug = `${run}-browser-pubg-existing`
+    const genshinSlug = `${run}-browser-genshin-new`
+    const mobileSlug = `${run}-browser-ml-new`
+    const upload = async (categoryName: string, categoryId: string, targetSlug: string, createThroughUi = false) => {
+      const categoryButton = page.getByRole('button', { name: new RegExp(categoryName) })
+      await expect(categoryButton).toBeVisible()
+      await categoryButton.click()
+      await page.getByRole('button', { name: 'Load and select complete snapshot' }).click()
+      await expect(page.getByRole('checkbox', { name: /Select / }).first()).toBeChecked()
+
+      const existing = await findGame(targetSlug)
+      if (createThroughUi && !existing) {
+        await page.getByRole('button', { name: 'Create draft game' }).click()
+        await page.getByLabel('Slug').fill(targetSlug)
+        await page.getByRole('button', { name: 'Save draft game' }).click()
+        await expect(page.getByRole('status').filter({ hasText: /Draft game created/ })).toBeVisible()
+      } else {
+        expect(existing, `expected the database-backed ${categoryId} target game`).not.toBeNull()
+        await page.getByLabel('Existing destination game').selectOption(existing!.id)
+      }
+
+      await page.getByRole('button', { name: /Preview selected import/ }).click()
+      await expect(page.getByText(/Import preview ·/)).toBeVisible()
+      const confirm = page.getByRole('button', { name: 'Confirm draft import' })
+      await confirm.click()
+      await expect(page.getByText(/Import complete:/)).toBeVisible({ timeout: 15_000 })
+      const { data: game } = await serviceDb().from('games').select('id,slug,name,catalog_status').eq('slug', targetSlug).single()
+      expect(game).not.toBeNull()
+      const { data: savedPackages, error: packageError } = await serviceDb().from('packages')
+        .select('id,supplier_offer_id,is_active,catalog_status,price_cents,supplier_review_required')
+        .eq('game_id', game!.id)
+        .eq('supplier_category_id', categoryId)
+      expect(packageError).toBeNull()
+      expect(savedPackages).toHaveLength(3)
+      const unpricedDrafts = savedPackages?.filter((pkg) => pkg.price_cents === 0) || []
+      expect(unpricedDrafts.every((pkg) => !pkg.is_active && pkg.catalog_status === 'DRAFT' && pkg.supplier_review_required)).toBe(true)
+      const previouslyReviewedPublished = savedPackages?.filter((pkg) => pkg.is_active || pkg.catalog_status === 'PUBLISHED') || []
+      expect(previouslyReviewedPublished.every((pkg) => categoryId === 'genshin_impact_global'
+        && pkg.supplier_offer_id === 'genshin_crystals_60'
+        && pkg.price_cents === 10000
+        && pkg.catalog_status === 'PUBLISHED'
+        && pkg.supplier_review_required === false)).toBe(true)
+      const administratorPrices: Record<string, number> = categoryId === 'pubg_mobile_global'
+        ? { pubg_uc_60: 12345 }
+        : categoryId === 'genshin_impact_global' ? { genshin_crystals_60: 10000 } : {}
+      for (const [offerId, priceCents] of Object.entries(administratorPrices)) {
+        const { data: preserved } = await serviceDb().from('packages').select('price_cents')
+          .eq('game_id', game!.id).eq('supplier_offer_id', offerId).single()
+        expect(preserved?.price_cents).toBe(priceCents)
+      }
+      await writeEvidence(page, testInfo, {
+        action: 'synthetic_multigame_draft_import', category: categoryName, package_count: savedPackages?.length,
+        new_offers_remain_inactive_drafts: unpricedDrafts.every((pkg) => !pkg.is_active && pkg.catalog_status === 'DRAFT'),
+        administrator_price_preserved: Object.keys(administratorPrices).length,
+      })
+      await page.getByRole('button', { name: 'Back to categories' }).click()
+      return game!
+    }
+
+    await loginAdmin(page)
+    await page.goto('/admin/suppliers/fazercards-catalog')
+    await expect(page.getByText('Disposable synthetic catalog')).toBeVisible()
+    const pubg = await upload('PUBG Mobile \\(Global\\)', 'pubg_mobile_global', pubgSlug)
+
+    await page.getByRole('button', { name: 'Load more categories' }).click()
+    const genshin = await upload('Genshin Impact \\(Global\\)', 'genshin_impact_global', genshinSlug)
+
+    const mobileLegends = await upload('Mobile Legends: Bang Bang \\(Philippines\\)', 'mobile_legends_philippines', mobileSlug, true)
+    expect(new Set([pubg.id, genshin.id, mobileLegends.id]).size).toBe(3)
+
+    const { data: gameState } = await serviceDb().from('games').select('id,slug,is_active,catalog_status').eq('id', genshin.id).single()
+    const { data: packageRecord } = await serviceDb().from('packages').select('id,sku,catalog_status,is_active').eq('game_id', genshin.id).eq('supplier_offer_id', 'genshin_crystals_60').single()
+    expect(packageRecord).not.toBeNull()
+    if (packageRecord?.catalog_status !== 'PUBLISHED') {
+      await page.goto(`/admin/games/${genshin.id}/packages`)
+      const card = page.locator('article').filter({ hasText: packageRecord!.sku })
+      await card.getByRole('button', { name: 'Edit' }).click()
+      await card.getByLabel('Selling price (PHP)').fill('100.00')
+      await card.getByRole('button', { name: 'Save draft changes' }).click()
+      await expect(card).toContainText('₱100.00')
+      page.on('dialog', (dialog) => dialog.accept())
+      await card.getByRole('button', { name: 'Publish' }).click()
+      await expect(card).toContainText('PUBLISHED')
+    }
+
+    if (!gameState?.is_active || gameState.catalog_status !== 'PUBLISHED') {
+      await page.goto('/admin/games')
+      const row = page.getByRole('row').filter({ hasText: genshin.slug })
+      page.on('dialog', (dialog) => dialog.accept())
+      await row.getByRole('button', { name: 'Publish' }).click()
+      await expect(row).toContainText('PUBLISHED')
+    }
+
+    await page.goto(`/games/${genshin.slug}`)
+    const supplierPackage = page.getByRole('radio', { name: /60 Genesis Crystals.*Currently unavailable/ })
+    await expect(supplierPackage).toBeVisible()
+    await expect(supplierPackage).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Review Order' })).toBeDisabled()
+    const customerEmail = `catalog-locked-${testInfo.project.name}@example.invalid`
+    const checkout = await page.request.post('/api/orders', { data: {
+      gameId: genshin.id, packageId: packageRecord!.id, email: customerEmail,
+      name: 'Synthetic Locked Catalog Customer', playerInputs: { uid: 'synthetic-uid', server: 'synthetic-server' }, paymentMethod: 'manual',
+    } })
+    expect(checkout.status()).toBe(400)
+    const { data: savedOrders } = await serviceDb().from('orders').select('id').eq('email', customerEmail)
+    expect(savedOrders).toHaveLength(0)
+    await writeEvidence(page, testInfo, { action: 'published_catalog_remains_non_saleable', storefront_visible: true, customer_control_disabled: true, checkout_status: checkout.status(), orders_created: savedOrders?.length })
+  })
 })

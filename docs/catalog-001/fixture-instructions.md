@@ -48,13 +48,45 @@ synthetic packages. The acceptance fixtures add run-tagged, uniquely keyed
 games and offers so desktop/mobile projects cannot collide. Every database
 write is to the disposable local stack. A clean reset removes all fixture rows.
 
-The snapshot importer currently supports only the approved Mobile Legends
-category `mobile_legends_philippines`; it does not claim general supplier
-category importing. It performs no provider request. `/api/admin/sync-offers`
-remains release-locked, FazerCards is seeded disabled, payment runs in mock
-mode, supplier fulfillment remains disabled in both app and database settings,
-and RF Coins flags/payment method remain false. No payment, supplier purchase,
-or hosted email operation is part of this suite.
+The catalog importer exercises three synthetic game top-up categories:
+`mobile_legends_philippines`, `pubg_mobile_global`, and
+`genshin_impact_global`. The paginated fixture also exposes a Steam gift-card
+category marked unsupported, to prove code-delivery products cannot enter the
+game top-up flow. Categories, offers, region/currency data, player fields, and
+costs are synthetic; the disposable seed creates a disabled FazerCards row with
+empty credentials. The browser and integration suites call only loopback app and
+Supabase endpoints. Live catalog access requires independent upstream-key
+revocation verification, a separate owner authorization, server-only credential
+configuration, and explicit release gates; no such gates or credentials are set
+to an enabling value by this fixture. `/api/admin/sync-offers` remains release-locked, payment runs
+in mock mode, supplier fulfillment remains disabled in both app and database
+settings, and RF Coins flags/payment method remain false. No payment, supplier
+purchase, hosted migration, or external email operation is part of this suite.
+
+No hosted supplier configuration was created or verified. Before any separately
+approved live catalog access, the owner must verify upstream revocation of the
+historically exposed FazerCards key, authorize catalog access, verify the current
+provider's catalog endpoint/response contract, and provision any new credential
+only as a server-side secret. No live `/topups` or `/offers` request was made in
+this batch. The source gate uses these names only:
+`RUNFAZONE_SUPPLIER_CATALOG_RELEASE`,
+`FAZERCARDS_CREDENTIAL_REVOCATION_VERIFIED`,
+`FAZERCARDS_CATALOG_ACCESS_AUTHORIZED`, and `FAZERCARDS_API_KEY`; the existing
+`fazercards` supplier row must also be explicitly enabled. No enabling
+production values are configured here; local tests set only explicit
+disabled/fixture values. Catalog
+visibility/import authorization is not fulfillment authorization: supplier
+ordering remains separately gated by
+`RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE`,
+`app_settings.supplier_fulfillment_release_enabled`, and the individual mapping
+state. Do not enable payment or fulfillment as part of catalog review.
+
+The admin catalog screen supports category/offer pagination, choosing an
+existing game or creating a draft game, selected-offer preview, draft import,
+and a database-backed storefront preview. Imported offers are not published or
+saleable by default. Use the existing game/package admin pages to configure
+buyer fields, prices, margins, and catalog visibility. Supplier fulfillment
+must remain independently disabled until its separate production approval.
 
 For manual cleanup after a forced machine shutdown, find the exact project ID
 and `CATALOG_DISPOSABLE_STACK_PATH` reported by the runner, then run

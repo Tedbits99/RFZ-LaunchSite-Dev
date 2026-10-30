@@ -16,6 +16,7 @@ type CustomerPackage = {
   sort_order: number;
   badge: string | null;
   image_url: string | null;
+  saleable: boolean;
 };
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
@@ -58,80 +59,63 @@ export default async function GamePage({ params }: { params: Promise<{ slug: str
     .maybeSingle();
   if (detailPromo?.image_url) detailBannerUrl = detailPromo.image_url;
 
-  const packageRecords = packages || [];
-  const isSpecialPackage = (pkg: (typeof packageRecords)[number]) => {
-    const normalizedName = pkg.name.toLowerCase();
-    return normalizedName === 'weekly diamond pass' || normalizedName === 'twilight pass' || normalizedName.includes('first top-up bonus');
-  };
-  let customerPackages: CustomerPackage[] = packageRecords;
-  if (game.slug === 'mobile-legends' || game.slug === 'mlbb') {
-    // Supplier mappings and offer identifiers are internal configuration.
-    // Read them only with the server-side service client; never ask the public
-    // catalog key for those columns or pass them to the browser.
-    const { data: supplierPackages, error: supplierPackagesError } = adminSupabase && packageRecords.length
-      ? await adminSupabase.from('packages')
-        .select('id, supplier_offer_id, supplier_category_id, supplier_cost_usd, supplier_review_required')
-        .in('id', packageRecords.map((pkg) => pkg.id))
-      : { data: [], error: null };
-    const supplierPackageById = new Map(
-      (supplierPackages || []).map((pkg) => [pkg.id, pkg]),
-    );
-    const customerPackageById = new Map(packageRecords.map((pkg) => [pkg.id, pkg]));
-    const [{ data: supplier }, { data: settings, error: settingsError }] = adminSupabase
-      ? await Promise.all([
-        adminSupabase.from('suppliers').select('id').eq('code', 'fazercards').eq('enabled', true).maybeSingle(),
-        adminSupabase.from('app_settings').select('reference_usd_php_rate,payment_fee_reserve_bps,payment_fee_fixed_cents,supplier_fulfillment_release_enabled').eq('id', 1).maybeSingle(),
-      ])
-      : [{ data: null }, { data: null, error: null }];
-    const releaseReady = process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE === 'enabled'
-      && settingsError === null
-      && settings?.supplier_fulfillment_release_enabled === true
-      && settings.payment_fee_reserve_bps !== null
-      && settings.payment_fee_fixed_cents !== null;
-
-    if (adminSupabase && !supplierPackagesError) {
-      const { data: mappings, error: mappingsError } = supplier && releaseReady
-        ? await adminSupabase
-        .from('supplier_package_mappings')
-        .select('package_id, supplier_product_id, metadata')
-        .eq('supplier_id', supplier.id)
-        .eq('enabled', true)
-        .not('supplier_product_id', 'is', null)
+  const publicPackages = packages || [];
+  let customerPackages: CustomerPackage[] = publicPackages.map((pkg) => ({ ...pkg, saleable: false }));
+  if (adminSupabase && publicPackages.length > 0) {
+    const [{ data: supplierPackages, error: supplierPackagesError }, { data: supplier }, { data: settings, error: settingsError }] = await Promise.all([
+      adminSupabase.from('packages').select('id,supplier_offer_id,supplier_category_id,supplier_cost_usd,supplier_review_required').in('id', publicPackages.map((pkg) => pkg.id)),
+      adminSupabase.from('suppliers').select('id,enabled').eq('code', 'fazercards').maybeSingle(),
+      adminSupabase.from('app_settings').select('reference_usd_php_rate,payment_fee_reserve_bps,payment_fee_fixed_cents,supplier_fulfillment_release_enabled').eq('id', 1).maybeSingle(),
+    ]);
+    if (!supplierPackagesError) {
+      const privateById = new Map((supplierPackages || []).map((pkg) => [pkg.id, pkg]));
+      const releaseReady = process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE === 'enabled'
+        && settingsError === null
+        && settings?.supplier_fulfillment_release_enabled === true
+        && supplier?.enabled === true
+        && settings.payment_fee_reserve_bps !== null
+        && settings.payment_fee_fixed_cents !== null;
+      const linkedIds = (supplierPackages || [])
+        .filter((pkg) => pkg.supplier_offer_id || pkg.supplier_category_id)
+        .map((pkg) => pkg.id);
+      const { data: mappings, error: mappingsError } = releaseReady && supplier && linkedIds.length
+        ? await adminSupabase.from('supplier_package_mappings')
+          .select('package_id,supplier_product_id,enabled,metadata')
+          .eq('supplier_id', supplier.id)
+          .eq('enabled', true)
+          .in('package_id', linkedIds)
         : { data: [], error: null };
-      const validMappingPackageIds = new Set(
-        (mappingsError ? [] : mappings || [])
-          .filter((mapping) => {
-            const pkg = supplierPackageById.get(mapping.package_id);
-            const publicPackage = customerPackageById.get(mapping.package_id);
-            const metadata = mapping.metadata as { category_id?: string } | null;
-            const minimum = pkg?.supplier_cost_usd == null || settings?.reference_usd_php_rate == null
-              || settings?.payment_fee_reserve_bps == null || settings?.payment_fee_fixed_cents == null
-              ? null
-              : minimumSalePriceCents(Number(pkg.supplier_cost_usd), Number(settings.reference_usd_php_rate), Number(settings.payment_fee_reserve_bps), Number(settings.payment_fee_fixed_cents));
-            return pkg?.supplier_category_id === 'mobile_legends_philippines'
-              && Boolean(pkg.supplier_offer_id)
-              && pkg.supplier_review_required === false
-              && mapping.supplier_product_id === pkg.supplier_offer_id
-              && metadata?.category_id === 'mobile_legends_philippines'
-              && minimum !== null && publicPackage !== undefined && publicPackage.price_cents >= minimum;
-          })
-          .map((mapping) => mapping.package_id),
-      );
-      customerPackages = customerPackages.filter((pkg) => {
-        const supplierPackage = supplierPackageById.get(pkg.id);
-        if (!supplierPackage) return false;
-        const supplierLinked = Boolean(supplierPackage.supplier_offer_id || supplierPackage.supplier_category_id);
-        if (supplierLinked) return releaseReady && validMappingPackageIds.has(pkg.id);
-        const customerPackage = customerPackageById.get(pkg.id);
-        return customerPackage ? isSpecialPackage(customerPackage) : false;
+      const validMappingIds = new Set((mappingsError ? [] : mappings || []).filter((mapping) => {
+        const internal = privateById.get(mapping.package_id);
+        const customer = publicPackages.find((pkg) => pkg.id === mapping.package_id);
+        const metadata = mapping.metadata as { category_id?: string } | null;
+        const minimum = !internal?.supplier_cost_usd || !settings?.reference_usd_php_rate
+          || settings.payment_fee_reserve_bps == null || settings.payment_fee_fixed_cents == null
+          ? null
+          : minimumSalePriceCents(Number(internal.supplier_cost_usd), Number(settings.reference_usd_php_rate), Number(settings.payment_fee_reserve_bps), Number(settings.payment_fee_fixed_cents));
+        return Boolean(internal?.supplier_offer_id
+          && internal.supplier_category_id
+          && internal.supplier_review_required === false
+          && mapping.supplier_product_id === internal.supplier_offer_id
+          && metadata?.category_id === internal.supplier_category_id
+          && minimum !== null
+          && customer
+          && customer.price_cents >= minimum);
+      }).map((mapping) => mapping.package_id));
+
+      customerPackages = publicPackages.map((pkg) => {
+        const internal = privateById.get(pkg.id);
+        const supplierLinked = Boolean(internal?.supplier_offer_id || internal?.supplier_category_id);
+        return {
+          ...pkg,
+          // Keep approved catalog content visible while the two release locks
+          // are off; only validated direct products or released supplier offers
+          // can proceed to checkout.
+          saleable: !supplierPackagesError && (!supplierLinked || validMappingIds.has(pkg.id)),
+        };
       });
-    } else {
-      customerPackages = [];
     }
   }
 
-  // The database is authoritative even when the query fails or returns no
-  // enabled rows. Never advertise hard-coded payment methods that checkout
-  // cannot actually accept.
   return <GameTopUp game={game} fields={fields || []} packages={customerPackages} dbPaymentMethods={payConfigs || []} paymentConfigAuthoritative bannerUrl={detailBannerUrl} />;
 }
