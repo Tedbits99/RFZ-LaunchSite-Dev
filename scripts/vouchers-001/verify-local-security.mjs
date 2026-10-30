@@ -136,7 +136,7 @@ try {
          or c.total_redemption_limit is not null and count(u.id) > c.total_redemption_limit
     ) violations
   `;
-  assert(overspent_campaigns === undefined, 'active voucher ledger exceeds a campaign limit or budget');
+  assert(overspent_campaigns === 0, `active voucher ledger exceeds a campaign limit or budget (campaigns=${overspent_campaigns})`);
 
   console.log('VOUCHERS_POSTGRES17_SECURITY_PASS rls=5 api_acl=16 private_schema=sealed release_locks=off accounting=reconciled');
 } catch (error) {
