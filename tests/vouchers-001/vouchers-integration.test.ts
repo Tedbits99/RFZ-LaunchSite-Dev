@@ -315,6 +315,21 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
       p_email: requiredEnv('CATALOG_CUSTOMER_EMAIL'), p_customer_user_id: customerUser.user.id,
     });
     expect(forgedServerRpc.error).not.toBeNull();
+    const forgedCheckout = await anonDb().rpc('create_order_idempotent', {
+      p_game_id: gameId,
+      p_package_id: packageId,
+      p_email: requiredEnv('CATALOG_CUSTOMER_EMAIL'),
+      p_customer_name: 'Synthetic forged customer identity',
+      p_player_inputs: { player_id: 'synthetic-forged-player', __rfz_order_access_hash: 'b'.repeat(64) },
+      p_payment_method: 'manual',
+      p_voucher_code: welcome.payload.code,
+      p_voucher_email: requiredEnv('CATALOG_CUSTOMER_EMAIL'),
+      p_request_key: randomUUID(),
+    });
+    const forgedCheckoutRow = responseData(Array.isArray(forgedCheckout.data) ? forgedCheckout.data[0] : forgedCheckout.data);
+    expect(forgedCheckout.error).toBeNull();
+    expect(forgedCheckoutRow?.out_reference).toBeNull();
+    expect(forgedCheckoutRow?.out_error).toMatch(/verified account/i);
 
     const customerOrder = await appRequest('/api/orders', 'POST', {
       gameId, packageId, email: 'browser-supplied@example.invalid', name: 'Synthetic verified customer',
