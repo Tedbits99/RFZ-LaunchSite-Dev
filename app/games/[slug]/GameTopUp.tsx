@@ -24,6 +24,12 @@ type ResolvedPaymentMethod = {
   disabled?: boolean;
   status?: string;
 };
+type PublicOffer = {
+  campaign_id: string; name: string; description: string; code: string;
+  discount_type: 'PERCENTAGE' | 'FIXED'; discount_value: number;
+  subtotal_cents: number; discount_cents: number; total_cents: number;
+  starts_at: string; ends_at: string | null; timezone: string;
+};
 
 const METHOD_STYLES: Record<string, { detail: string; className: string }> = {
   gcash: { detail: 'Pay with GCash', className: 'from-[#1262c5] to-[#0d3e91]' },
@@ -53,6 +59,38 @@ function formatPrice(cents: number): string {
   return `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 }
 
+const CHECKOUT_IDEMPOTENCY_STORAGE_KEY = 'rfz.checkout.idempotency.v1';
+let volatileCheckoutIdempotencyKey: string | null = null;
+
+function checkoutIdempotencyKey(): string {
+  if (typeof window === 'undefined') return crypto.randomUUID();
+  try {
+    const existing = window.localStorage.getItem(CHECKOUT_IDEMPOTENCY_STORAGE_KEY);
+    if (existing && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(existing)) return existing;
+    const created = crypto.randomUUID();
+    window.localStorage.setItem(CHECKOUT_IDEMPOTENCY_STORAGE_KEY, created);
+    return created;
+  } catch {
+    volatileCheckoutIdempotencyKey ||= crypto.randomUUID();
+    return volatileCheckoutIdempotencyKey;
+  }
+}
+
+function clearCheckoutIdempotencyKey(): void {
+  volatileCheckoutIdempotencyKey = null;
+  try { window.localStorage.removeItem(CHECKOUT_IDEMPOTENCY_STORAGE_KEY); } catch { /* Storage can be disabled by the browser. */ }
+}
+
+function formatCampaignDate(value: string, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-PH', {
+      dateStyle: 'medium', timeStyle: 'short', timeZone: timezone,
+    }).format(new Date(value));
+  } catch {
+    return new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value));
+  }
+}
+
 function discountPercent(pkg: Package): number {
   if (!pkg.original_price_cents || pkg.original_price_cents <= pkg.price_cents) return 0;
   return Math.round((1 - pkg.price_cents / pkg.original_price_cents) * 100);
@@ -75,9 +113,11 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [voucherCode, setVoucherCode] = useState('');
-  const [voucher, setVoucher] = useState<{ code: string; discount: number; total: number } | null>(null);
+  const [voucher, setVoucher] = useState<{ code: string; discount: number; total: number; startsAt: string | null; endsAt: string | null; timezone: string } | null>(null);
   const [voucherError, setVoucherError] = useState('');
   const [voucherChecking, setVoucherChecking] = useState(false);
+  const [publicOffers, setPublicOffers] = useState<PublicOffer[]>([]);
+  const [publicOffersLoading, setPublicOffersLoading] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [qrModal, setQrModal] = useState<{ reference: string; totalCents: number; qrData: string | null; displayName: string } | null>(null);
   const [proofFile, setProofFile] = useState<string | null>(null);
@@ -182,8 +222,30 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
   const subtotalCents = selectedPackage?.price_cents ?? 0;
   const finalCents = voucher ? voucher.total : subtotalCents;
 
-  const applyVoucher = async () => {
-    const code = voucherCode.trim().toUpperCase();
+  useEffect(() => {
+    if (!selectedPackage) { setPublicOffers([]); return; }
+    let cancelled = false;
+    const timeout = window.setTimeout(async () => {
+      setPublicOffersLoading(true);
+      try {
+        const response = await fetch('/api/promotions/available', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packageId: selectedPackage.id, email: email.trim() || undefined }),
+          cache: 'no-store',
+        });
+        const data = await response.json().catch(() => null);
+        if (!cancelled) setPublicOffers(response.ok && Array.isArray(data?.data) ? data.data as PublicOffer[] : []);
+      } catch {
+        if (!cancelled) setPublicOffers([]);
+      } finally {
+        if (!cancelled) setPublicOffersLoading(false);
+      }
+    }, 300);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [email, selectedPackage]);
+
+  const applyCode = async (requestedCode: string) => {
+    const code = requestedCode.trim().toUpperCase();
     if (!code) { setVoucherError('Enter a voucher code.'); return; }
     if (!selectedPackage) { setVoucherError('Choose a package first.'); return; }
     setVoucherChecking(true);
@@ -200,13 +262,17 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
         setVoucherError(data?.error || 'This voucher could not be applied.');
         return;
       }
-      setVoucher({ code: data.voucher.code, discount: data.discount, total: data.total });
+      setVoucher({ code: data.voucher.code, discount: data.discount, total: data.total,
+        startsAt: data.startsAt || null, endsAt: data.endsAt || null, timezone: data.timezone || 'UTC' });
+      setVoucherCode(data.voucher.code);
     } catch {
       setVoucherError('Could not check this voucher. Please try again.');
     } finally {
       setVoucherChecking(false);
     }
   };
+
+  const applyVoucher = async () => applyCode(voucherCode);
 
   const removeVoucher = () => { setVoucher(null); setVoucherCode(''); setVoucherError(''); };
 
@@ -287,14 +353,21 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
       const response = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameId: game.id, packageId: selectedPackage.id, email: email.trim(), name: 'RunFazone Customer', playerInputs, paymentMethod: paymentMethod, voucherCode: voucher?.code || '' }),
+        body: JSON.stringify({ gameId: game.id, packageId: selectedPackage.id, email: email.trim(), name: 'RunFazone Customer', playerInputs, paymentMethod: paymentMethod, voucherCode: voucher?.code || '', idempotencyKey: checkoutIdempotencyKey() }),
       });
       const data = await response.json() as { reference?: string; totalCents?: number; qrData?: string | null; paymentDisplayName?: string; error?: string };
       if (!response.ok || !data.reference) {
+        if (response.status === 409) clearCheckoutIdempotencyKey();
+        if (response.status === 400 && voucher) {
+          setVoucher(null);
+          setVoucherCode('');
+          setVoucherError(data.error || 'This promotion changed or expired. Review the updated price before continuing.');
+        }
         setError(data.error || 'We could not create your order. Please try again.');
         setShowReview(false);
         return;
       }
+      clearCheckoutIdempotencyKey();
       setShowReview(false);
       // For QR Ph (automated), redirect to checkout page which generates
       // a dynamic QR via PayMongo - no manual proof upload needed.
@@ -320,7 +393,7 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
     const discount = discountPercent(pkg);
     const isSelected = selectedPackage?.id === pkg.id;
     return <label key={pkg.id} aria-disabled={!pkg.saleable || undefined} className={`relative block min-h-[104px] rounded-xl border p-3 text-left transition ${pkg.saleable ? 'cursor-pointer focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/40' : 'cursor-not-allowed opacity-70'} ${isSelected ? 'border-cyan-300 bg-cyan-400/10 shadow-[0_0_22px_rgba(34,211,238,.14)]' : 'border-[#20304b] bg-[#0a1225] hover:border-[#3d5c80]'}`}>
-      <input type="radio" name="package" value={pkg.id} checked={isSelected} disabled={!pkg.saleable} onChange={() => { setSelectedPackage(pkg); setMessage(''); }} aria-label={`${pkg.name}, ${formatPrice(pkg.price_cents)}${pkg.saleable ? '' : ', currently unavailable'}${discount > 0 ? `, ${discount}% off` : ''}`} className="sr-only" />
+      <input type="radio" name="package" value={pkg.id} checked={isSelected} disabled={!pkg.saleable} onChange={() => { if (selectedPackage?.id !== pkg.id) { setVoucher(null); setVoucherError(''); } setSelectedPackage(pkg); setMessage(''); }} aria-label={`${pkg.name}, ${formatPrice(pkg.price_cents)}${pkg.saleable ? '' : ', currently unavailable'}${discount > 0 ? `, ${discount}% off` : ''}`} className="sr-only" />
       <span aria-hidden="true">
       {badge && (badge.toLowerCase().includes('popular') || badge.toLowerCase().includes('best')) && <span className="absolute -top-2 right-2 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 px-2 py-0.5 text-[9px] font-semibold text-white">{badge}</span>}
       {pkg.image_url && pkg.image_url.startsWith('https://') && (
@@ -356,9 +429,32 @@ export default function GameTopUp({ game, fields, packages, dbPaymentMethods = [
       {!hasConfiguredProductPaymentMethod && <p role="status" className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-100">No product payment methods are currently configured. RF Coins Wallet is shown separately as coming soon and cannot be selected.</p>}
       <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Payment Methods</h2><p className="mt-1 text-xs text-slate-500">Choose your preferred payment method</p></div>{resolvedMethods.length === 0 ? <div role="status" className="mt-5 rounded-xl border border-dashed border-[#29405f] bg-[#080f20] p-5 text-center text-xs text-slate-500">No payment methods are currently available. Please check back shortly.</div> : <div className="mt-5 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Payment methods">{resolvedMethods.map((method) => <label key={method.key} aria-disabled={method.disabled || undefined} className={`flex min-h-16 items-center gap-3 rounded-xl border p-3 text-left transition ${method.disabled ? 'cursor-not-allowed border-[#26344c] bg-[#080f20]/70 opacity-70' : 'cursor-pointer border-[#20304b] bg-[#080f20] hover:border-[#3d5c80] focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/40'} ${paymentMethod === method.key ? 'border-cyan-300 bg-cyan-400/10 shadow-[0_0_18px_rgba(34,211,238,.1)]' : ''}`}><input type="radio" name="payment-method" value={method.key} checked={paymentMethod === method.key} onChange={() => setPaymentMethod(method.key)} disabled={method.disabled} aria-label={method.name} aria-describedby={method.status ? `payment-method-status-${method.key}` : undefined} className="sr-only" /><span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-gradient-to-br ${method.className} text-[10px] font-bold text-white`}>{method.logo_url ? <img src={method.logo_url} alt="" className="h-full w-full object-contain bg-[#0e1a33]" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : method.key === 'gcash' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698010/gcash1_icon_f4qiy0.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'maya' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1753698009/maya1_icon_jlw6zs.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.key === 'coinsph' ? <img src="https://res.cloudinary.com/dex5ykrfs/image/upload/v1760245657/coinsph_icon_znsgeu.png" alt="" className="h-full w-full object-cover bg-[#0e1a33]" /> : method.name[0]}</span><span className="min-w-0"><span className="block text-xs font-semibold">{method.name}</span><span className="block text-[10px] text-slate-500">{method.detail}</span>{method.status && <span id={`payment-method-status-${method.key}`} className="mt-1 inline-flex rounded-full border border-amber-300/20 bg-amber-300/5 px-2 py-0.5 text-[9px] font-semibold text-amber-200">{method.status}</span>}</span></label>)}</div>}</section>
 
-      <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Order Tracking</h2><p className="mt-1 text-xs text-slate-500">Enter your email to track order</p></div><label className="mt-5 block"><span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-300"><Mail size={13} className="text-cyan-300" /> Email Address</span><input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setMessage(''); }} placeholder="Enter your email address" className="w-full rounded-xl border border-[#233653] bg-[#080f20] px-3.5 py-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-cyan-300" /></label><div className="mt-4 flex gap-2 rounded-xl border border-emerald-400/15 bg-emerald-400/5 p-3 text-[11px] leading-5 text-slate-400"><Info size={15} className="mt-0.5 shrink-0 text-emerald-300" /><p>Your order number and payment instructions will be sent to this email address.</p></div></section>
+      <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div><h2 className="font-display text-lg font-bold">Order Tracking</h2><p className="mt-1 text-xs text-slate-500">Enter your email to track your order</p></div><label className="mt-5 block"><span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-300"><Mail size={13} className="text-cyan-300" /> Email Address</span><input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setMessage(''); if (voucher) { setVoucher(null); setVoucherCode(''); setVoucherError('Recheck your promotion for this email address.'); } }} placeholder="Enter your email address" className="w-full rounded-xl border border-[#233653] bg-[#080f20] px-3.5 py-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-cyan-300" /></label><div className="mt-4 flex gap-2 rounded-xl border border-emerald-400/15 bg-emerald-400/5 p-3 text-[11px] leading-5 text-slate-400"><Info size={15} className="mt-0.5 shrink-0 text-emerald-300" /><p>Your order number and payment instructions will be sent to this email address.</p></div></section>
 
-      <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6"><div className="flex items-start justify-between"><div><h2 className="font-display text-lg font-bold">Voucher</h2><p className="mt-1 text-xs text-slate-500">Have a discount code? Apply it here (optional)</p></div><Ticket size={19} className="text-cyan-300" /></div>{voucher ? (<div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-4"><div className="flex items-center gap-3"><BadgeCheck size={18} className="shrink-0 text-emerald-300" /><div><p className="text-xs font-semibold text-emerald-300">{voucher.code} applied</p><p className="mt-0.5 text-[11px] text-slate-400">−{formatPrice(voucher.discount)} off · new total {formatPrice(voucher.total)}</p></div></div><button type="button" onClick={removeVoucher} className="text-xs text-slate-400 underline underline-offset-2 transition hover:text-rose-300">Remove</button></div>) : (<div className="mt-5 flex gap-2"><input value={voucherCode} onChange={(event) => { setVoucherCode(event.target.value.toUpperCase()); setVoucherError(''); }} placeholder="Enter voucher code" maxLength={50} className="min-w-0 flex-1 rounded-xl border border-[#233653] bg-[#080f20] px-3.5 py-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-cyan-300" /><button type="button" onClick={applyVoucher} disabled={voucherChecking || !voucherCode.trim()} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-cyan-400/50 bg-cyan-400/10 px-4 py-3 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40">{voucherChecking ? 'Checking...' : 'Apply'}</button></div>)}{voucherError && !voucher && <p className="mt-3 rounded-xl border border-rose-400/25 bg-rose-400/5 p-3 text-xs text-rose-300">{voucherError}</p>}</section>
+      <section className="mt-5 rounded-2xl border border-[#1b2a45] bg-[#0b1225] p-5 sm:p-6">
+        <div className="flex items-start justify-between"><div><h2 className="font-display text-lg font-bold">Voucher</h2><p className="mt-1 text-xs text-slate-500">Apply a code or choose an eligible public promotion.</p></div><Ticket size={19} className="text-cyan-300" /></div>
+        {voucher ? (
+          <div className="mt-5 flex items-start justify-between gap-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-4">
+            <div className="flex items-start gap-3"><BadgeCheck size={18} className="mt-0.5 shrink-0 text-emerald-300" /><div>
+              <p className="text-xs font-semibold text-emerald-300">{voucher.code} applied</p>
+              <p className="mt-1 text-[11px] text-slate-300">{formatPrice(subtotalCents)} − {formatPrice(voucher.discount)} = <strong className="text-white">{formatPrice(voucher.total)}</strong></p>
+              <p className="mt-1 text-[10px] text-slate-400">{voucher.startsAt ? `Eligible from ${formatCampaignDate(voucher.startsAt, voucher.timezone)}` : 'Eligible now'}{voucher.endsAt ? ` through ${formatCampaignDate(voucher.endsAt, voucher.timezone)}` : ''} ({voucher.timezone})</p>
+            </div></div>
+            <button type="button" onClick={removeVoucher} className="min-h-8 shrink-0 text-xs text-slate-400 underline underline-offset-2 transition hover:text-rose-300">Remove</button>
+          </div>
+        ) : (
+          <div className="mt-5 flex gap-2"><input aria-label="Voucher code" value={voucherCode} onChange={(event) => { setVoucherCode(event.target.value.toUpperCase()); setVoucherError(''); }} placeholder="Enter voucher code" maxLength={50} className="min-w-0 flex-1 rounded-xl border border-[#233653] bg-[#080f20] px-3.5 py-3 text-sm outline-none transition placeholder:text-slate-600 focus:border-cyan-300" /><button type="button" onClick={applyVoucher} disabled={voucherChecking || !voucherCode.trim()} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-cyan-400/50 bg-cyan-400/10 px-4 py-3 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40">{voucherChecking ? 'Checking...' : 'Apply'}</button></div>
+        )}
+        {voucherError && !voucher && <p role="alert" className="mt-3 rounded-xl border border-rose-400/25 bg-rose-400/5 p-3 text-xs text-rose-300">{voucherError}</p>}
+        {publicOffersLoading && <p role="status" className="mt-4 text-xs text-slate-500">Checking public promotions…</p>}
+        {!publicOffersLoading && publicOffers.length > 0 && <div className="mt-5 space-y-2" aria-label="Eligible public promotions">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Available for this package</p>
+          {publicOffers.map((offer) => <div key={offer.campaign_id} className="flex flex-col justify-between gap-3 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3 sm:flex-row sm:items-center">
+            <div className="min-w-0"><p className="text-xs font-semibold text-cyan-100">{offer.name}</p><p className="mt-1 text-[11px] text-slate-300">{formatPrice(offer.subtotal_cents)} − {formatPrice(offer.discount_cents)} = <strong className="text-white">{formatPrice(offer.total_cents)}</strong> · code <span className="font-mono">{offer.code}</span></p><p className="mt-1 text-[10px] text-slate-500">{offer.ends_at ? `Valid through ${formatCampaignDate(offer.ends_at, offer.timezone)}` : `Starts ${formatCampaignDate(offer.starts_at, offer.timezone)} · no scheduled end`} ({offer.timezone})</p></div>
+            <button type="button" onClick={() => applyCode(offer.code)} disabled={voucherChecking} className="min-h-10 shrink-0 rounded-lg border border-cyan-300/30 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-300/10 disabled:opacity-50">Apply offer</button>
+          </div>)}
+        </div>}
+      </section>
 
       <section aria-label="Order preparation summary" aria-live="polite" className="sticky bottom-3 z-10 mt-5 rounded-2xl border border-cyan-300/25 bg-[#081329]/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl sm:p-5"><div className="flex items-center justify-between gap-4"><div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-slate-500">Selected package</p><p className="mt-1 truncate text-sm font-semibold">{selectedPackage?.name || 'Choose a package'}</p>{selectedPackage && <p className="text-[11px] text-slate-500">{formatPrice(subtotalCents)}{voucher ? ` → ${formatPrice(finalCents)}` : ''} · {paymentMethod ? paymentMethodLabel(paymentMethod) : 'Choose payment'}</p>}</div><button type="button" onClick={openReview} disabled={!isReady} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-3 text-xs font-bold shadow-lg shadow-blue-900/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"><LockKeyhole size={14} />Review Order</button></div></section>
 

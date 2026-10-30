@@ -1,105 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
+import { readBoundedJson } from '@/lib/readBoundedJson';
+import { voucherRequestIdentity } from '@/lib/voucherRequestClient';
 
-// Simple in-memory rate limiting per email/IP for voucher validation.
-// Tracks attempts in a sliding window. This is per-instance (not shared across
-// edge instances) but provides basic brute-force protection for the common case.
-const RATE_WINDOW_MS = 60_000; // 1 minute
-const RATE_MAX_ATTEMPTS = 10;
-const rateMap = new Map<string, { count: number; firstAt: number }>();
+export const dynamic = 'force-dynamic';
 
-function rateLimit(key: string): boolean {
-  const now = Date.now();
-  const entry = rateMap.get(key);
-  if (!entry || now - entry.firstAt > RATE_WINDOW_MS) {
-    rateMap.set(key, { count: 1, firstAt: now });
-    return true;
-  }
-  entry.count++;
-  if (entry.count > RATE_MAX_ATTEMPTS) {
-    return false;
-  }
-  return true;
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(req: NextRequest) {
-  try {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-    const body = await req.json();
-    const { code, packageId, gameId, email } = body as {
-      code?: string;
-      packageId?: string;
-      gameId?: string;
-      email?: string;
-    };
-
-    const rateKey = `${ip}:${email || 'anon'}`;
-    if (!rateLimit(rateKey)) {
-      return NextResponse.json(
-        { error: 'Too many attempts. Please try again in a minute.' },
-        { status: 429 }
-      );
-    }
-
-    if (!code || typeof code !== 'string' || !code.trim()) {
-      return NextResponse.json({ error: 'Please enter a voucher code.' }, { status: 400 });
-    }
-    if (!packageId || !gameId) {
-      return NextResponse.json({ error: 'Missing product information.' }, { status: 400 });
-    }
-    const db = adminSupabase || supabase;
-    if (!db) {
-      return NextResponse.json({ error: 'Service unavailable.' }, { status: 503 });
-    }
-
-    // Server-side: load the actual package price from the database.
-    // Never trust a subtotal from the frontend.
-    const { data: pkg, error: pkgError } = await db
-      .from('packages')
-      .select('id, price_cents, game_id, is_active')
-      .eq('id', packageId)
-      .maybeSingle();
-
-    if (pkgError || !pkg || !pkg.is_active || pkg.game_id !== gameId) {
-      return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
-    }
-
-    const subtotalCents = pkg.price_cents;
-
-    const normalizedCode = code.trim().toUpperCase();
-
-    // The SECURITY DEFINER function holds all the validation rules and
-    // returns the specific failure reason (expired, usage limit, already
-    // used, minimum order, wrong game, inactive) — the same rules the
-    // atomic create_order function enforces, so they can never disagree.
-    const { data, error } = await db.rpc('validate_voucher', {
-      p_code: normalizedCode,
-      p_subtotal_cents: subtotalCents,
-      p_game_id: gameId,
-      p_email: email ? String(email).trim().toLowerCase() : null,
-    });
-
-    const result = (Array.isArray(data) ? data[0] : data) as
-      | { out_valid: boolean; out_error: string | null; out_discount_cents: number; out_total_cents: number }
-      | undefined;
-
-    if (error || !result) {
-      return NextResponse.json({ error: 'Could not check this voucher. Please try again.' }, { status: 500 });
-    }
-
-    if (!result.out_valid) {
-      return NextResponse.json({ error: result.out_error || 'Invalid voucher code.' }, { status: 400 });
-    }
-
-    return NextResponse.json({
-      success: true,
-      voucher: { code: normalizedCode },
-      subtotal: subtotalCents,
-      discount: result.out_discount_cents,
-      total: result.out_total_cents,
-    });
-  } catch {
-    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
+  const input = await readBoundedJson(req, 8192);
+  if (!input) return NextResponse.json({ error: 'Invalid or oversized JSON request.' }, { status: 400 });
+  if (typeof input.code !== 'string' || input.code.trim().length < 3 || input.code.trim().length > 50
+      || typeof input.packageId !== 'string' || !UUID_RE.test(input.packageId)
+      || (input.email !== undefined && (typeof input.email !== 'string' || input.email.length > 320))) {
+    return NextResponse.json({ error: 'Enter a valid promotion code and choose a package.' }, { status: 400 });
   }
+
+  // Cloudflare overwrites this reserved edge header. Never accept X-Forwarded-For
+  // or an arbitrary browser IP as an identity. Local development is loopback-only.
+  const edgeIp = req.headers.get('cf-connecting-ip')?.trim();
+  const clientIp = edgeIp || (process.env.NODE_ENV !== 'production' ? '127.0.0.1' : '');
+  if (!clientIp || clientIp.length > 64) {
+    return NextResponse.json({ error: 'Promotion validation is temporarily unavailable.' }, { status: 503 });
+  }
+  if (!adminSupabase) return NextResponse.json({ error: 'Promotion service is unavailable.' }, { status: 503 });
+  const { data: rateAllowed, error: rateError } = await adminSupabase.rpc('consume_voucher_validation_rate_limit', {
+    p_client_ip: clientIp,
+  });
+  if (rateError) return NextResponse.json({ error: 'Promotion validation is temporarily unavailable.' }, { status: 503 });
+  if (rateAllowed !== true) {
+    return NextResponse.json({ error: 'Too many attempts. Please try again in a minute.' }, {
+      status: 429,
+      headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  const identity = await voucherRequestIdentity(req);
+  if (!identity.ok) return NextResponse.json({ error: identity.error }, { status: identity.status });
+  const email = identity.authenticated ? identity.email : String(input.email || '').trim().toLowerCase();
+  if (!identity.authenticated && (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320)) {
+    return NextResponse.json({ error: 'Enter a valid checkout email.' }, { status: 400 });
+  }
+
+  const { data, error } = await identity.client.rpc('validate_campaign_voucher', {
+    p_code: input.code.trim().toUpperCase(),
+    p_package_id: input.packageId,
+    p_email: email,
+  });
+  const result = (Array.isArray(data) ? data[0] : data) as {
+    out_valid?: boolean;
+    out_error?: string | null;
+    out_discount_cents?: number;
+    out_total_cents?: number;
+    out_starts_at?: string | null;
+    out_ends_at?: string | null;
+    out_timezone?: string | null;
+  } | null;
+  if (error || !result) return NextResponse.json({ error: 'Could not check this promotion. Please try again.' }, { status: 503 });
+  if (!result.out_valid) return NextResponse.json({ error: result.out_error || 'Invalid or unavailable promotion code.' }, { status: 400 });
+
+  const response = NextResponse.json({
+    success: true,
+    voucher: { code: input.code.trim().toUpperCase() },
+    discount: result.out_discount_cents,
+    total: result.out_total_cents,
+    startsAt: result.out_starts_at,
+    endsAt: result.out_ends_at,
+    timezone: result.out_timezone || 'UTC',
+  });
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }
