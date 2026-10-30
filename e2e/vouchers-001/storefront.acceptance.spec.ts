@@ -69,9 +69,10 @@ test('storefront lists and applies one public offer with authoritative price and
 
   const voucher = page.getByText(`${code} applied`, { exact: true });
   await expect(voucher).toBeVisible();
-  await expect(page.getByText('₱4.00 − ₱0.75 = ₱3.25')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible();
-  await page.getByRole('button', { name: 'Remove' }).click();
+  const appliedVoucher = voucher.locator('xpath=../../..');
+  await expect(appliedVoucher.getByText('₱4.00 − ₱0.75 = ₱3.25', { exact: true })).toBeVisible();
+  await expect(appliedVoucher.getByRole('button', { name: 'Remove' })).toBeVisible();
+  await appliedVoucher.getByRole('button', { name: 'Remove' }).click();
   await expect(voucher).toHaveCount(0);
   await expect(publicOffers).toContainText(code);
 
