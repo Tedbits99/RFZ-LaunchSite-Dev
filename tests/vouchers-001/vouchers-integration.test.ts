@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
+import postgres from 'postgres';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { anonDb, identityDb, serviceDb } from '../../e2e/catalog-001/fixture-support';
 
@@ -28,6 +29,21 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing disposable voucher integration value: ${name}`);
   return value;
+}
+
+async function clearDisposableVoucherRateBuckets() {
+  const connection = new URL(requiredEnv('CATALOG_LOCAL_DB_URL'));
+  if (!['postgres:', 'postgresql:'].includes(connection.protocol)
+      || connection.hostname !== '127.0.0.1'
+      || connection.port !== process.env.E2E_LOCAL_DB_PORT) {
+    throw new Error('Voucher rate-limit reset refuses a non-loopback disposable database.');
+  }
+  const sql = postgres(connection.toString(), { max: 1, prepare: false, connect_timeout: 10 });
+  try {
+    await sql`DELETE FROM voucher_private.rate_limit_buckets`;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
 
 function localOrigin(): URL {
@@ -241,9 +257,8 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     const directAnonymous = await anonDb().rpc('validate_campaign_voucher', {
       p_code: privateCampaign.payload.code as string, p_package_id: packageId, p_email: `direct-${runTag}@example.invalid`,
     });
-    const directAnonymousResult = responseData(Array.isArray(directAnonymous.data) ? directAnonymous.data[0] : directAnonymous.data);
-    expect(directAnonymous.error).toBeNull();
-    expect(directAnonymousResult?.out_valid).toBe(true);
+    expect(directAnonymous.error).not.toBeNull();
+    expect(directAnonymous.data).toBeNull();
     const wrongPackage = await validateCode(privateCampaign.payload.code as string, otherPackageId);
     expect(wrongPackage.response.status).toBe(400);
 
@@ -278,6 +293,11 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     expect((await campaignStatus(welcome.id, 'ACTIVE')).response.status).toBe(200);
     const guest = await validateCode(welcome.payload.code as string);
     expect(guest.response.status).toBe(400);
+    const forgedGuest = await appRequest('/api/vouchers/validate', 'POST', {
+      code: welcome.payload.code, packageId, email: requiredEnv('CATALOG_CUSTOMER_EMAIL'),
+      customerUserId: 'c0010000-0000-4000-8000-000000000099',
+    }, { cookie: null, ip: '198.51.100.73' });
+    expect(forgedGuest.response.status).toBe(400);
     const customer = await validateCode(welcome.payload.code as string, packageId, {
       cookie: await authCookie('CUSTOMER'), email: requiredEnv('CATALOG_CUSTOMER_EMAIL'), ip: '198.51.100.74',
     });
@@ -289,9 +309,27 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     const directRpc = await customerClient.rpc('validate_campaign_voucher', {
       p_code: welcome.payload.code as string, p_package_id: packageId, p_email: 'forged@example.invalid',
     });
-    const directResult = responseData(Array.isArray(directRpc.data) ? directRpc.data[0] : directRpc.data);
-    expect(directRpc.error).toBeNull();
-    expect(directResult?.out_valid).toBe(true);
+    expect(directRpc.error).not.toBeNull();
+    const forgedServerRpc = await anonDb().rpc('validate_campaign_voucher_for_server', {
+      p_code: welcome.payload.code as string, p_package_id: packageId,
+      p_email: requiredEnv('CATALOG_CUSTOMER_EMAIL'), p_customer_user_id: customerUser.user.id,
+    });
+    expect(forgedServerRpc.error).not.toBeNull();
+
+    const customerOrder = await appRequest('/api/orders', 'POST', {
+      gameId, packageId, email: 'browser-supplied@example.invalid', name: 'Synthetic verified customer',
+      playerInputs: { player_id: 'synthetic-customer-player' }, paymentMethod: 'manual',
+      voucherCode: welcome.payload.code, idempotencyKey: randomUUID(),
+    }, { cookie: await authCookie('CUSTOMER') });
+    expect(customerOrder.response.status).toBe(200);
+    const { data: customerOrderRecord, error: customerOrderError } = await serviceDb().from('orders')
+      .select('customer_user_id,email,voucher_code').eq('reference', orderReference(customerOrder.body)).single();
+    expect(customerOrderError).toBeNull();
+    expect(customerOrderRecord).toMatchObject({
+      customer_user_id: customerUser.user.id,
+      email: requiredEnv('CATALOG_CUSTOMER_EMAIL'),
+      voucher_code: welcome.payload.code,
+    });
 
     const superAdminEmail = `voucher-super-${runTag}@example.invalid`;
     const superAdminPassword = randomUUID();
@@ -326,9 +364,7 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
       const directDenied = await customerClient.rpc('validate_campaign_voucher', {
         p_code: welcome.payload.code as string, p_package_id: packageId, p_email: 'forged@example.invalid',
       });
-      const deniedResult = responseData(Array.isArray(directDenied.data) ? directDenied.data[0] : directDenied.data);
-      expect(directDenied.error).toBeNull();
-      expect(deniedResult?.out_valid).toBe(false);
+      expect(directDenied.error).not.toBeNull();
       const routeDenied = await validateCode(welcome.payload.code as string, packageId, {
         cookie: await authCookie('CUSTOMER'), email: requiredEnv('CATALOG_CUSTOMER_EMAIL'), ip: '198.51.100.76',
       });
@@ -403,8 +439,10 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     expect((await campaignStatus(campaign.id, 'ACTIVE')).response.status).toBe(200);
     const responses = await Promise.all(Array.from({ length: 50 }, (_, index) => createOrder(campaign.payload.code as string, `concurrent-${index}`)));
     const successful = responses.filter(({ response, body }) => response.ok && typeof body.reference === 'string');
+    const rejected = responses.filter(({ response }) => !response.ok);
     expect(successful).toHaveLength(10);
-    expect(responses.every(({ response }) => response.status !== 500)).toBe(true);
+    expect(rejected).toHaveLength(40);
+    expect(rejected.every(({ body }) => /redemption limit/i.test(String(body.error)))).toBe(true);
 
     const { data: usages, error } = await serviceDb().from('voucher_usages')
       .select('id,redemption_status,discount_cents').eq('campaign_id', campaign.id);
@@ -543,4 +581,43 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     });
     expect(malformed.status).toBe(400);
   });
+
+  it('bounds voucher-code probes made directly against both public order RPCs', async () => {
+    await clearDisposableVoucherRateBuckets();
+    const anonymous = anonDb();
+    const oneEmail = `bounded-${runTag}@example.invalid`;
+    const emailAttempts = await Promise.all(Array.from({ length: 11 }, (_, index) => anonymous.rpc('create_order', {
+      p_game_id: gameId,
+      p_package_id: packageId,
+      p_email: oneEmail,
+      p_customer_name: 'Synthetic rate-limit probe',
+      p_player_inputs: { player_id: 'synthetic-rate-limit-player' },
+      p_payment_method: 'manual',
+      p_voucher_code: `INVALID-${index}-${runTag}`,
+      p_voucher_email: oneEmail,
+    })));
+    const emailRows = emailAttempts.map((attempt) => responseData(Array.isArray(attempt.data) ? attempt.data[0] : attempt.data));
+    expect(emailAttempts.every((attempt) => attempt.error === null)).toBe(true);
+    expect(emailRows.filter((row) => row?.out_error === 'Promotion validation is temporarily unavailable.')).toHaveLength(1);
+
+    await clearDisposableVoucherRateBuckets();
+    const rotatingEmailAttempts = await Promise.all(Array.from({ length: 61 }, (_, index) => {
+      const email = `rotating-${index}-${runTag}@example.invalid`;
+      return anonymous.rpc('create_order_idempotent', {
+        p_game_id: gameId,
+        p_package_id: packageId,
+        p_email: email,
+        p_customer_name: 'Synthetic aggregate rate-limit probe',
+        p_player_inputs: { player_id: 'synthetic-rate-limit-player', __rfz_order_access_hash: 'a'.repeat(64) },
+        p_payment_method: 'manual',
+        p_voucher_code: `INVALID-ROTATED-${index}-${runTag}`,
+        p_voucher_email: email,
+        p_request_key: randomUUID(),
+      });
+    }));
+    const rotatingRows = rotatingEmailAttempts.map((attempt) => responseData(Array.isArray(attempt.data) ? attempt.data[0] : attempt.data));
+    expect(rotatingEmailAttempts.every((attempt) => attempt.error === null)).toBe(true);
+    expect(rotatingRows.filter((row) => row?.out_error === 'Promotion validation is temporarily unavailable.')).toHaveLength(1);
+    expect(rotatingRows.filter((row) => row?.out_error === 'Invalid or unavailable promotion code.')).toHaveLength(60);
+  }, 90_000);
 });

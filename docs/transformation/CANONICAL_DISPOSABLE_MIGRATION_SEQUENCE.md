@@ -2,7 +2,7 @@
 
 **Status:** reviewed executable migration manifest for an unlinked disposable Supabase instance and the repository's deployable `supabase/migrations/` directory. This artifact does not alter any historical migration and is not authorization to apply anything to `ketdhcmwowzztcdlmris`.
 
-**Source history:** see the inventory documents for the current repository file count; **executable:** 110; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
+**Source history:** see the inventory documents for the current repository file count; **executable:** 111; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
 
 ## Selection rules
 
@@ -147,6 +147,7 @@
 | 108 | INCLUDE | `20261027120200_catalog_order_saleability_guard.sql` | `73849c4f224fb599d8100e38647a51d652c5637f34eb94baffb0e099112bbfea` | 107. 20261027120100_catalog_admin_rpc_status.sql | database guard rejects new orders for hidden, archived, invalid-price, or release-locked supplier catalog rows; browser-role catalog DML revoked; no outbound target |
 | 109 | INCLUDE | `20261030122423_supplier_catalog_multigame_import.sql` | `2b913e8d024e30dd01331dc5d0b692d50c337f70a6450211b05387d36dac24be` | 108. 20261027120200_catalog_order_saleability_guard.sql | append-only sanitized import audit, service-role-only SECURITY INVOKER RPC, and supplier/category/offer uniqueness; synthetic fixtures only; no provider calls |
 | 110 | INCLUDE | `20261030135332_vouchers_001_campaign_engine.sql` | `f50d35975099bf20a3ae7d8109e13e65c93910088c23fe23edd884c2b5b70e51` | 109. 20261030122423_supplier_catalog_multigame_import.sql | additive campaign and redemption accounting; locked transactional usage, bounded hashed rate limiting and service-only idempotency; no outbound or scheduled activity |
+| 111 | INCLUDE | `20261030211523_vouchers_001_rpc_abuse_boundary.sql` | `dfc690a8a4603dd26528af5d7391cb7a18be356984e07464a94f09205ce82f81` | 110. 20261030135332_vouchers_001_campaign_engine.sql | service-role-only direct validation with verified Auth identity; database-enforced rolling budgets on public voucher-bearing order RPCs; no outbound or scheduled activity |
 
 ## Execution gates
 

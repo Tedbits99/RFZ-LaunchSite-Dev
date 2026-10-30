@@ -4,7 +4,7 @@ import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { supabase } from '@/lib/supabase';
 
 export type VoucherRequestIdentity =
-  | { ok: true; client: SupabaseClient; email: string | null; authenticated: boolean }
+  | { ok: true; client: SupabaseClient; email: string | null; authenticated: boolean; userId: string | null }
   | { ok: false; status: number; error: string };
 
 export async function voucherRequestIdentity(req: NextRequest): Promise<VoucherRequestIdentity> {
@@ -21,11 +21,11 @@ export async function voucherRequestIdentity(req: NextRequest): Promise<VoucherR
       if (profileError || profile?.status !== 'active') {
         return { ok: false, status: 403, error: 'Your account is not eligible for promotions.' };
       }
-      return { ok: true, client, email: data.user.email, authenticated: true };
+      return { ok: true, client, email: data.user.email, authenticated: true, userId: data.user.id };
     } catch {
       return { ok: false, status: 401, error: 'Your customer session could not be verified.' };
     }
   }
   if (!supabase) return { ok: false, status: 503, error: 'Promotion service is unavailable.' };
-  return { ok: true, client: supabase, email: null, authenticated: false };
+  return { ok: true, client: supabase, email: null, authenticated: false, userId: null };
 }

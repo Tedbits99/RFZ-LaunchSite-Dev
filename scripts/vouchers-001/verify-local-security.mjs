@@ -15,7 +15,8 @@ assert(['postgres:', 'postgresql:'].includes(database.protocol)
 const sql = postgres(connection, { max: 1, prepare: false, idle_timeout: 2, connect_timeout: 10 });
 const functionPolicies = [
   ['public.evaluate_promotion_voucher(text,uuid,text,boolean)', 'none'],
-  ['public.validate_campaign_voucher(text,uuid,text)', 'public-read'],
+  ['public.validate_campaign_voucher(text,uuid,text)', 'service-only'],
+  ['public.validate_campaign_voucher_for_server(text,uuid,text,uuid)', 'service-only'],
   ['public.list_public_promotion_offers(uuid,text)', 'public-read'],
   ['public.admin_create_promotion_campaign(uuid,jsonb)', 'service-only'],
   ['public.admin_update_promotion_campaign(uuid,uuid,jsonb)', 'service-only'],
@@ -30,6 +31,8 @@ const functionPolicies = [
   ['public.validate_voucher(text,integer,uuid,text)', 'none'],
   ['public.validate_and_reserve_voucher_usage()', 'none'],
   ['public.reconcile_voucher_usage_with_order()', 'none'],
+  ['voucher_private.consume_checkout_rate_bucket(text,integer)', 'none'],
+  ['voucher_private.consume_checkout_voucher_attempt(text)', 'none'],
 ];
 
 try {

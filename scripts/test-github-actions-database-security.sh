@@ -628,8 +628,9 @@ if [ "$upgrade_mode" = true ]; then
     esac
     case "$migration_name" in
       20261030122423_supplier_catalog_multigame_import.sql|\
-      20261030135332_vouchers_001_campaign_engine.sql)
-        # These appended catalog/campaign migrations are timestamped after
+      20261030135332_vouchers_001_campaign_engine.sql|\
+      20261030211523_vouchers_001_rpc_abuse_boundary.sql)
+        # These appended catalog/campaign/security migrations are timestamped after
         # the wallet migrations, so defer them until that chronological
         # segment is applied.
         continue
@@ -651,7 +652,7 @@ if [ "$upgrade_mode" = true ]; then
 
   manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")"
   wallet_migration_count=3
-  post_wallet_migration_count=2
+  post_wallet_migration_count=3
   pre_wallet_manifest_count=$((manifest_count - wallet_migration_count - post_wallet_migration_count))
   expected_upgrade_count=$((pre_wallet_manifest_count - 11))
   if [ "$upgrade_count" -ne "$expected_upgrade_count" ]; then
@@ -687,10 +688,11 @@ if [ "$upgrade_mode" = true ]; then
     cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
   done
   supabase_local migration up
-  echo "LEGACY_UPGRADE_PHASE=post-wallet-catalog-campaign-migrations"
+  echo "LEGACY_UPGRADE_PHASE=post-wallet-catalog-campaign-security-migrations"
   for post_wallet_migration in \
     20261030122423_supplier_catalog_multigame_import.sql \
-    20261030135332_vouchers_001_campaign_engine.sql; do
+    20261030135332_vouchers_001_campaign_engine.sql \
+    20261030211523_vouchers_001_rpc_abuse_boundary.sql; do
     source_migration="$project_root/supabase/migrations/$post_wallet_migration"
     test -s "$source_migration" || {
       echo "ERROR: Canonical post-wallet migration is missing: $post_wallet_migration" >&2

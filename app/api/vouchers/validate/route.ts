@@ -42,10 +42,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Enter a valid checkout email.' }, { status: 400 });
   }
 
-  const { data, error } = await identity.client.rpc('validate_campaign_voucher', {
+  // This RPC is service-role-only. `userId` comes only from auth.getUser()
+  // inside voucherRequestIdentity; browser-supplied identity fields are ignored.
+  const { data, error } = await adminSupabase.rpc('validate_campaign_voucher_for_server', {
     p_code: input.code.trim().toUpperCase(),
     p_package_id: input.packageId,
     p_email: email,
+    p_customer_user_id: identity.userId,
   });
   const result = (Array.isArray(data) ? data[0] : data) as {
     out_valid?: boolean;
