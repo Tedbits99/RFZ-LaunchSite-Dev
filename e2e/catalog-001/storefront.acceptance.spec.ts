@@ -26,10 +26,21 @@ test.describe('CATALOG-001 storefront and checkout acceptance', () => {
     expect(hiddenResult.error).toBeNull();
     expect(archivedResult.error).toBeNull();
 
-    const cases = [[draft, draftPackage], [hidden, hiddenPackage], [archived, archivedPackage]] as const;
-    for (const [game, pkg] of cases) {
+    const cases = [
+      [draft, draftPackage, 'DRAFT'],
+      [hidden, hiddenPackage, 'DRAFT'],
+      [archived, archivedPackage, 'ARCHIVED'],
+    ] as const;
+    for (const [game, pkg, expectedStatus] of cases) {
+      const { data: savedGame, error: savedGameError } = await serviceDb().from('games').select('catalog_status,is_active').eq('id', game.id).single();
+      expect(savedGameError).toBeNull();
+      expect(savedGame, `fixture state before storefront request for ${game.slug}`).toMatchObject({
+        catalog_status: expectedStatus,
+        is_active: false,
+      });
       const response = await page.goto(`/games/${game.slug}`);
-      expect(response?.status(), `non-saleable game route should be unavailable: ${game.slug}`).toBe(404);
+      const gameHeadingCount = await page.getByRole('heading', { name: game.name, exact: true }).count();
+      expect(response?.status(), `non-saleable game route should be unavailable: ${game.slug}; game heading count=${gameHeadingCount}`).toBe(404);
       const checkout = await page.request.post('/api/orders', { data: checkoutBody(game.id, pkg.id, `${game.slug}@example.invalid`) });
       expect(checkout.status()).toBe(400);
     }
@@ -82,7 +93,7 @@ test.describe('CATALOG-001 storefront and checkout acceptance', () => {
     await createPackage(game.id, { name: 'Synthetic standard package', sku: `${game.slug}-standard`, priceCents: 500, status: 'PUBLISHED' });
     await page.goto(`/games/${game.slug}`);
     await page.getByRole('button', { name: 'Verify Player' }).click();
-    await expect(page.getByRole('alert')).toContainText('Enter your Player ID first.');
+    await expect(page.getByText('Enter your Player ID first.', { exact: true })).toBeVisible();
     await page.locator('#player-player_id').fill('synthetic-player');
     const blockedExternalRequests: string[] = [];
     page.on('requestfailed', (request) => { if (!['localhost', '127.0.0.1'].includes(new URL(request.url()).hostname)) blockedExternalRequests.push(new URL(request.url()).hostname); });

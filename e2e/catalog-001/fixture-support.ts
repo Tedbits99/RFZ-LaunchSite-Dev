@@ -158,9 +158,12 @@ export async function loginCustomer(page: Page) {
   await page.getByLabel('Email').fill(process.env.CATALOG_CUSTOMER_EMAIL || '')
   await page.locator('input[autocomplete="current-password"]').fill(process.env.CATALOG_CUSTOMER_PASSWORD || '')
   await page.getByRole('button', { name: 'Sign In' }).click()
-  await page.waitForTimeout(500)
-  const alert = page.getByRole('alert')
-  if (await alert.count()) throw new Error(`Synthetic customer login was rejected by local Supabase Auth: ${(await alert.first().textContent())?.trim() || 'unknown error'}`)
+  try {
+    await page.waitForURL((url) => url.pathname !== '/login', { timeout: 5000 })
+  } catch {
+    const messages = (await page.locator('main [role="alert"]').allTextContents()).map((message) => message.trim()).filter(Boolean)
+    throw new Error(`Synthetic customer login did not complete: ${messages.join(' | ') || 'login stayed on the sign-in page'}`)
+  }
 }
 
 export function observePageErrors(page: Page) {

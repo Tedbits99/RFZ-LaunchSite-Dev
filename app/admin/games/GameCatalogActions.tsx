@@ -43,17 +43,29 @@ export default function GameCatalogActions({ game, onSaved }: { game?: Game; onS
       setOpen(true);
       return;
     }
-    setForm({ ...blankForm(), slug: game.slug || '', name: game.name || '', description: game.description || '', region: game.region || 'Global' });
-    setFields(game.game_input_fields || []);
-    setOpen(true);
+    setBusy(true);
     try {
       const response = await fetch('/api/admin/catalog/games');
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not load player fields.');
       const record = (result.data || []).find((row: { id: string }) => row.id === game.id);
+      if (!record) throw new Error('The selected game is no longer available.');
+      setForm({
+        ...blankForm(),
+        slug: record.slug || game.slug || '',
+        name: record.name || game.name || '',
+        description: record.description || game.description || '',
+        region: record.region || game.region || 'Global',
+        logo_url: record.logo_url || '',
+        cover_url: record.cover_url || '',
+        banner_url: record.banner_url || '',
+      });
       setFields((record?.game_input_fields || []).map((field: GameField, index: number) => ({ ...field, sort_order: index })));
+      setOpen(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not load player fields.');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -92,7 +104,7 @@ export default function GameCatalogActions({ game, onSaved }: { game?: Game; onS
   }
 
   return <div className="flex flex-wrap gap-1">
-    <button type="button" onClick={() => void openEditor()} className="rounded border border-[#22314d] px-2 py-1 text-[11px] text-cyan-300">Edit</button>
+    <button type="button" disabled={busy} onClick={() => void openEditor()} className="rounded border border-[#22314d] px-2 py-1 text-[11px] text-cyan-300 disabled:opacity-50">Edit</button>
     {game.catalog_status === 'ARCHIVED' ? <button type="button" disabled={busy} onClick={() => void lifecycle('restore')} className="rounded border border-amber-400/40 px-2 py-1 text-[11px] text-amber-300">Restore</button> : <>
       {game.catalog_status === 'PUBLISHED' ? <button type="button" disabled={busy} onClick={() => void lifecycle('hide')} className="rounded border border-slate-500/40 px-2 py-1 text-[11px] text-slate-300">Hide</button> : <button type="button" disabled={busy} onClick={() => void lifecycle('publish')} className="rounded border border-emerald-400/40 px-2 py-1 text-[11px] text-emerald-300">Publish</button>}
       <button type="button" disabled={busy} onClick={() => void lifecycle('archive')} className="rounded border border-rose-400/40 px-2 py-1 text-[11px] text-rose-300">Archive</button>
