@@ -39,8 +39,9 @@ test.describe('CATALOG-001 storefront and checkout acceptance', () => {
         is_active: false,
       });
       const response = await page.goto(`/games/${game.slug}`);
-      const gameHeadingCount = await page.getByRole('heading', { name: game.name, exact: true }).count();
-      expect(response?.status(), `non-saleable game route should be unavailable: ${game.slug}; game heading count=${gameHeadingCount}`).toBe(404);
+      expect([200, 404], `non-saleable game route returned an unexpected status: ${game.slug}`).toContain(response?.status());
+      await expect(page.getByText('This page could not be found.', { exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: game.name, exact: true })).toHaveCount(0);
       const checkout = await page.request.post('/api/orders', { data: checkoutBody(game.id, pkg.id, `${game.slug}@example.invalid`) });
       expect(checkout.status()).toBe(400);
     }

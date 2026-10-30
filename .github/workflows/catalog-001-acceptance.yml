@@ -132,5 +132,6 @@ jobs:
           path: |
             ${{ runner.temp }}/catalog-001-integration/artifacts/catalog-001/test-output/
             ${{ runner.temp }}/catalog-001-integration/artifacts/catalog-acceptance/test-output/
+            ${{ runner.temp }}/catalog-001-integration/e2e/catalog-acceptance/artifacts/catalog-acceptance/test-output/
           if-no-files-found: warn
           retention-days: 7

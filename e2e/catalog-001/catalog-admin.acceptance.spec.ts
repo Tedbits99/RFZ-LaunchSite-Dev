@@ -213,7 +213,13 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     await page.goto('/admin/games')
     page.on('dialog', (dialog) => dialog.accept())
     const row = page.getByRole('row').filter({ hasText: game.slug })
-    await row.getByRole('button', { name: 'Archive' }).click()
+    const archiveResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/admin/catalog/games/${game.id}`) && response.request().method() === 'PATCH')
+    const archiveClickPromise = row.getByRole('button', { name: 'Archive' }).click()
+    const archiveResponse = await archiveResponsePromise
+    const archiveStatus = archiveResponse.status()
+    const archiveBody = await archiveResponse.json().catch(() => ({}))
+    await archiveClickPromise
+    expect(archiveStatus, JSON.stringify(archiveBody)).toBe(200)
     const { data: archived, error } = await serviceDb().from('games').select('catalog_status,is_active').eq('id', game.id).single()
     expect(error).toBeNull()
     expect(archived).toMatchObject({ catalog_status: 'ARCHIVED', is_active: false })
@@ -221,7 +227,13 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     expect(orderError).toBeNull()
     expect(orderRows).toEqual([{ id: order.id, game_id: game.id, package_id: pkg.id }])
     const archivedRow = page.getByRole('row').filter({ hasText: game.slug })
-    await archivedRow.getByRole('button', { name: 'Restore' }).click()
+    const restoreResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/admin/catalog/games/${game.id}`) && response.request().method() === 'PATCH')
+    const restoreClickPromise = archivedRow.getByRole('button', { name: 'Restore' }).click()
+    const restoreResponse = await restoreResponsePromise
+    const restoreStatus = restoreResponse.status()
+    const restoreBody = await restoreResponse.json().catch(() => ({}))
+    await restoreClickPromise
+    expect(restoreStatus, JSON.stringify(restoreBody)).toBe(200)
     const { data: restored, error: restoreError } = await serviceDb().from('games').select('catalog_status,is_active').eq('id', game.id).single()
     expect(restoreError).toBeNull()
     expect(restored).toMatchObject({ catalog_status: 'DRAFT', is_active: false })
