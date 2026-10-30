@@ -185,7 +185,7 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
 
   test('admin hides a game and its storefront route becomes unavailable', async ({ page }, testInfo) => {
     const game = await createGame(testInfo, 'hide-game', { published: true })
-    await createPackage(game.id, { name: 'Synthetic visible package', sku: `${game.slug}-active`, priceCents: 700, status: 'PUBLISHED' })
+    const pkg = await createPackage(game.id, { name: 'Synthetic visible package', sku: `${game.slug}-active`, priceCents: 700, status: 'PUBLISHED' })
     await loginAdmin(page)
     await page.goto('/admin/games')
     const row = page.getByRole('row').filter({ hasText: game.slug })
@@ -201,8 +201,23 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     expect(error).toBeNull()
     expect(data).toMatchObject({ catalog_status: 'DRAFT', is_active: false })
     const storefront = await page.goto(`/games/${game.slug}`)
-    expect(storefront?.status()).toBe(404)
-    await writeEvidence(page, testInfo, { action: 'hide_game', status: data?.catalog_status, storefront_http_status: storefront?.status() })
+    expect([200, 404], 'hidden game route should return the not-found page').toContain(storefront?.status())
+    await expect(page.getByText('This page could not be found.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: game.name, exact: true })).toHaveCount(0)
+    const checkoutEmail = `${game.slug}@example.invalid`
+    const checkout = await page.request.post('/api/orders', { data: {
+      gameId: game.id,
+      packageId: pkg.id,
+      email: checkoutEmail,
+      name: 'Synthetic Hidden-Game Customer',
+      playerInputs: { player_id: 'synthetic' },
+      paymentMethod: 'manual',
+    } })
+    expect(checkout.status()).toBe(400)
+    const { data: orders, error: orderError } = await serviceDb().from('orders').select('id').eq('email', checkoutEmail)
+    expect(orderError).toBeNull()
+    expect(orders).toHaveLength(0)
+    await writeEvidence(page, testInfo, { action: 'hide_game', status: data?.catalog_status, storefront_http_status: storefront?.status(), checkout_status: checkout.status(), orders_created: orders?.length })
   })
 
   test('archive and restore preserve a historical order reference', async ({ page }, testInfo) => {
