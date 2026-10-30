@@ -262,7 +262,7 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     expect((await campaignStatus(expiring.id, 'ACTIVE')).response.status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 5_500));
     expect((await validateCode(expiring.payload.code as string)).response.status).toBe(400);
-  });
+  }, 30_000);
 
   it('requires verified account identity for first-purchase campaigns and rejects invalid rule payloads', async () => {
     const welcome = await createCampaign({
@@ -287,11 +287,36 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     expect(directRpc.error).toBeNull();
     expect(directResult?.out_valid).toBe(true);
 
-    const suspended = await serviceDb().from('customer_profiles').update({ status: 'suspended' })
-      .eq('user_id', customerUser.user.id);
-    expect(suspended.error).toBeNull();
+    const superAdminEmail = `voucher-super-${runTag}@example.invalid`;
+    const superAdminPassword = randomUUID();
+    const { data: createdSuperAdmin, error: createSuperAdminError } = await serviceDb().auth.admin.createUser({
+      email: superAdminEmail,
+      password: superAdminPassword,
+      email_confirm: true,
+    });
+    if (createSuperAdminError || !createdSuperAdmin.user) {
+      throw new Error('Synthetic voucher super-admin identity could not be created.');
+    }
+    const { error: insertSuperAdminError } = await serviceDb().from('admins').insert({
+      id: createdSuperAdmin.user.id,
+      email: superAdminEmail,
+      name: 'Synthetic Voucher Super Admin',
+      role: 'SUPER_ADMIN',
+      is_active: true,
+    });
+    if (insertSuperAdminError) throw new Error('Synthetic voucher super-admin authorization could not be created.');
+    const superAdmin = await identityDb(superAdminEmail, superAdminPassword);
     let profileRestored = false;
     try {
+      const suspended = await superAdmin.rpc('admin_set_customer_profile_status', {
+        p_user_id: customerUser.user.id,
+        p_status: 'suspended',
+      });
+      const suspendedRow = responseData(Array.isArray(suspended.data) ? suspended.data[0] : suspended.data);
+      expect(suspended.error).toBeNull();
+      expect(suspendedRow?.out_status).toBe('suspended');
+      expect(suspendedRow?.out_error).toBeNull();
+
       const directDenied = await customerClient.rpc('validate_campaign_voucher', {
         p_code: welcome.payload.code as string, p_package_id: packageId, p_email: 'forged@example.invalid',
       });
@@ -303,9 +328,14 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
       });
       expect(routeDenied.response.status).toBe(403);
     } finally {
-      const restored = await serviceDb().from('customer_profiles').update({ status: 'active' })
-        .eq('user_id', customerUser.user.id);
-      profileRestored = restored.error === null;
+      const restored = await superAdmin.rpc('admin_set_customer_profile_status', {
+        p_user_id: customerUser.user.id,
+        p_status: 'active',
+      });
+      const restoredRow = responseData(Array.isArray(restored.data) ? restored.data[0] : restored.data);
+      profileRestored = restored.error === null
+        && restoredRow?.out_status === 'active'
+        && restoredRow?.out_error === null;
     }
     expect(profileRestored).toBe(true);
 
