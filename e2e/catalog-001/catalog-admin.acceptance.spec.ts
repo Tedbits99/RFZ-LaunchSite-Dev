@@ -57,6 +57,7 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     const row = page.getByRole('row').filter({ hasText: game.slug })
     await row.getByRole('button', { name: 'Edit' }).click()
     const dialog = page.getByRole('dialog', { name: 'Edit game' })
+    await expect(dialog.locator('input[aria-label="Field 1 key"]')).toHaveValue('player_id')
     await dialog.getByLabel('Name').fill('Synthetic Edited Catalog Game')
     await dialog.getByLabel('Region').fill('Synthetic Test Region')
     await dialog.getByLabel('Description').fill('Edited in the isolated acceptance fixture.')
@@ -66,6 +67,10 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     await dialog.locator('input[aria-label="Field 1 label"]').fill('Account ID')
     await dialog.locator('input[aria-label="Field 1 key"]').fill('account_id')
     await dialog.getByRole('button', { name: 'Save draft' }).click()
+    await expect(dialog).toBeHidden({ timeout: 5000 }).catch(async () => {
+      const message = (await dialog.getByRole('status').textContent().catch(() => ''))?.trim() || 'no response message'
+      throw new Error(`Catalog game edit was not saved: ${message}`)
+    })
     const { data, error } = await serviceDb().from('games').select('name,region,description,logo_url,cover_url,banner_url').eq('id', game.id).single()
     expect(error).toBeNull()
     expect(data).toMatchObject({
@@ -96,6 +101,10 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     await dialog.locator('input[aria-label="Field 1 label"]').fill('Player Tag')
     await dialog.locator('input[aria-label="Field 1 key"]').fill('player_tag')
     await dialog.getByRole('button', { name: 'Save draft' }).click()
+    await expect(dialog).toBeHidden({ timeout: 5000 }).catch(async () => {
+      const message = (await dialog.getByRole('status').textContent().catch(() => ''))?.trim() || 'no response message'
+      throw new Error(`Catalog player-field edit was not saved: ${message}`)
+    })
     const { data, error } = await serviceDb().from('game_input_fields').select('field_key,is_required').eq('game_id', game.id)
     expect(error).toBeNull()
     expect(data).toEqual([{ field_key: 'player_tag', is_required: true }])
@@ -156,7 +165,10 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
 
     await page.goto('/admin/games')
     const row = page.getByRole('row').filter({ hasText: game.slug })
+    const publishResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/admin/catalog/games/${game.id}`) && response.request().method() === 'PATCH')
     await row.getByRole('button', { name: 'Publish' }).click()
+    const publishResponse = await publishResponsePromise
+    expect(publishResponse.status(), await publishResponse.text()).toBe(200)
     const { data: savedGame, error: gameError } = await serviceDb().from('games').select('catalog_status,is_active').eq('id', game.id).single()
     expect(gameError).toBeNull()
     expect(savedGame).toMatchObject({ catalog_status: 'PUBLISHED', is_active: true })
@@ -170,7 +182,10 @@ test.describe('CATALOG-001 admin lifecycle and authorization', () => {
     await page.goto('/admin/games')
     const row = page.getByRole('row').filter({ hasText: game.slug })
     page.on('dialog', (dialog) => dialog.accept())
+    const hideResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/admin/catalog/games/${game.id}`) && response.request().method() === 'PATCH')
     await row.getByRole('button', { name: 'Hide' }).click()
+    const hideResponse = await hideResponsePromise
+    expect(hideResponse.status(), await hideResponse.text()).toBe(200)
     const { data, error } = await serviceDb().from('games').select('catalog_status,is_active').eq('id', game.id).single()
     expect(error).toBeNull()
     expect(data).toMatchObject({ catalog_status: 'DRAFT', is_active: false })

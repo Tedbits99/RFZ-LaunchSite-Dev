@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Page, TestInfo } from '@playwright/test'
@@ -124,7 +124,7 @@ export async function createHistoricalOrder(gameId: string, packageId: string, s
     customer_name: 'Synthetic Historical Customer',
     game_id: gameId,
     package_id: packageId,
-    player_inputs: { player_id: 'synthetic-player' },
+    player_inputs: { player_id: 'synthetic-player', __rfz_order_access_hash: randomBytes(32).toString('hex') },
     subtotal_cents: priceCents,
     discount_cents: 0,
     total_cents: priceCents,
@@ -159,7 +159,8 @@ export async function loginCustomer(page: Page) {
   await page.locator('input[autocomplete="current-password"]').fill(process.env.CATALOG_CUSTOMER_PASSWORD || '')
   await page.getByRole('button', { name: 'Sign In' }).click()
   await page.waitForTimeout(500)
-  if (await page.getByRole('alert').count()) throw new Error('Synthetic customer login was rejected by local Supabase Auth.')
+  const alert = page.getByRole('alert')
+  if (await alert.count()) throw new Error(`Synthetic customer login was rejected by local Supabase Auth: ${(await alert.first().textContent())?.trim() || 'unknown error'}`)
 }
 
 export function observePageErrors(page: Page) {

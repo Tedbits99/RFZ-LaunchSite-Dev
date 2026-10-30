@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 type GameField = {
+  id?: string;
   label: string;
   field_key: string;
   placeholder: string;
@@ -129,7 +130,7 @@ function GameDialog({ form, setForm, fields, setFields, busy, message, onClose, 
       <section aria-label="Player input fields" className="space-y-2 rounded-lg border border-[#253451] p-3">
         <div className="flex items-center justify-between"><h3 className="text-sm font-medium">Player input fields</h3><button type="button" onClick={() => setFields([...fields, blankField(fields.length)])} className="rounded border border-[#253451] px-2 py-1 text-xs text-cyan-300">Add field</button></div>
         {fields.length === 0 && <p className="text-xs text-amber-300">At least one required player field is needed before publishing.</p>}
-        {fields.map((field, index) => <div key={`${index}-${field.field_key}`} className="grid gap-2 rounded border border-[#1b2a45] p-2 sm:grid-cols-2">
+        {fields.map((field, index) => <div key={field.id || `new-${index}`} className="grid gap-2 rounded border border-[#1b2a45] p-2 sm:grid-cols-2">
           <label className="text-[11px] text-slate-400">Label<input aria-label={`Field ${index + 1} label`} required value={field.label} onChange={(event) => updateField(index, { label: event.target.value })} className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] p-2 text-xs text-slate-100" /></label>
           <label className="text-[11px] text-slate-400">Field key<input aria-label={`Field ${index + 1} key`} required pattern="[a-z][a-z0-9_]*" value={field.field_key} onChange={(event) => updateField(index, { field_key: event.target.value.toLowerCase() })} className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] p-2 font-mono text-xs text-slate-100" /></label>
           <label className="text-[11px] text-slate-400">Placeholder<input value={field.placeholder} onChange={(event) => updateField(index, { placeholder: event.target.value })} className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] p-2 text-xs text-slate-100" /></label>

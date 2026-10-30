@@ -29,7 +29,7 @@ test.describe('CATALOG-001 storefront and checkout acceptance', () => {
     const cases = [[draft, draftPackage], [hidden, hiddenPackage], [archived, archivedPackage]] as const;
     for (const [game, pkg] of cases) {
       const response = await page.goto(`/games/${game.slug}`);
-      expect(response?.status()).toBe(404);
+      expect(response?.status(), `non-saleable game route should be unavailable: ${game.slug}`).toBe(404);
       const checkout = await page.request.post('/api/orders', { data: checkoutBody(game.id, pkg.id, `${game.slug}@example.invalid`) });
       expect(checkout.status()).toBe(400);
     }
@@ -47,6 +47,8 @@ test.describe('CATALOG-001 storefront and checkout acceptance', () => {
     await page.goto(`/games/${game.slug}`);
     const group = page.getByRole('radiogroup', { name: `${game.name} packages` });
     const names = await group.locator('label').allTextContents();
+    expect(names.findIndex((name) => name.includes('Synthetic First Package')), `published package missing from storefront: ${names.join(' | ')}`).toBeGreaterThanOrEqual(0);
+    expect(names.findIndex((name) => name.includes('Synthetic Later Package')), `published package missing from storefront: ${names.join(' | ')}`).toBeGreaterThanOrEqual(0);
     expect(names.findIndex((name) => name.includes('Synthetic First Package'))).toBeLessThan(names.findIndex((name) => name.includes('Synthetic Later Package')));
     expect(names.join(' ')).not.toContain('Unavailable low sort');
     const { data: draftPackage } = await serviceDb().from('packages').select('id').eq('game_id', game.id).eq('catalog_status', 'DRAFT').single();
@@ -70,13 +72,13 @@ test.describe('CATALOG-001 storefront and checkout acceptance', () => {
   test('missing game artwork uses the initials fallback', async ({ page }, testInfo) => {
     const game = await createGame(testInfo, 'safe-artwork-fallback', { published: true });
     await page.goto(`/games/${game.slug}`);
-    await expect(page.getByRole('heading', { name: game.name })).toBeVisible();
+    await expect(page.getByRole('heading', { name: game.name, exact: true })).toBeVisible();
     await expect(page.getByText('SS', { exact: true })).toBeVisible();
     await writeEvidence(page, testInfo, { action: 'artwork_fallback', initials_fallback_visible: true });
   });
 
   test('required player fields validate without calling a player-verification provider', async ({ page }, testInfo) => {
-    const game = await createGame(testInfo, 'required-player-validation');
+    const game = await createGame(testInfo, 'required-player-validation', { published: true });
     await createPackage(game.id, { name: 'Synthetic standard package', sku: `${game.slug}-standard`, priceCents: 500, status: 'PUBLISHED' });
     await page.goto(`/games/${game.slug}`);
     await page.getByRole('button', { name: 'Verify Player' }).click();
@@ -110,7 +112,7 @@ test('storefront flow has no unexpected JavaScript exceptions or supplier/paymen
       if (!['localhost', '127.0.0.1'].includes(url.hostname) && url.protocol !== 'data:') blockedExternalRequests.push(url.hostname);
     });
     await page.goto(`/games/${game.slug}`);
-    await expect(page.getByRole('heading', { name: game.name })).toBeVisible();
+    await expect(page.getByRole('heading', { name: game.name, exact: true })).toBeVisible();
     expect(errors).toEqual([]);
     expect(blockedExternalRequests.filter((host) => /fazercards|paymongo|paypal|stripe/i.test(host))).toEqual([]);
     await writeEvidence(page, testInfo, {
