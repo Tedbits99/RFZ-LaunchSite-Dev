@@ -238,6 +238,12 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     const valid = await validateCode(publicCampaign.payload.code as string);
     expect(valid.response.status).toBe(200);
     expect(valid.body).toMatchObject({ success: true, discount: 50, total: expect.any(Number) });
+    const directAnonymous = await anonDb().rpc('validate_campaign_voucher', {
+      p_code: privateCampaign.payload.code as string, p_package_id: packageId, p_email: `direct-${runTag}@example.invalid`,
+    });
+    const directAnonymousResult = responseData(Array.isArray(directAnonymous.data) ? directAnonymous.data[0] : directAnonymous.data);
+    expect(directAnonymous.error).toBeNull();
+    expect(directAnonymousResult?.out_valid).toBe(true);
     const wrongPackage = await validateCode(privateCampaign.payload.code as string, otherPackageId);
     expect(wrongPackage.response.status).toBe(400);
 
