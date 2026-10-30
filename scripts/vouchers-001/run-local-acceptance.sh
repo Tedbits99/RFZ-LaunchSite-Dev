@@ -71,7 +71,7 @@ node scripts/catalog-001/verify-local-database.mjs
 node scripts/vouchers-001/verify-local-security.mjs
 
 CATALOG_INTEGRATION_RUN=0 VOUCHERS_INTEGRATION_RUN=0 \
-  npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
+  env -u SUPABASE_SERVICE_ROLE_KEY npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
 npx tsc --noEmit
 npm run lint
 npm run build
