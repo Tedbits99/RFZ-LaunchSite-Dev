@@ -687,7 +687,10 @@ if [ "$upgrade_mode" = true ]; then
     }
     cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
   done
-  supabase_local migration up
+  # This rehearsal intentionally applies wallet migrations whose timestamps
+  # precede the already-applied AdminOps migration. Supabase CLI requires
+  # --include-all to apply this reviewed out-of-order fixture sequence.
+  supabase_local migration up --include-all
   echo "LEGACY_UPGRADE_PHASE=post-wallet-catalog-campaign-security-migrations"
   for post_wallet_migration in \
     20261030122423_supplier_catalog_multigame_import.sql \

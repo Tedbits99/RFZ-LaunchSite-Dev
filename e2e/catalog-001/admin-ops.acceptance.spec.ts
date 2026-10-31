@@ -18,8 +18,7 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     }
     const operations = page.getByRole('button', { name: 'Operations' })
     if (await operations.getAttribute('aria-expanded') === 'false') {
-      await operations.focus()
-      await page.keyboard.press('Enter')
+      await operations.press('Enter')
     }
     await expect(operations).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByRole('link', { name: 'Tasks', exact: true })).toBeVisible()
@@ -40,7 +39,7 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     await createForm.getByRole('button', { name: 'Create task' }).click()
     await expect(page.getByRole('status')).toContainText('Task created and recorded in the admin audit log.')
 
-    let taskForm = page.locator('form').filter({ hasText: title }).first()
+    let taskForm = page.getByRole('form', { name: `Task: ${title}` })
     await taskForm.getByLabel('Status').selectOption('IN_PROGRESS')
     await taskForm.getByRole('button', { name: 'Save changes' }).click()
     await expect(page.getByRole('status')).toContainText('Task saved and recorded in the admin audit log.')
@@ -48,14 +47,14 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     expect(saved.error).toBeNull()
     expect(saved.data?.status).toBe('IN_PROGRESS')
 
-    taskForm = page.locator('form').filter({ hasText: title }).first()
+    taskForm = page.getByRole('form', { name: `Task: ${title}` })
     await taskForm.getByRole('button', { name: 'Archive' }).click()
     await expect(page.getByRole('status')).toContainText('Task archived.')
     const archived = await serviceDb().from('admin_tasks').select('archived_at').eq('id', saved.data!.id).single()
     expect(archived.data?.archived_at).not.toBeNull()
 
     await page.getByLabel('Show archived tasks').check()
-    taskForm = page.locator('form').filter({ hasText: title }).first()
+    taskForm = page.getByRole('form', { name: `Task: ${title}` })
     await taskForm.getByRole('button', { name: 'Restore' }).click()
     await expect(page.getByRole('status')).toContainText('Task restored.')
     const restored = await serviceDb().from('admin_tasks').select('archived_at,status').eq('id', saved.data!.id).single()
@@ -90,6 +89,7 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     // Restore the fixture's default grant so the next browser project starts
     // from the canonical STAFF permission matrix.
     await loginAdmin(page)
+    await page.goto('/admin/roles')
     const restoreCheckbox = page.getByRole('checkbox', { name: 'Grant Manage admin tasks to STAFF' })
     if ((await restoreCheckbox.isChecked()) !== original) {
       await restoreCheckbox.focus()
@@ -108,7 +108,7 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     const singleForm = page.locator('form').filter({ hasText: single.sku })
     await singleForm.getByLabel(`Retail price in PHP for ${single.name}`).fill('12.34')
     await singleForm.getByRole('button', { name: 'Save price' }).click()
-    await expect(page.getByRole('status')).toContainText('Price saved.')
+    await expect(page.getByRole('status').filter({ hasText: 'Price saved.' })).toContainText('Price saved.')
     const singleSaved = await serviceDb().from('packages').select('price_cents,is_active,catalog_status').eq('id', single.id).single()
     expect(singleSaved.data).toMatchObject({ price_cents: 1234, is_active: false, catalog_status: 'DRAFT' })
 
@@ -164,7 +164,7 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     expect(staffResponse.status()).toBe(403)
     expect(rolesResponse.status()).toBe(403)
     await page.goto('/admin/staff')
-    await expect(page.getByRole('alert')).toContainText('cannot manage staff access')
+    await expect(page.getByRole('alert').filter({ hasText: 'cannot manage staff access' })).toContainText('cannot manage staff access')
     await writeEvidence(page, testInfo, { action: 'staff_privilege_denial', staff_api: staffResponse.status(), roles_api: rolesResponse.status() })
   })
 })

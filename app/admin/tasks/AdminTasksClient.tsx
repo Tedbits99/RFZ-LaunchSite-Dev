@@ -179,7 +179,7 @@ export default function AdminTasksClient() {
             const draft = drafts[task.id]
             const busy = busyId === task.id
             return (
-              <form key={task.id} onSubmit={(event) => { event.preventDefault(); void saveTask(task.id) }} className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4 sm:p-5">
+              <form key={task.id} aria-label={`Task: ${task.title}`} onSubmit={(event) => { event.preventDefault(); void saveTask(task.id) }} className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4 sm:p-5">
                 <div className="mb-4 flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <label className="mb-1 block text-xs text-slate-400" htmlFor={'task-title-' + task.id}>Title</label>
