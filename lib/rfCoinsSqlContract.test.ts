@@ -224,13 +224,24 @@ describe('grants and schema', () => {
     const walletVersions = walletNames.map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
     const catalogImportName = '20261030122423_supplier_catalog_multigame_import.sql';
     const catalogImportVersion = Number(catalogImportName.match(/^([0-9]{14})_/)?.[1] || 0);
-    const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version) && version !== catalogImportVersion);
+    const vouchersMigrationName = '20261030135332_vouchers_001_campaign_engine.sql';
+    const vouchersMigrationVersion = Number(vouchersMigrationName.match(/^([0-9]{14})_/)?.[1] || 0);
+    const voucherSecurityName = '20261030211523_vouchers_001_rpc_abuse_boundary.sql';
+    const voucherSecurityVersion = Number(voucherSecurityName.match(/^([0-9]{14})_/)?.[1] || 0);
+    const followOnVersions = [catalogImportVersion, vouchersMigrationVersion, voucherSecurityVersion];
+    const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version) && !followOnVersions.includes(version));
     const latestNonWalletVersion = Math.max(...nonWalletVersions);
 
     expect(walletVersions.every((version) => version > latestNonWalletVersion)).toBe(true);
     expect(currentVersions).toContain(catalogImportVersion);
     expect(catalogImportVersion).toBeGreaterThan(Math.max(...walletVersions));
+    expect(currentVersions).toContain(vouchersMigrationVersion);
+    expect(vouchersMigrationVersion).toBeGreaterThan(catalogImportVersion);
+    expect(currentVersions).toContain(voucherSecurityVersion);
+    expect(voucherSecurityVersion).toBeGreaterThan(vouchersMigrationVersion);
     expect(manifest).toContain(`| INCLUDE | \`${catalogImportName}\` |`);
+    expect(manifest).toContain(`| INCLUDE | \`${vouchersMigrationName}\` |`);
+    expect(manifest).toContain(`| INCLUDE | \`${voucherSecurityName}\` |`);
     for (const name of walletNames) {
       expect(currentVersions).toContain(Number(name.slice(0, 14)));
       expect(manifest).toContain(`| INCLUDE | \`${name}\` |`);

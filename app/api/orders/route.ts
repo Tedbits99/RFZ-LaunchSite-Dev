@@ -1,21 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { hashOrderCapability, orderCapabilityCookieName } from '@/lib/orderCapability';
-import { validateVoucher } from '@/lib/voucher';
 import { paymentMethodLabel } from '@/lib/paymentMethods';
 import { RF_COIN_PAYMENT_METHOD } from '@/lib/rfCoins';
 import { RF_COINS_SPENDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
+import { readBoundedJson } from '@/lib/readBoundedJson';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PRODUCT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { gameId, packageId, email: submittedEmail, name, playerInputs, paymentMethod, voucherCode } = body;
+    const input = await readBoundedJson(req, 24 * 1024);
+    if (!input) return NextResponse.json({ error: 'Invalid or oversized checkout request.' }, { status: 400 });
+    const { gameId, packageId, email: submittedEmail, name, playerInputs, paymentMethod, voucherCode } = input;
+    if ((name !== undefined && (typeof name !== 'string' || name.length > 100))
+        || (voucherCode !== undefined && (typeof voucherCode !== 'string' || voucherCode.length > 50))
+        || (playerInputs !== undefined && (!playerInputs || typeof playerInputs !== 'object' || Array.isArray(playerInputs)
+          || Object.keys(playerInputs as Record<string, unknown>).length > 32
+          || Object.entries(playerInputs as Record<string, unknown>).some(([key, value]) => !/^[A-Za-z0-9_-]{1,80}$/.test(key)
+            || typeof value !== 'string' || value.length > 500)))
+        || (input.idempotencyKey !== undefined && (typeof input.idempotencyKey !== 'string'
+          || !UUID_RE.test(input.idempotencyKey)))) {
+      return NextResponse.json({ error: 'Invalid checkout request.' }, { status: 400 });
+    }
     let email = typeof submittedEmail === 'string' ? submittedEmail.trim() : '';
 
-    if (!gameId || !packageId || !email || !email.includes('@')) {
+    if (typeof gameId !== 'string' || !PRODUCT_ID_RE.test(gameId)
+        || typeof packageId !== 'string' || !PRODUCT_ID_RE.test(packageId)
+        || !email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: 'Please complete all required fields.' }, { status: 400 });
     }
     if (!paymentMethod || typeof paymentMethod !== 'string' || paymentMethod.length > 50) {
@@ -109,18 +125,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // If a voucher code is provided, pre-validate it for a friendlier error
-    // before the atomic create_order call. The authoritative validation +
-    // consumption happens inside the SECURITY DEFINER function.
-    // Use the REAL package price so minimum-order checks are accurate here;
-    // create_order re-checks everything authoritatively.
     const code = (voucherCode || '').trim().toUpperCase();
-    if (code) {
-      const validation = await validateVoucher({ code, subtotalCents: packageRecord.price_cents, gameId, email });
-      if (!validation.valid) {
-        return NextResponse.json({ error: validation.error }, { status: 400 });
-      }
-    }
 
     // Atomic order creation via SECURITY DEFINER function.
     const capability = randomBytes(32).toString('base64url');
@@ -128,11 +133,11 @@ export async function POST(req: NextRequest) {
       ? playerInputs as Record<string, unknown>
       : {};
 
-    const { data, error } = await rpcClient.rpc('create_order', {
+    const { data, error } = await rpcClient.rpc('create_order_idempotent', {
       p_game_id: gameId,
       p_package_id: packageId,
       p_email: email.trim(),
-      p_customer_name: name || 'Guest',
+      p_customer_name: typeof name === 'string' && name.trim() ? name.trim() : 'Guest',
       p_player_inputs: {
         ...safePlayerInputs,
         __rfz_order_access_hash: hashOrderCapability(capability),
@@ -140,9 +145,17 @@ export async function POST(req: NextRequest) {
       p_payment_method: paymentMethod,
       p_voucher_code: code || null,
       p_voucher_email: email.trim(),
+      p_request_key: (input.idempotencyKey as string | undefined) || randomUUID(),
     });
 
     if (error) {
+      if (error.message.includes('IDEMPOTENCY_KEY_CONFLICT')) {
+        return NextResponse.json({ error: 'This checkout retry key was used with a different order. Please retry checkout.' }, { status: 409 });
+      }
+      if (error.message.includes('VOUCHER_REJECTED:')) {
+        const reason = error.message.split('VOUCHER_REJECTED:').slice(1).join(':').trim();
+        return NextResponse.json({ error: reason || 'This promotion is no longer available.' }, { status: 400 });
+      }
       if (error.message.includes('GUEST_CHECKOUT_DISABLED')) {
         return NextResponse.json({ error: 'Guest checkout is currently disabled. Please sign in to continue.' }, { status: 403 });
       }
@@ -163,6 +176,9 @@ export async function POST(req: NextRequest) {
 
     const row = (data as Array<{ out_reference: string | null; out_error: string | null; out_total_cents: number | null }>)[0];
     if (!row || !row.out_reference) {
+      if (row?.out_error === 'IDEMPOTENCY_KEY_CONFLICT') {
+        return NextResponse.json({ error: 'This checkout retry key was used with a different order. Please retry checkout.' }, { status: 409 });
+      }
       return NextResponse.json({ error: row?.out_error || 'Could not create your order.' }, { status: 400 });
     }
 
