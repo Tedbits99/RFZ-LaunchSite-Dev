@@ -30,14 +30,15 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
         if (minimum === null || price < minimum) return NextResponse.json({ error: 'Price does not cover supplier cost plus the configured payment fee reserve.' }, { status: 409 });
       }
       if (supplierLinked) {
-        if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled' || setting.supplier_fulfillment_release_enabled !== true) return NextResponse.json({ error: 'Supplier fulfillment is release-locked; this offer cannot be published as saleable.' }, { status: 409 });
-        if (!current.supplier_offer_id || current.supplier_category_id !== 'mobile_legends_philippines') return NextResponse.json({ error: 'This supplier offer does not have an approved category and offer identity.' }, { status: 409 });
+        if (!current.supplier_offer_id || !current.supplier_category_id) return NextResponse.json({ error: 'This supplier offer does not have a valid category and offer identity.' }, { status: 409 });
         if (!Number.isFinite(cost) || cost <= 0) return NextResponse.json({ error: 'A positive supplier cost is required before this offer can be published.' }, { status: 409 });
         if (setting.payment_fee_reserve_bps == null || setting.payment_fee_fixed_cents == null) return NextResponse.json({ error: 'Configure an approved payment fee reserve before publishing supplier-linked packages.' }, { status: 409 });
-        const { data: supplier } = await db.from('suppliers').select('id').eq('code', 'fazercards').eq('enabled', true).maybeSingle();
-        const { data: mapping } = supplier ? await db.from('supplier_package_mappings').select('id,metadata').eq('package_id', id).eq('supplier_id', supplier.id).eq('supplier_product_id', current.supplier_offer_id).eq('enabled', true).maybeSingle() : { data: null };
+        const { data: supplier } = await db.from('suppliers').select('id').eq('code', 'fazercards').maybeSingle();
+        const { data: mapping } = supplier ? await db.from('supplier_package_mappings').select('id,metadata').eq('package_id', id).eq('supplier_id', supplier.id).eq('supplier_product_id', current.supplier_offer_id).maybeSingle() : { data: null };
         const metadata = mapping?.metadata as { category_id?: string } | null;
-        if (!mapping || metadata?.category_id !== current.supplier_category_id) return NextResponse.json({ error: 'A matching enabled supplier mapping is required.' }, { status: 409 });
+        if (!mapping || metadata?.category_id !== current.supplier_category_id) return NextResponse.json({ error: 'A matching supplier offer mapping is required.' }, { status: 409 });
+        // Catalog publication makes an approved product visible only. The
+        // fulfillment lock and disabled mapping remain authoritative at checkout.
       }
       if (current.supplier_review_required && body.acknowledge_supplier_review !== true) return NextResponse.json({ error: 'Acknowledge the supplier cost, FX rate, and fee reserve review before publishing.' }, { status: 409 });
     }

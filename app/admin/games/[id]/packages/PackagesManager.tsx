@@ -153,7 +153,7 @@ export default function PackagesManager({ packages: initialPackages, gameId, isM
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div className="flex flex-wrap gap-3 text-xs">
         <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Packages</span><p className="text-lg font-bold text-slate-200">{packages.length}</p></div>
-        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Published and saleable</span><p className="text-lg font-bold text-emerald-400">{activeCount}</p></div>
+        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Published to catalog</span><p className="text-lg font-bold text-emerald-400">{activeCount}</p></div>
         <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Awaiting price/review</span><p className="text-lg font-bold text-amber-300">{packages.filter((pkg) => pkg.price_cents <= 0 || pkg.supplier_review_required).length}</p></div>
       </div>
       <button type="button" onClick={() => { setShowCreate((shown) => !shown); setDraft(blankDraft()); setError(null) }} className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200"><Plus size={14} /> Add package</button>

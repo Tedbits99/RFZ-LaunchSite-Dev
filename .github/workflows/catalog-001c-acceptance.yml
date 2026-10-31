@@ -1,0 +1,144 @@
+name: CATALOG-001C disposable acceptance
+
+on:
+  pull_request:
+    branches: [codex/rfz-catalog-001-implementation, main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-001c-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  catalog-001c-disposable-acceptance:
+    if: >-
+      github.event.pull_request.head.ref == 'codex/rfz-catalog-multigame-completion' &&
+      (github.event.pull_request.base.ref == 'codex/rfz-catalog-001-implementation' ||
+       github.event.pull_request.base.ref == 'main')
+    name: Catalog PostgreSQL 17, Auth, supplier contracts, and browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      CATALOG_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      CATALOG_RUN_TAG: catalog-${{ github.run_id }}-${{ github.run_attempt }}
+      NEXT_TELEMETRY_DISABLED: "1"
+      PAYMENT_MODE: mock
+      PAYMENT_PROVIDER: mock
+
+    steps:
+      - name: Check out the exact CATALOG-001C head without persisting credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify branch, base, and exact candidate SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_BRANCH" == codex/rfz-catalog-multigame-completion ]]
+          [[ "$BASE_BRANCH" == codex/rfz-catalog-001-implementation || "$BASE_BRANCH" == main ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf 'CATALOG_CANDIDATE_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install pinned local Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.121.0
+
+      - name: Verify fail-closed migration selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version | grep -Fx '2.121.0'
+          supabase start --help | grep -q -- '--exclude'
+          supabase db reset --help | grep -q -- '--local'
+          bash scripts/verify-deployable-migrations.sh --self-test
+          bash scripts/verify-deployable-migrations.sh
+
+      - name: Install Chromium for desktop and mobile acceptance
+        run: npx playwright install --with-deps chromium
+
+      - name: Run application test suite
+        run: npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
+
+      - name: Run TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Check out the exact PR #92 acceptance contract
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: 3c6c1ba315ff482acd5eefd4f62ab190b813ef3e
+          path: .catalog-001-pr92-acceptance
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build the disposable implementation-plus-contract worktree
+        shell: bash
+        env:
+          IMPLEMENTATION_SHA: ${{ github.event.pull_request.head.sha }}
+          ACCEPTANCE_SHA: 3c6c1ba315ff482acd5eefd4f62ab190b813ef3e
+        run: |
+          set -euo pipefail
+          contract_checkout="$GITHUB_WORKSPACE/.catalog-001-pr92-acceptance"
+          integration="$RUNNER_TEMP/catalog-001c-integration"
+          [[ "$(git rev-parse HEAD)" == "$IMPLEMENTATION_SHA" ]]
+          [[ "$(git -C "$contract_checkout" rev-parse HEAD)" == "$ACCEPTANCE_SHA" ]]
+          [[ ! -e "$integration" ]]
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add -b codex/catalog-001c-integration-verification "$integration" "$IMPLEMENTATION_SHA"
+          git -C "$integration" fetch --no-tags "$contract_checkout" "$ACCEPTANCE_SHA"
+          [[ "$(git -C "$integration" rev-parse FETCH_HEAD)" == "$ACCEPTANCE_SHA" ]]
+          git -C "$integration" merge --no-edit --no-ff FETCH_HEAD
+          git -C "$integration" merge-base --is-ancestor "$IMPLEMENTATION_SHA" HEAD
+          git -C "$integration" merge-base --is-ancestor "$ACCEPTANCE_SHA" HEAD
+          mv "$contract_checkout" "$RUNNER_TEMP/catalog-001-pr92-source"
+          node "$GITHUB_WORKSPACE/scripts/catalog-001/activate-companion-tests.mjs" "$integration"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$integration/node_modules"
+          printf 'CATALOG_INTEGRATION_WORKTREE=%s\n' "$integration"
+          printf 'CATALOG_IMPLEMENTATION_SHA=%s\nCATALOG_ACCEPTANCE_SHA=%s\n' "$IMPLEMENTATION_SHA" "$ACCEPTANCE_SHA"
+
+      - name: Run isolated PostgreSQL 17, Auth, and full browser matrix
+        shell: bash
+        env:
+          CATALOG_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          CATALOG_RUN_TAG: catalog-${{ github.run_id }}-${{ github.run_attempt }}
+        working-directory: ${{ runner.temp }}/catalog-001c-integration
+        run: scripts/catalog-001/run-local-acceptance.sh
+
+      - name: Upload synthetic acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-001c-sanitized-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/catalog-001c-integration/artifacts/catalog-001/test-output/
+            ${{ runner.temp }}/catalog-001c-integration/e2e/catalog-001/artifacts/catalog-001/test-output/
+            ${{ runner.temp }}/catalog-001c-integration/artifacts/catalog-acceptance/test-output/
+            ${{ runner.temp }}/catalog-001c-integration/e2e/catalog-acceptance/artifacts/catalog-acceptance/test-output/
+          if-no-files-found: warn
+          retention-days: 7

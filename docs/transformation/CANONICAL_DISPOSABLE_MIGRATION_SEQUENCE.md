@@ -2,7 +2,7 @@
 
 **Status:** reviewed executable migration manifest for an unlinked disposable Supabase instance and the repository's deployable `supabase/migrations/` directory. This artifact does not alter any historical migration and is not authorization to apply anything to `ketdhcmwowzztcdlmris`.
 
-**Source history:** see the inventory documents for the current repository file count; **executable:** 104; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
+**Source history:** see the inventory documents for the current repository file count; **executable:** 109; **archived:** 19. Files in the active directory are ordered by the numeric migration prefix using `sort -V`. The 19 archived files are preserved byte-for-byte under `supabase/migrations-archive/unapplied-replaced-20261021/` and cannot be executed by the Supabase CLI or GitHub deployment integration. SHA-256 values make the selection auditable.
 
 ## Selection rules
 
@@ -11,7 +11,7 @@
 3. The corrected fulfillment, RPC, and slug-based Honor of Kings migrations are the executable replacements for their archived predecessors.
 4. Fail closed if an executable migration contains an external scheduler or HTTP target. Development must have no `pg_cron`, `pg_net`, payment, supplier, SMTP, webhook, or external HTTP activity.
 5. Treat Vault/provider migrations as schema-only with synthetic values; no secrets or external endpoints may be inherited. Verify RLS, grants, `SECURITY DEFINER` authorization, ownership, payment boundaries, supplier reconciliation, receipt outbox, and concurrency after reset.
-6. A fresh-install PASS requires the complete 100-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
+6. A fresh-install PASS requires the complete 109-file executable set plus the database assertions and retry/concurrency suite to execute on an unlinked local or owner-approved disposable runner.
 
 ## Generated file selection
 
@@ -145,6 +145,7 @@
 | 106 | INCLUDE | `20261027120000_catalog_lifecycle.sql` | `5a6b641fcf2a85d00399f90bdc3d8f7653621faec0d5a69309a99ef5cd648d06` | 100. 20261027110000_grant_public_catalog_columns.sql | additive catalog lifecycle/status columns and saleability-based legacy backfill; no outbound target; run in isolated disposable DB |
 | 107 | INCLUDE | `20261027120100_catalog_admin_rpc_status.sql` | `38004fd89e6d5ff7892e8859b36a4e12e5938b8a93df490a2ef5ff866e029f48` | 106. 20261027120000_catalog_lifecycle.sql | status-aware admin catalog RPCs with catalog-admin role guard; no outbound target; run in isolated disposable DB |
 | 108 | INCLUDE | `20261027120200_catalog_order_saleability_guard.sql` | `73849c4f224fb599d8100e38647a51d652c5637f34eb94baffb0e099112bbfea` | 107. 20261027120100_catalog_admin_rpc_status.sql | database guard rejects new orders for hidden, archived, invalid-price, or release-locked supplier catalog rows; browser-role catalog DML revoked; no outbound target |
+| 109 | INCLUDE | `20261030122423_supplier_catalog_multigame_import.sql` | `2b913e8d024e30dd01331dc5d0b692d50c337f70a6450211b05387d36dac24be` | 108. 20261027120200_catalog_order_saleability_guard.sql | append-only sanitized import audit, service-role-only SECURITY INVOKER RPC, and supplier/category/offer uniqueness; synthetic fixtures only; no provider calls |
 
 ## Execution gates
 

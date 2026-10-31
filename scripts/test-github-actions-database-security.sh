@@ -626,6 +626,13 @@ if [ "$upgrade_mode" = true ]; then
         continue
         ;;
     esac
+    case "$migration_name" in
+      20261030122423_supplier_catalog_multigame_import.sql)
+        # This appended catalog migration is timestamped after the wallet
+        # migrations, so defer it until that chronological segment is applied.
+        continue
+        ;;
+    esac
     source_migration="$project_root/supabase/migrations/$migration_name"
     echo "LEGACY_UPGRADE_CANDIDATE=$migration_name"
     [ -f "$source_migration" ] || {
@@ -642,7 +649,8 @@ if [ "$upgrade_mode" = true ]; then
 
   manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")"
   wallet_migration_count=3
-  pre_wallet_manifest_count=$((manifest_count - wallet_migration_count))
+  post_wallet_catalog_migration_count=1
+  pre_wallet_manifest_count=$((manifest_count - wallet_migration_count - post_wallet_catalog_migration_count))
   expected_upgrade_count=$((pre_wallet_manifest_count - 11))
   if [ "$upgrade_count" -ne "$expected_upgrade_count" ]; then
     echo "ERROR: Expected $expected_upgrade_count canonical post-baseline migrations from the reviewed manifest; found $upgrade_count." >&2
@@ -676,6 +684,15 @@ if [ "$upgrade_mode" = true ]; then
     }
     cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
   done
+  supabase_local migration up
+  echo "LEGACY_UPGRADE_PHASE=post-wallet-catalog-migrations"
+  post_wallet_migration="20261030122423_supplier_catalog_multigame_import.sql"
+  source_migration="$project_root/supabase/migrations/$post_wallet_migration"
+  test -s "$source_migration" || {
+    echo "ERROR: Canonical post-wallet catalog migration is missing: $post_wallet_migration" >&2
+    exit 13
+  }
+  cp "$source_migration" "$test_root/supabase/migrations/$post_wallet_migration"
   supabase_local migration up
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --set expected_migration_count="$manifest_count" \

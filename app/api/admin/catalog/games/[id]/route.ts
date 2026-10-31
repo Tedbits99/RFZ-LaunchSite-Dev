@@ -57,28 +57,27 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
         .select('id,price_cents,supplier_offer_id,supplier_category_id,supplier_cost_usd,supplier_review_required')
         .eq('game_id', id).eq('catalog_status', 'PUBLISHED').eq('is_active', true).gt('price_cents', 0).eq('supplier_review_required', false);
       if (error) return NextResponse.json({ error: 'Could not validate publish eligibility.' }, { status: 500 });
-      const directSaleable = (candidates || []).some((pkg) => !pkg.supplier_offer_id && !pkg.supplier_category_id);
-      let supplierSaleable = false;
+      const directCatalogReady = (candidates || []).some((pkg) => !pkg.supplier_offer_id && !pkg.supplier_category_id);
+      let supplierCatalogReady = false;
       const linked = (candidates || []).filter((pkg) => pkg.supplier_offer_id || pkg.supplier_category_id);
-      if (linked.length && process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE === 'enabled') {
+      if (linked.length) {
         const { data: settings } = await db.from('app_settings').select('reference_usd_php_rate,payment_fee_reserve_bps,payment_fee_fixed_cents,supplier_fulfillment_release_enabled').eq('id', 1).maybeSingle();
-        const { data: supplier } = await db.from('suppliers').select('id').eq('code', 'fazercards').eq('enabled', true).maybeSingle();
-        if (supplier && settings?.supplier_fulfillment_release_enabled === true
-            && settings.payment_fee_reserve_bps !== null && settings.payment_fee_fixed_cents !== null) {
-          const { data: mappings } = await db.from('supplier_package_mappings').select('package_id,supplier_product_id,metadata').eq('supplier_id', supplier.id).eq('enabled', true).in('package_id', linked.map((pkg) => pkg.id));
-          supplierSaleable = (mappings || []).some((mapping) => {
+        const { data: supplier } = await db.from('suppliers').select('id').eq('code', 'fazercards').maybeSingle();
+        if (supplier && settings?.payment_fee_reserve_bps != null && settings.payment_fee_fixed_cents != null) {
+          const { data: mappings } = await db.from('supplier_package_mappings').select('package_id,supplier_product_id,metadata').eq('supplier_id', supplier.id).in('package_id', linked.map((pkg) => pkg.id));
+          supplierCatalogReady = (mappings || []).some((mapping) => {
             const pkg = linked.find((candidate) => candidate.id === mapping.package_id);
             const metadata = mapping.metadata as { category_id?: string } | null;
             const minimum = pkg?.supplier_cost_usd == null
               ? null
               : minimumSalePriceCents(Number(pkg.supplier_cost_usd), Number(settings.reference_usd_php_rate), Number(settings.payment_fee_reserve_bps), Number(settings.payment_fee_fixed_cents));
             return pkg !== undefined
-              && Boolean(pkg.supplier_offer_id && pkg.supplier_category_id === 'mobile_legends_philippines' && pkg.supplier_offer_id === mapping.supplier_product_id && metadata?.category_id === pkg.supplier_category_id)
+              && Boolean(pkg.supplier_offer_id && pkg.supplier_category_id && pkg.supplier_offer_id === mapping.supplier_product_id && metadata?.category_id === pkg.supplier_category_id)
               && minimum !== null && pkg.price_cents >= minimum;
           });
         }
       }
-      if (!directSaleable && !supplierSaleable) return NextResponse.json({ error: 'Publish requires a priced, reviewed package with a valid active fulfillment path.' }, { status: 409 });
+      if (!directCatalogReady && !supplierCatalogReady) return NextResponse.json({ error: 'Publish requires a priced, reviewed package with a valid supplier mapping and sufficient margin.' }, { status: 409 });
     }
     const { data, error } = await db.from('games').update({
       ...next,

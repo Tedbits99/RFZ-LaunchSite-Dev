@@ -34,6 +34,19 @@ async function gameFixture(label: string) {
   return data;
 }
 
+async function ensureGameBySlug(slug: string, name: string) {
+  const db = serviceDb();
+  const existing = await db.from('games').select('id,slug').eq('slug', slug).maybeSingle();
+  if (existing.error) throw new Error(`Disposable game lookup failed (SQLSTATE ${existing.error.code}).`);
+  if (existing.data) return existing.data;
+  const created = await db.from('games').insert({
+    slug, name, description: 'Disposable CATALOG-001 multi-game fixture.', region: 'Synthetic Region', currency: 'PHP',
+    is_active: false, is_featured: false, sort_order: 900, catalog_status: 'DRAFT',
+  }).select('id,slug').single();
+  if (created.error || !created.data) throw new Error(`Disposable game creation failed (SQLSTATE ${created.error?.code || 'unknown'}).`);
+  return created.data;
+}
+
 async function packageFixture(gameId: string, values: {
   sku?: string; name?: string; priceCents?: number; status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'; active?: boolean;
   offerId?: string | null; costUsd?: number | null; review?: boolean;
@@ -73,13 +86,23 @@ async function adminCookie() {
   return `rfz-admin-auth=${value}`;
 }
 
-async function appRequest(path: string, body: Record<string, unknown>) {
+async function appRequest(path: string, body: Record<string, unknown>, method: 'PATCH' | 'POST' = 'PATCH', cookie?: string) {
   const origin = assertLoopback('CATALOG_APP_URL', requiredEnv('CATALOG_APP_URL'));
   if (origin.port !== '3000') throw new Error('CATALOG_APP_URL must use the isolated application port 3000.');
   const response = await fetch(new URL(path, origin), {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json', cookie: await adminCookie(), origin: origin.origin },
+    method,
+    headers: { 'content-type': 'application/json', cookie: cookie || await adminCookie(), origin: origin.origin },
     body: JSON.stringify(body),
+  });
+  return { response, body: await response.json().catch(() => ({})) as Record<string, unknown> };
+}
+
+async function appGet(path: string, cookie?: string) {
+  const origin = assertLoopback('CATALOG_APP_URL', requiredEnv('CATALOG_APP_URL'));
+  if (origin.port !== '3000') throw new Error('CATALOG_APP_URL must use the isolated application port 3000.');
+  const response = await fetch(new URL(path, origin), {
+    headers: { cookie: cookie || await adminCookie(), origin: origin.origin },
+    cache: 'no-store',
   });
   return { response, body: await response.json().catch(() => ({})) as Record<string, unknown> };
 }
@@ -87,7 +110,7 @@ async function appRequest(path: string, body: Record<string, unknown>) {
 async function importOffers(gameId: string, offers: Array<{ offer_id: string; name: string; price_usd: number }>, completeSnapshot = false) {
   return importSupplierOffers(serviceDb(), {
     gameId, supplierId, categoryId: MOBILE_LEGENDS_CATEGORY_ID, completeSnapshot,
-    offers, fxRate: 56, feeReserveBps: 250, fixedFeeCents: 25,
+    offers,
   });
 }
 
@@ -103,12 +126,10 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
   beforeAll(async () => {
     assertLoopback('CATALOG_SUPABASE_URL', requiredEnv('CATALOG_SUPABASE_URL'));
     const db = serviceDb();
-    const { data: supplier, error: supplierError } = await db.from('suppliers').upsert({
-      name: 'Synthetic FazerCards fixture', code: 'fazercards', adapter: 'fazercards',
-      api_url: 'https://supplier.invalid', sandbox_api_url: 'https://supplier.invalid',
-      environment: 'sandbox', enabled: false, auth_config: {}, metadata: { fixture: 'catalog-001' },
-    }, { onConflict: 'code' }).select('id').single();
+    const { data: supplier, error: supplierError } = await db.from('suppliers')
+      .select('id,enabled').eq('code', 'fazercards').single();
     if (supplierError || !supplier) throw new Error(`Local supplier fixture failed (SQLSTATE ${supplierError?.code || 'unknown'}).`);
+    if (supplier.enabled !== false) throw new Error('Disposable FazerCards fixture must remain disabled.');
     supplierId = supplier.id;
     const { data: existingGame, error: gameError } = await db.from('games').select('id').eq('slug', 'mobile-legends').maybeSingle();
     if (gameError) throw new Error(`Local catalog lookup failed (SQLSTATE ${gameError.code}).`);
@@ -151,7 +172,7 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
       sku, name: 'Manually Approved Synthetic Package', priceCents: 10_000, status: 'PUBLISHED', active: true,
     });
     const result = await importOffers(mobileLegendsGameId, [{ offer_id: offerId, name: 'Synthetic supplier offer', price_usd: 1 }]);
-    expect(result.error).toMatch(/manual.*package/i);
+    expect(result).toMatchObject({ status: 'failed', created: 0, failed: 1 });
     const { data, error } = await serviceDb().from('packages')
       .select('name,price_cents,is_active,catalog_status,supplier_offer_id,supplier_category_id')
       .eq('id', manual.id).single();
@@ -162,15 +183,15 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     });
   });
 
-  it('existing package selling price and active state survive a supplier cost refresh', async () => {
+  it('supplier cost changes preserve the administrator price and force explicit review', async () => {
     const offerId = `${runTag}-cost-refresh-${randomUUID().slice(0, 6)}`;
     const pkg = await packageFixture(mobileLegendsGameId, { offerId, costUsd: 1, priceCents: 10_000, status: 'PUBLISHED', active: true, review: false });
     await linkOffer(pkg.id, offerId, 1);
     const result = await importOffers(mobileLegendsGameId, [{ offer_id: offerId, name: 'Synthetic Updated Name', price_usd: 1.1 }]);
-    expect(result).toMatchObject({ created: 0, updated: 1, failed: 0, requires_review: 0 });
+    expect(result).toMatchObject({ created: 0, updated: 1, failed: 0, requires_review: 1 });
     const { data, error } = await serviceDb().from('packages').select('price_cents,is_active,catalog_status,supplier_cost_usd,supplier_review_required').eq('id', pkg.id).single();
     expect(error).toBeNull();
-    expect(data).toMatchObject({ price_cents: 10_000, is_active: true, catalog_status: 'PUBLISHED', supplier_review_required: false });
+    expect(data).toMatchObject({ price_cents: 10_000, is_active: false, catalog_status: 'DRAFT', supplier_review_required: true });
     expect(Number(data?.supplier_cost_usd)).toBeCloseTo(1.1);
   });
 
@@ -234,7 +255,8 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const foreign = await packageFixture(other.id, { offerId, costUsd: 1, priceCents: 9000, status: 'DRAFT', active: false });
     await linkOffer(foreign.id, offerId, 1);
     const result = await importOffers(target.id, [{ offer_id: offerId, name: 'Synthetic foreign mapping', price_usd: 1 }]);
-    expect(result.error).toMatch(/different game/i);
+    expect(result).toMatchObject({ status: 'failed', created: 0, failed: 1 });
+    expect(result.failed_offer_ids).toContain(offerId);
     const { data, error } = await serviceDb().from('packages').select('id').eq('game_id', target.id).eq('supplier_offer_id', offerId);
     expect(error).toBeNull();
     expect(data).toHaveLength(0);
@@ -356,5 +378,147 @@ integration('CATALOG-001 disposable PostgreSQL/Auth integration contracts', () =
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(503);
     expect(body).toMatchObject({ error: expect.stringMatching(/disabled|not available|release/i) });
+  });
+
+  it('admin browses three game categories and imports a verified offer into an existing game idempotently', async () => {
+    const firstPage = await appGet('/api/admin/suppliers/fazercards-catalog/categories');
+    expect(firstPage.response.status).toBe(200);
+    expect(firstPage.body.source).toBe('synthetic_fixture');
+    const pageItems = firstPage.body.items as Array<{ category_id: string; product_type: string }>;
+    const pageMeta = firstPage.body.meta as { next_cursor: string | null; has_more: boolean };
+    const secondPage = await appGet(`/api/admin/suppliers/fazercards-catalog/categories?cursor=${encodeURIComponent(pageMeta.next_cursor || '')}`);
+    expect(secondPage.response.status).toBe(200);
+    const allCategories = [...pageItems, ...(secondPage.body.items as typeof pageItems)];
+    expect(allCategories.filter((item) => item.product_type === 'game_topup').map((item) => item.category_id)).toEqual(expect.arrayContaining([
+      'mobile_legends_philippines', 'pubg_mobile_global', 'genshin_impact_global',
+    ]));
+    expect(allCategories.find((item) => item.category_id === 'steam_gift_card_us')?.product_type).toBe('gift_card');
+
+    const pubgOffers = await appGet('/api/admin/suppliers/fazercards-catalog/offers?category_id=pubg_mobile_global&all=1');
+    expect(pubgOffers.response.status).toBe(200);
+    expect(pubgOffers.body.fields).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'character_id', required: true })]));
+    expect(pubgOffers.body.offers).toEqual(expect.arrayContaining([expect.objectContaining({ offer_id: 'pubg_uc_60', price_usd: 0.91 })]));
+
+    const browserRun = (process.env.CATALOG_RUN_TAG || 'local-multigame').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 28);
+    const target = await ensureGameBySlug(`${browserRun}-browser-pubg-existing`, 'Synthetic PUBG Existing Game');
+    const spoofed = await appRequest('/api/admin/catalog/import-offers', {
+      category_id: 'pubg_mobile_global', game_id: target.id, offer_ids: ['pubg_uc_60'],
+      offers: [{ offer_id: 'pubg_uc_60', name: 'Spoofed', price_usd: 0.01 }],
+    }, 'POST');
+    expect(spoofed.response.status).toBe(400);
+    const { data: absent } = await serviceDb().from('packages').select('id').eq('supplier_offer_id', 'pubg_uc_60');
+    expect(absent).toEqual([]);
+    const rejectedGiftCard = await appRequest('/api/admin/catalog/import-offers', {
+      category_id: 'steam_gift_card_us', game_id: target.id, offer_ids: ['steam_gift_card_20'],
+    }, 'POST');
+    expect(rejectedGiftCard.response.status).toBe(422);
+
+    const staff = await identityDb(requiredEnv('CATALOG_STAFF_EMAIL'), requiredEnv('CATALOG_STAFF_PASSWORD'));
+    const { data: staffSession } = await staff.auth.getSession();
+    expect(staffSession.session).not.toBeNull();
+    const staffCookie = `rfz-admin-auth=base64-${Buffer.from(JSON.stringify(staffSession.session)).toString('base64url')}`;
+    const unauthorized = await appRequest('/api/admin/catalog/import-offers', {
+      category_id: 'pubg_mobile_global', game_id: target.id, offer_ids: ['pubg_uc_60'],
+    }, 'POST', staffCookie);
+    expect(unauthorized.response.status).toBe(403);
+    await staff.auth.signOut({ scope: 'local' });
+
+    const firstImport = await appRequest('/api/admin/catalog/import-offers', {
+      category_id: 'pubg_mobile_global', game_id: target.id, offer_ids: ['pubg_uc_60'],
+    }, 'POST');
+    expect(firstImport.response.status, JSON.stringify(firstImport.body)).toBe(200);
+    expect(firstImport.body).toMatchObject({ success: true, created: 1, updated: 0, complete_snapshot: false });
+    const { data: imported, error: importedError } = await serviceDb().from('packages')
+      .select('id,game_id,name,price_cents,is_active,catalog_status,supplier_cost_usd,supplier_category_id,supplier_review_required')
+      .eq('supplier_offer_id', 'pubg_uc_60').single();
+    expect(importedError).toBeNull();
+    expect(imported).toMatchObject({
+      game_id: target.id, name: '60 UC', price_cents: 0, is_active: false, catalog_status: 'DRAFT',
+      supplier_category_id: 'pubg_mobile_global', supplier_review_required: true,
+    });
+    expect(Number(imported?.supplier_cost_usd)).toBeCloseTo(0.91);
+    const { data: playerField } = await serviceDb().from('game_input_fields').select('label,field_key,is_required').eq('game_id', target.id).eq('field_key', 'character_id').single();
+    expect(playerField).toMatchObject({ label: 'Character ID', field_key: 'character_id', is_required: true });
+    const { data: mapping } = await serviceDb().from('supplier_package_mappings').select('supplier_product_id,enabled,metadata').eq('package_id', imported!.id).single();
+    expect(mapping).toMatchObject({ supplier_product_id: 'pubg_uc_60', enabled: false, metadata: expect.objectContaining({ category_id: 'pubg_mobile_global', product_type: 'game_topup' }) });
+
+    const manualPrice = await serviceDb().from('packages').update({ price_cents: 12345 }).eq('id', imported!.id);
+    expect(manualPrice.error).toBeNull();
+    const repeatedImport = await appRequest('/api/admin/catalog/import-offers', {
+      category_id: 'pubg_mobile_global', game_id: target.id, offer_ids: ['pubg_uc_60'],
+    }, 'POST');
+    expect(repeatedImport.response.status, JSON.stringify(repeatedImport.body)).toBe(200);
+    expect(repeatedImport.body).toMatchObject({ created: 0, updated: 1, complete_snapshot: false });
+    const { data: idempotentPackages } = await serviceDb().from('packages').select('id,price_cents').eq('supplier_offer_id', 'pubg_uc_60');
+    expect(idempotentPackages).toEqual([{ id: imported!.id, price_cents: 12345 }]);
+    const { data: auditRuns } = await serviceDb().from('supplier_catalog_import_runs').select('id,status,source').eq('category_id', 'pubg_mobile_global').eq('game_id', target.id).order('created_at');
+    expect(auditRuns).toHaveLength(2);
+    expect(auditRuns?.map((run) => run.source)).toEqual(['synthetic_fixture', 'synthetic_fixture']);
+  });
+
+  it('creates a new draft game from imported Genshin fields and publishes visible but locked catalog content', async () => {
+    const browserRun = (process.env.CATALOG_RUN_TAG || 'local-multigame').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 28);
+    const slug = `${browserRun}-browser-genshin-new`;
+    const createdGame = await appRequest('/api/admin/catalog/games', {
+      slug, name: 'Synthetic Genshin Impact', region: 'GLOBAL', currency: 'PHP', fields: [],
+    }, 'POST');
+    expect(createdGame.response.status, JSON.stringify(createdGame.body)).toBe(201);
+    const game = createdGame.body.data as { id: string; slug: string; catalog_status: string };
+    expect(game.catalog_status).toBe('DRAFT');
+
+    const imported = await appRequest('/api/admin/catalog/import-offers', {
+      category_id: 'genshin_impact_global', game_id: game.id, offer_ids: ['genshin_crystals_60'],
+    }, 'POST');
+    expect(imported.response.status, JSON.stringify(imported.body)).toBe(200);
+    expect(imported.body).toMatchObject({ created: 1, complete_snapshot: false });
+    const { data: fields } = await serviceDb().from('game_input_fields').select('field_key,is_required').eq('game_id', game.id).order('field_key');
+    expect(fields).toEqual([{ field_key: 'server', is_required: true }, { field_key: 'uid', is_required: true }]);
+    const { data: pkg } = await serviceDb().from('packages').select('id').eq('supplier_offer_id', 'genshin_crystals_60').single();
+    expect(pkg).not.toBeNull();
+
+    const priceEdit = await appRequest(`/api/admin/catalog/packages/${pkg!.id}`, { price_cents: 10000 });
+    expect(priceEdit.response.status, JSON.stringify(priceEdit.body)).toBe(200);
+    const packagePublish = await appRequest(`/api/admin/catalog/packages/${pkg!.id}`, {
+      action: 'publish', price_cents: 10000, acknowledge_supplier_review: true,
+    });
+    expect(packagePublish.response.status, JSON.stringify(packagePublish.body)).toBe(200);
+    const gamePublish = await appRequest(`/api/admin/catalog/games/${game.id}`, { action: 'publish' });
+    expect(gamePublish.response.status, JSON.stringify(gamePublish.body)).toBe(200);
+
+    const origin = assertLoopback('CATALOG_APP_URL', requiredEnv('CATALOG_APP_URL'));
+    const storefront = await fetch(new URL(`/games/${game.slug}`, origin), { cache: 'no-store' });
+    const storefrontHtml = await storefront.text();
+    expect(storefront.status).toBe(200);
+    expect(storefrontHtml).toContain('Synthetic Genshin Impact');
+    expect(storefrontHtml).toContain('60 Genesis Crystals');
+    expect(storefrontHtml).toContain('Currently unavailable');
+    const { data: settings, error: settingsError } = await serviceDb().from('app_settings')
+      .select('supplier_fulfillment_release_enabled').eq('id', 1);
+    expect(settingsError).toBeNull();
+    expect(settings?.[0]?.supplier_fulfillment_release_enabled).toBe(false);
+
+    async function expectOrderBlocked() {
+      const order = await serviceDb().from('orders').insert({
+        reference: `${runTag}-${randomUUID().slice(0, 12)}`,
+        email: 'synthetic-catalog-customer@example.invalid', customer_name: 'Synthetic Customer',
+        game_id: game.id, package_id: pkg!.id,
+        player_inputs: { uid: 'synthetic-uid', server: 'synthetic-server', __rfz_order_access_hash: randomBytes(32).toString('hex') },
+        subtotal_cents: 10000, discount_cents: 0, total_cents: 10000, payment_method: 'manual', status: 'WAITING_PAYMENT',
+      });
+      expect(order.error).not.toBeNull();
+      expect(order.error?.message).toMatch(/CATALOG_(SUPPLIER_MAPPING_REQUIRED|SUPPLIER_RELEASE_LOCKED|ITEM_UNAVAILABLE)/);
+    }
+    await expectOrderBlocked();
+
+    for (const action of ['hide', 'archive'] as const) {
+      const lifecycle = await appRequest(`/api/admin/catalog/packages/${pkg!.id}`, { action });
+      expect(lifecycle.response.status, JSON.stringify(lifecycle.body)).toBe(200);
+      await expectOrderBlocked();
+    }
+    const restored = await appRequest(`/api/admin/catalog/packages/${pkg!.id}`, { action: 'restore' });
+    expect(restored.response.status, JSON.stringify(restored.body)).toBe(200);
+    const { data: state } = await serviceDb().from('packages').select('catalog_status,is_active,price_cents').eq('id', pkg!.id).single();
+    expect(state).toMatchObject({ catalog_status: 'DRAFT', is_active: false, price_cents: 10000 });
+    await expectOrderBlocked();
   });
 });

@@ -49,6 +49,49 @@ try {
     if (['admin_create_catalog_game', 'admin_update_catalog_game', 'admin_update_catalog_pricing_assumptions'].includes(name)) assert(fn.definition.includes('is_catalog_admin'), `${name} must enforce the catalog-specific admin guard`);
   }
 
+  const importIdentity = 'public.admin_import_supplier_catalog(uuid,uuid,text,jsonb,jsonb,text,text,boolean,uuid,text)';
+  const importRows = await sql`
+    select p.oid::regprocedure::text as identity, p.prosecdef, p.proconfig,
+      has_function_privilege('anon', p.oid, 'EXECUTE') as anon_exec,
+      has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_exec,
+      has_function_privilege('service_role', p.oid, 'EXECUTE') as service_exec,
+      exists (
+        select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where a.grantee = 0 and a.privilege_type = 'EXECUTE'
+      ) as public_exec
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'admin_import_supplier_catalog'
+      and p.oid = to_regprocedure(${importIdentity})
+  `;
+  assert(importRows.length === 1, 'expected the multi-game supplier import RPC');
+  const importRpc = importRows[0];
+  assert(importRpc.prosecdef === false, 'multi-game import RPC must remain SECURITY INVOKER');
+  assert(Array.isArray(importRpc.proconfig) && importRpc.proconfig.some((value) => /^search_path=(?:""|)$/.test(value)), 'multi-game import RPC must use an empty search_path');
+  assert(importRpc.anon_exec === false && importRpc.authenticated_exec === false && importRpc.public_exec === false && importRpc.service_exec === true, 'multi-game import RPC must be service-role-only');
+
+  const [{ rls_enabled: auditRls }] = await sql`
+    select c.relrowsecurity as rls_enabled
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relname = 'supplier_catalog_import_runs'
+  `;
+  assert(auditRls === true, 'supplier catalog audit table must have RLS enabled');
+  const [{ anon_read: auditAnonRead, auth_read: auditAuthRead, service_read: auditServiceRead,
+    service_insert: auditServiceInsert, service_update: auditServiceUpdate, service_delete: auditServiceDelete }] = await sql`
+    select has_table_privilege('anon', 'public.supplier_catalog_import_runs', 'SELECT') as anon_read,
+      has_table_privilege('authenticated', 'public.supplier_catalog_import_runs', 'SELECT') as auth_read,
+      has_table_privilege('service_role', 'public.supplier_catalog_import_runs', 'SELECT') as service_read,
+      has_table_privilege('service_role', 'public.supplier_catalog_import_runs', 'INSERT') as service_insert,
+      has_table_privilege('service_role', 'public.supplier_catalog_import_runs', 'UPDATE') as service_update,
+      has_table_privilege('service_role', 'public.supplier_catalog_import_runs', 'DELETE') as service_delete
+  `;
+  assert(auditAnonRead === false && auditAuthRead === false, 'catalog import audit must not be readable by browser roles');
+  assert(auditServiceRead === true && auditServiceInsert === true && auditServiceUpdate === false && auditServiceDelete === false, 'catalog import audit must be service-role-readable, insert-only evidence');
+  const [{ offer_identity_index: offerIndex, package_identity_index: packageIndex }] = await sql`
+    select to_regclass('public.supplier_package_mappings_offer_identity_uidx') is not null as offer_identity_index,
+      to_regclass('public.packages_supplier_offer_identity_uidx') is not null as package_identity_index
+  `;
+  assert(offerIndex === true && packageIndex === true, 'supplier/category/offer uniqueness indexes are required');
+
   for (const table of ['games', 'game_input_fields', 'packages']) {
     for (const privilege of ['INSERT', 'UPDATE', 'DELETE']) {
       const [{ anon_write: anonWrite, auth_write: authWrite }] = await sql`
@@ -67,7 +110,7 @@ try {
   assert(coinPaymentEnabled === false, 'RF Coins payment method must remain disabled');
   const [{ fazercards_enabled: supplierEnabled }] = await sql`select coalesce(bool_or(enabled) filter (where code = 'fazercards'), false) as fazercards_enabled from public.suppliers`;
   assert(supplierEnabled === false, 'synthetic supplier must remain disabled');
-  console.log('CATALOG_POSTGRES17_SECURITY_PASS rpc_acl=6 direct_browser_dml=revoked supplier_release=off rf_coins=off');
+  console.log('CATALOG_POSTGRES17_SECURITY_PASS rpc_acl=7 direct_browser_dml=revoked catalog_audit=service-role-append-only supplier_release=off rf_coins=off');
 } catch (error) {
   const safeMessage = error instanceof Error ? error.message.replace(/postgres(?:ql)?:\/\/[^\s]+/gi, '[LOCAL_DATABASE_URL]').replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[LOCAL_JWT]') : 'unknown error';
   console.error(`CATALOG_POSTGRES17_SECURITY_FAIL ${safeMessage}`);

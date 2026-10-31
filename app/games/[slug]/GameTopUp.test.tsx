@@ -39,6 +39,7 @@ function renderGameStore(slug: string, methods = ENABLED_METHODS) {
       price_cents: 10000,
       original_price_cents: null,
       bonus: null,
+      saleable: true,
     }],
     dbPaymentMethods: methods,
     paymentConfigAuthoritative: true,
