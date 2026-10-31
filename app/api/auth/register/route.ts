@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { validateRegistrationInput } from '@/lib/authValidation';
 import { getAuthCallbackUrl } from '@/lib/authRedirect';
+import { logAuthFlowFailure } from '@/lib/authFlowDiagnostics';
 
 const pendingMessage = 'If the address can receive mail, confirmation instructions will be sent.';
 
@@ -49,12 +50,16 @@ export async function POST(req: NextRequest) {
   if (!validation.ok) return errorResponse(validation.error, 400);
 
   const emailRedirectTo = getAuthCallbackUrl();
-  if (!emailRedirectTo) return errorResponse('Registration is temporarily unavailable.', 503);
+  if (!emailRedirectTo) {
+    logAuthFlowFailure('customer_registration', 'callback_configuration');
+    return errorResponse('Registration is temporarily unavailable.', 503);
+  }
 
-  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  let supabase: Awaited<ReturnType<typeof createCustomerServerClient>>;
   try {
-    supabase = await createSupabaseServerClient();
-  } catch {
+    supabase = await createCustomerServerClient();
+  } catch (error) {
+    logAuthFlowFailure('customer_registration', 'client_initialization', error);
     return errorResponse('Registration is temporarily unavailable.', 503);
   }
 
@@ -73,19 +78,25 @@ export async function POST(req: NextRequest) {
       // successful request. Other Auth failures remain generic and do not
       // disclose provider details or whether an address exists.
       if (isDuplicateSignupError(error)) return pendingResponse();
+      logAuthFlowFailure('customer_registration', 'supabase_signup', error);
       return errorResponse('Registration is temporarily unavailable.', 503);
     }
 
     // Email confirmation must be required. A returned session means the
     // current Auth configuration would grant access before confirmation.
     if (data.session) {
+      logAuthFlowFailure('customer_registration', 'unexpected_preconfirmation_session');
       await supabase.auth.signOut();
       return errorResponse('Registration is temporarily unavailable.', 503);
     }
 
-    if (!data.user) return errorResponse('Registration is temporarily unavailable.', 503);
+    if (!data.user) {
+      logAuthFlowFailure('customer_registration', 'signup_user_missing');
+      return errorResponse('Registration is temporarily unavailable.', 503);
+    }
     return pendingResponse();
-  } catch {
+  } catch (error) {
+    logAuthFlowFailure('customer_registration', 'signup_exception', error);
     return errorResponse('Registration is temporarily unavailable.', 503);
   }
 }

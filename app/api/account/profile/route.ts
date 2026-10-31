@@ -13,7 +13,7 @@ export async function GET() {
 
   const { data, error } = await session.client
     .from('customer_profiles')
-    .select('display_name, email_snapshot')
+    .select('display_name, email_snapshot, status')
     .eq('user_id', session.user.id)
     .maybeSingle();
 
@@ -22,6 +22,7 @@ export async function GET() {
   return json({
     display_name: (data as { display_name: string }).display_name ?? '',
     email: (data as { email_snapshot: string }).email_snapshot ?? '',
+    status: (data as { status: string }).status,
   }, 200);
 }
 

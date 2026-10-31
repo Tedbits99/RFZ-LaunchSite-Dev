@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { ChevronRight, CheckCircle2, Clock, XCircle, Circle, RefreshCw } from 'lucide-react';
 import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
-import SiteFooter from '@/components/SiteFooter';
+import AccountFooter from '@/components/account/AccountFooter';
+import { getOrderPresentation } from '@/lib/orderPresentation';
+import RetryServerDataButton from '@/components/account/RetryServerDataButton';
 
 type Order = {
   id: string;
@@ -26,7 +28,6 @@ type Order = {
 type TimelineEntry = {
   id: string;
   status: string;
-  note: string;
   created_at: string;
 };
 
@@ -82,16 +83,32 @@ const LOG_PREFIX = '[OrderStatus]';
 export default function AccountOrderDetailClient({
   order: initialOrder,
   timeline: initialTimeline,
+  timelineUnavailable: initialTimelineUnavailable,
 }: {
   order: Order;
   timeline: TimelineEntry[];
+  timelineUnavailable: boolean;
 }) {
   const [order, setOrder] = useState(initialOrder);
   const [timeline, setTimeline] = useState(initialTimeline);
+  const [timelineUnavailable, setTimelineUnavailable] = useState(initialTimelineUnavailable);
   const [refreshing, setRefreshing] = useState(false);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<string>('connecting');
-  const orderIdRef = useRef(order.id);
+  const [copyMessage, setCopyMessage] = useState('');
+
+  async function copyReference() {
+    if (!navigator.clipboard?.writeText) {
+      setCopyMessage('Clipboard unavailable. Select the reference above to copy it.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(order.reference);
+      setCopyMessage('Order reference copied.');
+    } catch {
+      setCopyMessage('Could not copy automatically. Select the reference above to copy it.');
+    }
+  }
 
   const poll = useCallback(async () => {
     try {
@@ -111,7 +128,10 @@ export default function AccountOrderDetailClient({
           updated_at: data.updated_at || prev.updated_at,
         } : prev);
       }
-      if (data.timeline) setTimeline(data.timeline);
+      if (data.timeline) {
+        setTimeline(data.timeline);
+        setTimelineUnavailable(false);
+      }
       setLastPolledAt(new Date().toISOString());
     } catch (err) {
       console.log(LOG_PREFIX, 'poll error:', err instanceof Error ? err.message : 'unknown');
@@ -163,8 +183,8 @@ export default function AccountOrderDetailClient({
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${order.id}` },
-        (payload: { new: Record<string, unknown> }) => {
-          const n = payload.new as Record<string, any>;
+        (payload: { new: { status?: string | null; payment_status?: string | null; fulfillment_status?: string | null; updated_at?: string | null } }) => {
+          const n = payload.new;
           console.log(LOG_PREFIX, 'Realtime UPDATE event:', { status: n.status, fulfillment: n.fulfillment_status, payment: n.payment_status });
           setOrder((prev) =>
             prev
@@ -209,7 +229,6 @@ export default function AccountOrderDetailClient({
 
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/90"><div className="mx-auto max-w-[1180px] px-5 py-4"><a href="/account/orders" className="text-xs text-cyan-300">← Orders</a></div></header>
       <div className="mx-auto max-w-3xl px-5 py-10">
         <nav className="flex items-center gap-2 text-xs text-slate-500"><Link href="/account">Account</Link><ChevronRight size={12} /><Link href="/account/orders">Orders</Link><ChevronRight size={12} /><span className="text-slate-300">{order.reference}</span></nav>
 
@@ -223,6 +242,10 @@ export default function AccountOrderDetailClient({
               <div><p className="text-[10px] text-slate-500">Payment Status</p><p className="text-xs font-medium text-slate-300">{paymentStatusLabel[order.payment_status] || order.payment_status}</p></div>
               <div><p className="text-[10px] text-slate-500">Fulfillment Status</p><p className="text-xs font-medium text-slate-300">{fulfillmentStatusLabel[order.fulfillment_status] || order.fulfillment_status}</p></div>
             </div>
+          </div>
+          <div className="mt-4 rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-300">What happens next</p>
+            <p className="mt-1 text-sm text-slate-300">{getOrderPresentation(displayStatus).message}</p>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <div><p className="text-xs text-slate-500">Game</p><p className="text-sm">{order.games?.name || '—'}</p></div>
@@ -307,7 +330,8 @@ export default function AccountOrderDetailClient({
           </div>
         )}
 
-        {timeline.length > 0 && (
+        {timelineUnavailable ? <div className="mt-5 rounded-xl border border-amber-400/25 bg-amber-400/5 p-5 text-sm text-amber-100" role="status"><p>Order events are temporarily unavailable; the current order status above is still shown.</p><RetryServerDataButton label="Retry order events" /></div> : null}
+        {!timelineUnavailable && timeline.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-6">
             <h2 className="font-display text-sm font-semibold mb-4">Order Timeline</h2>
             <div className="space-y-3">
@@ -321,15 +345,23 @@ export default function AccountOrderDetailClient({
                       <span className={`text-xs font-semibold ${statusColor[entry.status] || 'text-slate-400'}`}>{entry.status}</span>
                       <span className="text-[10px] text-slate-600">{fmtTime(entry.created_at)}</span>
                     </div>
-                    {entry.note && <p className="mt-0.5 text-[11px] text-slate-500">{entry.note}</p>}
                   </div>
                 </div>
               ))}
             </div>
           </div>
         )}
+        <section className="mt-5 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5" aria-labelledby="order-help-heading">
+          <h2 id="order-help-heading" className="font-display text-sm font-semibold">Need help with this order?</h2>
+          <p className="mt-1 text-xs text-slate-400">When contacting support, include this order reference. Do not share your password or payment credentials.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void copyReference()} className="min-h-11 rounded-lg border border-[#263752] px-3 text-xs text-slate-200 hover:border-cyan-300">Copy reference</button>
+            <Link href="/#contact" className="inline-flex min-h-11 items-center rounded-lg border border-cyan-400/30 px-3 text-xs text-cyan-200 hover:border-cyan-300">Support options</Link>
+          </div>
+          {copyMessage ? <p className="mt-2 text-xs text-slate-400" role="status" aria-live="polite">{copyMessage}</p> : null}
+        </section>
       </div>
-      <SiteFooter />
+      <AccountFooter />
     </main>
   );
 }

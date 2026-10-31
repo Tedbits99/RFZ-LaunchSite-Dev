@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRecoveryServerClient } from '@/lib/authSessionClients';
-import { getConfiguredAppOrigin } from '@/lib/authRedirect';
+import { getConfiguredAppOrigin, getRecoveryCallbackUrl } from '@/lib/authRedirect';
 import { validateEmailInput } from '@/lib/authValidation';
+import { logAuthFlowFailure } from '@/lib/authFlowDiagnostics';
 
 const GENERIC_OK = 'If the address can receive mail, reset instructions will be sent.';
 const GENERIC_503 = 'Password reset is temporarily unavailable.';
@@ -38,19 +39,26 @@ export async function POST(request: NextRequest) {
   try {
     client = await createRecoveryServerClient();
   } catch {
+    logAuthFlowFailure('password_recovery', 'client_initialization');
     return json({ error: GENERIC_503 }, 503);
   }
 
   try {
-    const redirectTo = `${getConfiguredAppOrigin()}/auth/callback?type=recovery`;
+    // The trusted recovery marker selects the recovery cookie namespace that
+    // initiated the PKCE flow. Supabase adds its code/token hash to this
+    // allow-listed callback; it must not fall back to the customer session.
+    const redirectTo = getRecoveryCallbackUrl();
+    if (!redirectTo) return json({ error: GENERIC_503 }, 503);
     const { error } = await client.auth.resetPasswordForEmail(validation.value, { redirectTo });
     if (error) {
+      logAuthFlowFailure('password_recovery', 'email_provider', error);
       // Never reveal whether the address exists. The Auth provider's own
       // enumeration protections may return errors that we swallow here.
       return json({ message: GENERIC_OK }, 202);
     }
     return json({ message: GENERIC_OK }, 202);
-  } catch {
+  } catch (error) {
+    logAuthFlowFailure('password_recovery', 'email_provider_exception', error);
     return json({ error: GENERIC_503 }, 503);
   }
 }

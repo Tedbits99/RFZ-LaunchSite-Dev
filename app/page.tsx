@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, BadgeCheck, ChevronDown, ChevronLeft, ChevronRight, Headphones, Menu, Search, ShieldCheck, Sparkles, Tag, UserRound, WalletCards, X, Zap } from 'lucide-react';
+import { ArrowRight, BadgeCheck, ChevronDown, ChevronLeft, ChevronRight, Headphones, Menu, Search, ShieldCheck, Sparkles, Tag, WalletCards, X, Zap } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { createCustomerBrowserClient } from '@/lib/authSessionBrowserClients';
+import CustomerAccountMenu from '@/components/CustomerAccountMenu';
 import AnnouncementPopup from '@/components/AnnouncementPopup';
 import SiteFooter from '@/components/SiteFooter';
 import { filterStorefrontGames, type StorefrontCatalogFilter } from '@/lib/storefrontCatalog';
@@ -37,11 +37,10 @@ export default function Home() {
   const [heroImages, setHeroImages] = useState<string[]>([...RFZ_PUBLIC_ASSETS.heroBanners]);
   const [heroAspect, setHeroAspect] = useState<number | null>(1600 / 600);
   const [cardBanners, setCardBanners] = useState<Record<string, string>>({});
-  const [customerSignedIn, setCustomerSignedIn] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [catalogFilter, setCatalogFilter] = useState<StorefrontCatalogFilter>('all');
 
-  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('*').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => { /* Homepage remains usable with its empty catalog state. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
+  useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('games').select('id, slug, name, short_name, description, is_featured, sort_order').eq('is_active', true).order('sort_order')).then(({ data, error }) => { if (!error && data?.length) setGames(data as Game[]); }).catch(() => { /* Homepage remains usable with its empty catalog state. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
   useEffect(() => {
     try {
       const client = db();
@@ -62,18 +61,6 @@ export default function Home() {
     } catch { /* Supabase is optional in local previews. */ }
   }, []);
   useEffect(() => { try { const client = db(); if (!client) return; Promise.resolve(client.from('promotions').select('target_game_id, image_url').eq('is_active', true).eq('placement', 'GAME_CARD').order('sort_order')).then(({ data }) => { if (data?.length) { const banners: Record<string, string> = {}; (data as CardPromo[]).forEach(p => { if (p.target_game_id && p.image_url && !banners[p.target_game_id]) banners[p.target_game_id] = p.image_url; }); setCardBanners(banners); } }).catch(() => { /* Optional card artwork does not block the storefront. */ }); } catch { /* Supabase is optional in local previews. */ } }, []);
-  useEffect(() => {
-    let cancelled = false;
-    try {
-      const customer = createCustomerBrowserClient();
-      customer.auth.getSession().then(({ data }) => {
-        if (!cancelled) setCustomerSignedIn(Boolean(data.session));
-      }).catch(() => {});
-    } catch {
-      // The signed-out destination is the safe default while Auth is unavailable.
-    }
-    return () => { cancelled = true; };
-  }, []);
   const slideCount = heroImages.length;
   useEffect(() => { if (slide > 0 && slide >= slideCount) setSlide(0); }, [slideCount, slide]);
   useEffect(() => { if (slideCount <= 1) return; const timer = setInterval(() => setSlide((s) => (s + 1) % slideCount), 6000); return () => clearInterval(timer); }, [slideCount]);
@@ -84,9 +71,9 @@ export default function Home() {
   return <main>
     <AnnouncementPopup />
     <header className="sticky top-0 z-30 border-b border-[#14203a] bg-[#030718]/90 backdrop-blur-xl"><div className="mx-auto flex max-w-[1180px] items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
-      <a href="#top" className="font-display flex min-w-0 shrink items-center text-xl font-bold tracking-tight"><img src={RFZ_PUBLIC_ASSETS.logo} alt="RunFazone" width={2172} height={724} className="h-8 w-auto max-w-[190px] object-contain sm:h-10 sm:max-w-none" /></a>
-      <div className="flex shrink-0 items-center gap-2"><div className="hidden items-center gap-2 md:flex"><nav className="mr-3 flex items-center gap-5 text-[12px] text-slate-400"><a className="text-cyan-300" href="#top">Home</a><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></nav><a href="/track-order" className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-200 transition hover:border-cyan-400"><Search size={13} className="mr-1 inline text-cyan-300" />Track Order</a><a href={customerSignedIn ? '/account' : '/login'} className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-300"><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a><ThemeSelector /></div><div className="flex items-center gap-2 md:hidden"><ThemeSelector /><button className="grid size-10 place-items-center rounded-lg text-slate-200" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileOpen}>{mobileOpen ? <X /> : <Menu />}</button></div></div>
-    </div>{mobileOpen && <nav aria-label="Mobile navigation" className="border-t border-[#14203a] px-5 py-4 md:hidden"><div className="flex flex-col gap-4 text-slate-300"><a href="#games" onClick={() => setMobileOpen(false)}>Top Up</a><a href="#benefits" onClick={() => setMobileOpen(false)}>About</a><a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a><a href="#contact" onClick={() => setMobileOpen(false)}>Contact</a><a href={customerSignedIn ? '/account' : '/login'}><UserRound size={13} className="mr-1 inline text-cyan-300" />Account</a></div></nav>}</header>
+      <a href="#top" className="font-display flex min-w-0 shrink items-center text-xl font-bold tracking-tight"><img src={RFZ_PUBLIC_ASSETS.logo} alt="RunFazone" width={259} height={68} className="h-6 w-auto max-w-[74px] object-contain sm:h-8 sm:max-w-[150px] lg:h-10 lg:max-w-none" /></a>
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2"><div className="hidden items-center gap-2 lg:flex"><nav className="mr-3 flex items-center gap-5 text-[12px] text-slate-400"><a className="text-cyan-300" href="#top">Home</a><a href="#games">Top Up</a><a href="#benefits">About</a><a href="#faq">FAQ</a><a href="#contact">Contact</a></nav><a href="/track-order" className="rounded-lg border border-[#253451] px-3 py-2 text-[12px] text-slate-200 transition hover:border-cyan-400"><Search size={13} className="mr-1 inline text-cyan-300" />Track Order</a><CustomerAccountMenu /><ThemeSelector /></div><div className="flex items-center gap-1 lg:hidden sm:gap-2"><CustomerAccountMenu compactOnMobile /><ThemeSelector /><button className="grid size-10 place-items-center rounded-lg text-slate-200" onClick={() => setMobileOpen(!mobileOpen)} aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileOpen}>{mobileOpen ? <X /> : <Menu />}</button></div></div>
+    </div>{mobileOpen && <nav aria-label="Mobile navigation" className="border-t border-[#14203a] px-5 py-4 lg:hidden"><div className="flex flex-col gap-4 text-slate-300"><a href="#games" onClick={() => setMobileOpen(false)}>Top Up</a><a href="#benefits" onClick={() => setMobileOpen(false)}>About</a><a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a><a href="#contact" onClick={() => setMobileOpen(false)}>Contact</a></div></nav>}</header>
 
     <section id="top" className="mx-auto max-w-[1180px] px-5 pt-7"><div data-testid="homepage-hero" role="region" aria-label="RunFazone promotional banners" className="hero-glow grid-bg relative overflow-hidden rounded-2xl border border-[#1a3553] bg-gradient-to-br from-[#0b2840] via-[#09152d] to-[#1b092d]" style={heroAspect ? { aspectRatio: String(heroAspect) } : { minHeight: '300px' }}>{heroImages.length > 0 ? heroImages.map((img, i) => img ? <img key={i} src={img} alt="" aria-hidden="true" className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${slide === i ? 'opacity-100' : 'opacity-0'}`} /> : <span key={i} />) : <div className="absolute inset-0" aria-hidden="true" />}{slideCount > 1 && <><button aria-label="Previous promotion" className="absolute left-2 top-1/2 z-20 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-black/30 sm:left-0 sm:h-8 sm:w-8" onClick={() => setSlide((slide + slideCount - 1) % slideCount)}><ChevronLeft size={16}/></button><button aria-label="Next promotion" className="absolute right-2 top-1/2 z-20 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-black/30 sm:right-0 sm:h-8 sm:w-8" onClick={() => setSlide((slide + 1) % slideCount)}><ChevronRight size={16}/></button><div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-2 sm:bottom-4">{Array.from({ length: slideCount }, (_, i) => <button aria-label={`Show promotion ${i + 1}`} key={i} onClick={() => setSlide(i)} className={`h-1.5 w-1.5 rounded-full ${slide === i ? 'w-5 bg-cyan-300' : 'bg-slate-600'}`} />)}</div></>}</div></section>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
@@ -9,21 +9,24 @@ import { PRIMARY_NAV, type NavDropdownItem } from './navData';
 type AdminNavigationProps = {
   open: boolean;
   onClose: () => void;
+  role: string;
 };
 
-export default function AdminNavigation({ open, onClose }: AdminNavigationProps) {
+export default function AdminNavigation({ open, onClose, role }: AdminNavigationProps) {
   const pathname = usePathname();
   const [openGroups, setOpenGroups] = useState<string[]>([]);
 
   const isActive = (href: string) => pathname === href || (href !== '/admin' && pathname.startsWith(`${href}/`));
-  const groupIsActive = (item: NavDropdownItem) => item.items.some((leaf) => isActive(leaf.href));
+  const visibleItems = useCallback((item: NavDropdownItem) => item.items.filter((leaf) =>
+    leaf.href !== '/admin/rf-coins' || role === 'SUPER_ADMIN'), [role]);
+  const groupIsActive = (item: NavDropdownItem) => visibleItems(item).some((leaf) => isActive(leaf.href));
 
   useEffect(() => {
     const activeGroups = PRIMARY_NAV
-      .filter((item): item is NavDropdownItem => 'items' in item && item.items.some((leaf) => pathname === leaf.href || (leaf.href !== '/admin' && pathname.startsWith(`${leaf.href}/`))))
+      .filter((item): item is NavDropdownItem => 'items' in item && visibleItems(item).some((leaf) => pathname === leaf.href || (leaf.href !== '/admin' && pathname.startsWith(`${leaf.href}/`))))
       .map((item) => item.label);
     setOpenGroups((current) => Array.from(new Set([...current, ...activeGroups])));
-  }, [pathname]);
+  }, [pathname, visibleItems]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -42,6 +45,7 @@ export default function AdminNavigation({ open, onClose }: AdminNavigationProps)
       {open && <button aria-label="Close admin navigation" className="fixed inset-0 z-40 bg-slate-950/70 lg:hidden" onClick={onClose} />}
       <aside
         aria-label="Admin navigation"
+        style={open ? { transform: 'translateX(0)' } : undefined}
         className={`rfz-admin-nav fixed inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r px-3 py-4 shadow-2xl shadow-black/30 transition-transform duration-200 lg:sticky lg:top-0 lg:z-30 lg:block lg:h-[calc(100vh-73px)] lg:translate-x-0 lg:shadow-none ${open ? 'translate-x-0' : '-translate-x-full'}`}
       >
         <div className="mb-5 flex items-center justify-between px-2 lg:hidden">
@@ -86,7 +90,7 @@ export default function AdminNavigation({ open, onClose }: AdminNavigationProps)
                 </button>
                 {expanded && (
                   <div className="ml-5 border-l border-[#20304d] pl-3">
-                    {item.items.map((leaf) => {
+                    {visibleItems(item).map((leaf) => {
                       const leafActive = isActive(leaf.href);
                       return (
                         <Link

@@ -4,6 +4,7 @@ import { adminSupabase } from '@/lib/supabaseAdmin';
 import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { hashOrderCapability, orderCapabilityCookieName } from '@/lib/orderCapability';
 import { RF_COIN_PAYMENT_METHOD, rfCoinErrorMessage } from '@/lib/rfCoins';
+import { RF_COINS_SPENDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 /*
   Order creation with RF Coins wallet payment (Phase 3, gated by the master
@@ -23,6 +24,9 @@ import { RF_COIN_PAYMENT_METHOD, rfCoinErrorMessage } from '@/lib/rfCoins';
 */
 
 export async function POST(req: NextRequest) {
+  if (!RF_COINS_SPENDING_RELEASE_ENABLED) {
+    return NextResponse.json({ error: 'RF Coins spending is not available in this release.' }, { status: 503 });
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) {

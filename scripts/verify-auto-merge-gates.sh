@@ -41,11 +41,25 @@ verify_checks_json() {
   done
 }
 
+verify_review_decision() {
+  local review_decision="$1"
+  [ "$review_decision" = "APPROVED" ]
+}
+
+verify_approved_review_json() {
+  local reviews_json="$1" pr_author="$2"
+  jq -e --arg author "$pr_author" '
+    type == "array" and
+    ([.[] | select(.user.type == "User" and .user.login != $author and .state == "APPROVED")] | length > 0)
+  ' <<<"$reviews_json" >/dev/null
+}
+
 self_test() {
   local sha="0123456789012345678901234567890123456789" repo="Tedbits99/RFZ-LaunchSite-Dev"
   local ruleset='{"enforcement":"active","target":"branch","conditions":{"ref_name":{"include":["refs/heads/main"]}},"bypass_actors":[],"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":0}},{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"Next.js checks"},{"context":"Isolated Supabase RPC security tests"},{"context":"Production release safety"}]}},{"type":"non_fast_forward"},{"type":"deletion"}]}'
   local pr='{"base":{"ref":"main"},"head":{"repo":{"full_name":"Tedbits99/RFZ-LaunchSite-Dev"},"ref":"codex/test","sha":"0123456789012345678901234567890123456789"},"draft":false,"mergeable_state":"clean"}'
   local checks='{"check_runs":[{"name":"Next.js checks","head_sha":"0123456789012345678901234567890123456789","status":"completed","conclusion":"success"},{"name":"Isolated Supabase RPC security tests","head_sha":"0123456789012345678901234567890123456789","status":"completed","conclusion":"success"},{"name":"Production release safety","head_sha":"0123456789012345678901234567890123456789","status":"completed","conclusion":"success"}]}'
+  local reviews='[{"user":{"login":"reviewer","type":"User"},"state":"APPROVED"}]'
   local ruleset_without_bypass
   ruleset_without_bypass="$(jq 'del(.bypass_actors)' <<<"$ruleset")"
   assert_pass() { "$@" || die "self-test unexpectedly rejected valid fixture"; }
@@ -62,6 +76,14 @@ self_test() {
   assert_fail verify_pr_json "$pr" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$repo"
   assert_fail verify_pr_json "${pr/\"full_name\":\"Tedbits99\/RFZ-LaunchSite-Dev\"/\"full_name\":\"untrusted\/fork\"}" "$sha" "$repo"
   assert_pass verify_checks_json "$checks" "$sha"
+  assert_pass verify_review_decision APPROVED
+  assert_fail verify_review_decision REVIEW_REQUIRED
+  assert_fail verify_review_decision CHANGES_REQUESTED
+  assert_fail verify_review_decision ""
+  assert_pass verify_approved_review_json "$reviews" author
+  assert_fail verify_approved_review_json "$reviews" reviewer
+  assert_fail verify_approved_review_json '[{"user":{"login":"bot","type":"Bot"},"state":"APPROVED"}]' author
+  assert_fail verify_approved_review_json '[]' author
   assert_fail verify_checks_json "${checks/\"conclusion\":\"success\"/\"conclusion\":\"failure\"}" "$sha"
   assert_fail verify_checks_json "${checks/\"status\":\"completed\"/\"status\":\"in_progress\"}" "$sha"
   assert_fail verify_checks_json "${checks/\"name\":\"Production release safety\"/\"name\":\"Skipped production release safety\"}" "$sha"
@@ -76,6 +98,11 @@ pr_number="${PR_NUMBER:?PR_NUMBER is required}"
 expected_sha="${EXPECTED_SHA:?EXPECTED_SHA is required}"
 pr_json="$(gh api "repos/$repo/pulls/$pr_number")"
 verify_pr_json "$pr_json" "$expected_sha" "$repo" || die "PR identity, trust, draft, mergeability, or exact-head check failed"
+review_decision="$(gh pr view "$pr_number" --repo "$repo" --json reviewDecision --jq .reviewDecision)" || die "cannot read the PR review decision"
+verify_review_decision "$review_decision" || die "an independent APPROVED review is required before native auto-merge"
+pr_author="$(jq -r '.user.login' <<<"$pr_json")"
+reviews_json="$(gh api --paginate "repos/$repo/pulls/$pr_number/reviews?per_page=100" | jq -s 'add // []')" || die "cannot read PR review evidence"
+verify_approved_review_json "$reviews_json" "$pr_author" || die "a submitted APPROVED review by a different human is required before native auto-merge"
 
 # The default GITHUB_TOKEN is deliberately the only credential used here.
 # Ruleset responses may omit bypass_actors for this caller; verify_ruleset_json

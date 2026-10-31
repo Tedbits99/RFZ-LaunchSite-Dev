@@ -6,6 +6,64 @@ local_api_port=""
 local_db_port=""
 upgrade_mode=false
 
+# Pending migrations are reviewed but not deployed by normal `db push`; scan
+# every one explicitly before the disposable upgrade rehearsal so a queued
+# migration cannot hide an outbound HTTP request or scheduled side effect.
+if ! command -v grep >/dev/null 2>&1; then
+  echo "ERROR: Required pending-migration safety scanner (grep) is unavailable." >&2
+  exit 2
+fi
+pending_migration_dirs=()
+for pending_dir in \
+  "$project_root/supabase/migrations-pending" \
+  "$project_root/supabase/migrations-pending-provider"; do
+  # Empty/untracked directories disappear from clean Git checkouts. Treat a
+  # missing optional queue as empty, but fail closed for an existing unreadable
+  # path and continue scanning every pending SQL directory that is present.
+  [ -e "$pending_dir" ] || continue
+  if [ ! -d "$pending_dir" ] || [ ! -r "$pending_dir" ]; then
+    echo "ERROR: Pending migration inventory path is not a readable directory: ${pending_dir##*/}." >&2
+    exit 2
+  fi
+  pending_migration_dirs+=("$pending_dir")
+done
+pending_migrations=""
+if [ "${#pending_migration_dirs[@]}" -gt 0 ]; then
+  pending_migrations="$(find "${pending_migration_dirs[@]}" -type f -name '*.sql' -print 2>/dev/null | sort)" || {
+  echo "ERROR: Could not inventory pending SQL migrations." >&2
+  exit 2
+  }
+fi
+if [ -n "$pending_migrations" ]; then
+  pending_migration_count=0
+  while IFS= read -r pending_migration; do
+    [ -n "$pending_migration" ] || continue
+    pending_migration_count=$((pending_migration_count + 1))
+    scan_status=0
+    grep -Eiq '(cron\.schedule|net\.http|(extensions\.)?http_(post|get|put|delete|head|patch)|https?://)' \
+      "$pending_migration" || scan_status=$?
+    case "$scan_status" in
+      0)
+        echo "ERROR: Pending migration contains an outbound/scheduled operation: $(basename "$pending_migration")" >&2
+        exit 3
+        ;;
+      1) ;;
+      *)
+        echo "ERROR: Pending migration safety scanner failed for $(basename "$pending_migration") (exit $scan_status)." >&2
+        exit 2
+        ;;
+    esac
+  done <<EOF_PENDING_MIGRATIONS
+$pending_migrations
+EOF_PENDING_MIGRATIONS
+else
+  pending_migration_count=0
+fi
+echo "PENDING_MIGRATION_SAFETY_PASS count=$pending_migration_count"
+if [ "${1:-}" = "--scan-pending-migrations" ]; then
+  exit 0
+fi
+
 if [ "${1:-}" = "--existing-schema-upgrade" ]; then
   upgrade_mode=true
   shift
@@ -162,19 +220,27 @@ validate_psql_invocation() {
           supabase/tests/customer-auth-foundation.sql|\
           supabase/tests/customer-confirmation-resend-rate-limit.sql|\
           supabase/tests/fulfillment-completion-guard.sql|\
+          supabase/tests/supplier_transactions_service_role_grants.sql|\
           supabase/tests/reconciliation-atomicity.sql|\
           supabase/tests/completion-receipt-outbox.sql|\
           supabase/tests/completion-receipt-data-contract.sql|\
           supabase/tests/completion-receipt-outbox-worker.sql|\
           supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
           supabase/tests/hosted-acl-metadata-audit.sql|\
+          supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql|\
+          supabase/tests/database/rf-coins-default-acl-fixture.sql|\
+          supabase/tests/database/rf-coins-current-schema-upgrade.sql|\
           supabase/tests/customer-confirmation-resend-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-setup.sql|\
           supabase/tests/reconciliation-concurrency-assertion.sql|\
           supabase/tests/reconciliation-concurrency-cleanup.sql) ;;
           *) return 1 ;;
         esac
-        [ "$1" = "supabase/tests/database/existing-schema-upgrade.sql" ] && upgrade_assertion_file=1
+        case "$1" in
+          supabase/tests/database/existing-schema-upgrade.sql|\
+          supabase/tests/database/rf-coins-current-schema-upgrade.sql) upgrade_assertion_file=1 ;;
+        esac
         seen_file=1
         shift
         ;;
@@ -213,13 +279,22 @@ validate_psql_invocation() {
 }
 
 test_psql_invocation_validator() {
-  local valid_url
+  local valid_url manifest_count
   valid_url="$(validate_db_url "postgresql://postgres:test%40pass@127.0.0.1:${local_db_port}/postgres" "$local_db_port")" || return 1
+  manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' \
+    "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")" || return 1
+  [[ "$manifest_count" =~ ^[1-9][0-9]*$ ]] || return 1
 
   # Exercise every argument shape used by the harness without opening a socket.
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
-    --set expected_migration_count=100 --file supabase/tests/database/existing-schema-upgrade.sql || return 1
+    --set expected_migration_count="$manifest_count" \
+    --file supabase/tests/database/existing-schema-upgrade.sql || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count="$manifest_count" \
+    --file supabase/tests/database/rf-coins-current-schema-upgrade.sql || return 1
+  validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-default-acl-fixture.sql || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --set ON_ERROR_STOP=1 --command "SELECT 1;" || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --no-psqlrc --quiet --tuples-only --no-align --set ON_ERROR_STOP=1 || return 1
   validate_psql_invocation "$valid_url" "$valid_url" --quiet --tuples-only --no-align \
@@ -263,11 +338,11 @@ test_psql_invocation_validator() {
   assert_psql_args_rejected --set ON_ERROR_STOP=1 --set ON_ERROR_STOP=1 || return 1
   assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=0 \
     --file supabase/tests/database/existing-schema-upgrade.sql || return 1
-  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=100 \
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count="$manifest_count" \
     --file supabase/tests/privileged-rpc-security.sql || return 1
-  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count=100 \
+  assert_psql_args_rejected --set ON_ERROR_STOP=1 --set expected_migration_count="$manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql \
-    --set expected_migration_count=101 || return 1
+    --set expected_migration_count="$((manifest_count + 1))" || return 1
   assert_psql_args_rejected --file supabase/tests/completion-receipt-outbox-worker.sql \
     --file supabase/tests/completion-receipt-outbox-worker.sql || return 1
   assert_psql_args_rejected --command 'SELECT 1;' --command 'SELECT 2;' || return 1
@@ -308,6 +383,9 @@ fi
 
 supabase_bin="$(command -v supabase)"
 psql_bin="$(command -v psql)"
+
+echo "Running source-only hosted ACL remediation rehearsal in standalone disposable PostgreSQL 17..."
+bash "$project_root/scripts/test-hosted-acl-remediation-postgres17.sh"
 
 tmp_parent="${RUNNER_TEMP:-${TMPDIR:-$project_root}}"
 test_root="$(mktemp -d "$tmp_parent/runfazone-supabase.XXXXXX")"
@@ -417,6 +495,8 @@ cp "$project_root/supabase/tests/customer-confirmation-resend-concurrency-assert
   "$test_root/supabase/tests/customer-confirmation-resend-concurrency-assertion.sql"
 cp "$project_root/supabase/tests/fulfillment-completion-guard.sql" \
   "$test_root/supabase/tests/fulfillment-completion-guard.sql"
+cp "$project_root/supabase/tests/supplier_transactions_service_role_grants.sql" \
+  "$test_root/supabase/tests/supplier_transactions_service_role_grants.sql"
 cp "$project_root/supabase/tests/reconciliation-atomicity.sql" \
   "$test_root/supabase/tests/reconciliation-atomicity.sql"
 cp "$project_root/supabase/tests/completion-receipt-outbox.sql" \
@@ -429,6 +509,12 @@ cp "$project_root/supabase/tests/database/existing-schema-upgrade.sql" \
   "$test_root/supabase/tests/database/existing-schema-upgrade.sql"
 cp "$project_root/supabase/tests/hosted-acl-metadata-audit.sql" \
   "$test_root/supabase/tests/hosted-acl-metadata-audit.sql"
+cp "$project_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql" \
+  "$test_root/supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql"
+cp "$project_root/supabase/tests/database/rf-coins-default-acl-fixture.sql" \
+  "$test_root/supabase/tests/database/rf-coins-default-acl-fixture.sql"
+cp "$project_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql" \
+  "$test_root/supabase/tests/database/rf-coins-current-schema-upgrade.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-setup.sql" \
   "$test_root/supabase/tests/reconciliation-concurrency-setup.sql"
 cp "$project_root/supabase/tests/reconciliation-concurrency-assertion.sql" \
@@ -530,6 +616,16 @@ if [ "$upgrade_mode" = true ]; then
         continue
         ;;
     esac
+    case "$migration_name" in
+      20261028120000_rf_coins_schema.sql|\
+      20261028120100_rf_coins_functions.sql|\
+      20261028120200_rf_coin_admin_center_read.sql)
+        # The legacy stage intentionally stops before RF Coins. The three
+        # reviewed wallet migrations are applied in the separate post-upgrade
+        # rehearsal below, matching their canonical dependency order.
+        continue
+        ;;
+    esac
     source_migration="$project_root/supabase/migrations/$migration_name"
     echo "LEGACY_UPGRADE_CANDIDATE=$migration_name"
     [ -f "$source_migration" ] || {
@@ -545,7 +641,9 @@ if [ "$upgrade_mode" = true ]; then
   done < <(awk -F'|' '/\| INCLUDE \|/ {gsub(/`/, "", $4); gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")
 
   manifest_count="$(awk -F'|' '/\| INCLUDE \|/ { count++ } END { print count + 0 }' "$project_root/docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md")"
-  expected_upgrade_count=$((manifest_count - 11))
+  wallet_migration_count=3
+  pre_wallet_manifest_count=$((manifest_count - wallet_migration_count))
+  expected_upgrade_count=$((pre_wallet_manifest_count - 11))
   if [ "$upgrade_count" -ne "$expected_upgrade_count" ]; then
     echo "ERROR: Expected $expected_upgrade_count canonical post-baseline migrations from the reviewed manifest; found $upgrade_count." >&2
     exit 13
@@ -554,11 +652,35 @@ if [ "$upgrade_mode" = true ]; then
   supabase_local migration up
   echo "LEGACY_UPGRADE_PHASE=canonical-apply-complete"
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
-    --set expected_migration_count="$manifest_count" \
+    --set expected_migration_count="$pre_wallet_manifest_count" \
     --file supabase/tests/database/existing-schema-upgrade.sql
+  echo "LEGACY_UPGRADE_PHASE=seed-synthetic-order-payment"
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-payment-compatibility-before-upgrade.sql
   # A second migration-up must be a no-op. This is separate from db reset so
   # forward-only and duplicate-history behavior are exercised.
   supabase_local migration up
+
+  echo "LEGACY_UPGRADE_PHASE=rf-coins-current-schema-rehearsal"
+  echo "LEGACY_UPGRADE_PHASE=postgres17-default-acl-fixture"
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --file supabase/tests/database/rf-coins-default-acl-fixture.sql
+  for migration_name in \
+    20261028120000_rf_coins_schema.sql \
+    20261028120100_rf_coins_functions.sql \
+    20261028120200_rf_coin_admin_center_read.sql; do
+    source_migration="$project_root/supabase/migrations/$migration_name"
+    test -s "$source_migration" || {
+      echo "ERROR: Canonical RF Coins migration is missing: $migration_name" >&2
+      exit 13
+    }
+    cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
+  done
+  supabase_local migration up
+  PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
+    --set expected_migration_count="$manifest_count" \
+    --file supabase/tests/database/rf-coins-current-schema-upgrade.sql
+  echo "LEGACY_UPGRADE_PHASE=rf-coins-current-schema-rehearsal-complete"
 else
   supabase_local db reset
 fi
@@ -582,6 +704,11 @@ echo "Executing direct fulfillment completion guard assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
   --set ON_ERROR_STOP=1 \
   --file supabase/tests/fulfillment-completion-guard.sql
+
+echo "Executing narrow supplier transaction grant assertions..."
+PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \
+  --set ON_ERROR_STOP=1 \
+  --file supabase/tests/supplier_transactions_service_role_grants.sql
 
 echo "Executing reconciliation atomicity assertions..."
 PGOPTIONS='-c statement_timeout=30000' psql "$db_url" \

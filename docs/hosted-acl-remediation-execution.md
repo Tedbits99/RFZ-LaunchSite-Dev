@@ -1,9 +1,13 @@
 # Hosted ACL remediation: scoped application and recovery package
 
-**Status: migration-only PR candidate, NOT applied.** This is a development-only
-operation for Supabase project `ketdhcmwowzztcdlmris`. The migration is being
-prepared for the trusted main-only workflow; merging it and applying it are
-separate owner decisions. It does not change PR #82's DRAFT hold.
+**Current status: the postgres-owned ACL migration is applied through the
+approved Supabase GitHub deployment on `main`.** The owner confirms its
+execution provenance and recorded SQL were reconciled. The trusted metadata
+audit after deployment confirms the expected postgres-owned ACL post-state.
+Do not reapply migration `20261028113000`. This is development-only state for
+project `ketdhcmwowzztcdlmris`; it does not itself authorize merging PR #82.
+The owner-approved automatic deployment policy permits the reviewed RF Coins
+migrations only after required gates pass and the exact PR merge is approved.
 
 ## Evidence and scope
 
@@ -11,7 +15,7 @@ separate owner decisions. It does not change PR #82's DRAFT hold.
   `b726746dfd42b0976188cb8e0c731e46cd97f092` (workflow `40639888077`), against
   PostgreSQL 17.11. It found 36 public tables, all RLS-enabled and owned by
   `postgres`; no data rows were exported.
-- The audit identified 204 direct excess privilege entries: `TRUNCATE`,
+- The pre-application audit identified 204 direct excess privilege entries: `TRUNCATE`,
   `REFERENCES`, `TRIGGER`, and `MAINTAIN` on 24 public tables for `anon` and
   `authenticated`, plus three more tables for `authenticated`. All were
   directly granted by `postgres` and not grantable onward.
@@ -28,9 +32,9 @@ separate owner decisions. It does not change PR #82's DRAFT hold.
 
 | Operation | File | SHA-256 | Executor scope |
 |---|---|---|---|
-| Supported ACL migration | `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql` | `a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d` | Hosted `postgres`; exact audited relation grants and its own two default contexts |
+| Applied ACL migration | `supabase/migrations/20261028113000_revoke_browser_table_ddl_privileges.sql` | `a4e166a9fa808760d3e5da3e96045dbf9e8f3f476a6f45392a5dce20dd58a82d` | Hosted `postgres`; exact audited relation grants and its own two default contexts |
 
-The migration-only PR contains no RF Coins SQL. The ACL migration does not
+PR #90 introduced the ACL migration without RF Coins SQL. The ACL migration does not
 alter SELECT/DML grants, RLS, policies, table contents, `PUBLIC`, or
 `service_role`. It fails closed if the audited table ownership,
 RLS, grant count/provenance, default-ACL counts, or PostgreSQL version no longer
@@ -41,62 +45,55 @@ three documented schemas; the disposable local Supabase stack also provisions
 eight managed defaults in `supabase_functions`, which the rehearsal verifies
 remain unchanged. That local fixture detail is not evidence of hosted entries.
 
-## Application order and preconditions
+## Current verification and remaining boundary
 
-No operation is authorized by this package alone. Before any future application:
+The post-deployment metadata audit is workflow `40659937258` on main SHA
+`0fde4cf946c85150fc0a607657e4a9e18f8c4afe`; its sanitized artifact reports 36
+public tables (all postgres-owned and RLS-enabled), zero audited direct excess
+grants, zero postgres-owned defaults in public/storage, and 24 audited
+`supabase_admin` defaults preserved. The migration ledger contains 101
+versions, including `20261028113000`; before/after lists for that audit were
+identical. The audit exported no rows. The owner reconciled migration
+provenance and recorded SQL; no application of this migration occurred in the
+audit session.
 
-1. Confirm the exact current project ref and PostgreSQL version through the
-   protected main-only workflow. Compare the hosted migration ledger and
-   schema inventory against the reviewed source; do not reset, repair, or
-   blanket-push migrations.
-2. Re-run the sanitized ACL metadata query. Require all 36 expected public
-   tables to remain `postgres`-owned and RLS-enabled; require the exact 204
-   direct grants, 16 `postgres` defaults, 24 provider defaults, no unexpected
-   PUBLIC/browser grants, and no new role memberships. Stop on drift.
-3. The owner-provided fresh read-only inventory is 5 Auth users, 1 admin,
-   5 customer profiles, 44 packages, and 6 payment configurations; orders,
-   payment transactions, and refunds are zero. This batch did not reconnect
-   to re-count them or export row contents.
-4. After this migration-only PR is manually approved and merged, verify the
-   exact trusted `main` source SHA and all mandatory exact-head CI. The
-   protected database workflow must re-check project identity, migration
-   ledger, table ownership/RLS, and ACL preconditions before applying only the
-   supported migration. It must not include RF Coins pending SQL.
-5. Apply only the supported `postgres`-owned ACL migration and verify its
-   migration-ledger entry plus read-only ACL metadata after application.
-6. The 24 hosted `supabase_admin` defaults remain unresolved. Ask Supabase through
-   its supported support channel or documented managed-database process for
-   an authorized remediation path. Do not `SET ROLE`, add role membership, or
-   attempt to change provider-owned ACLs from `postgres`.
-7. Re-run metadata-only ACL assertions, customer/admin RLS and privileged-RPC
-   security tests, checkout/order/payment regressions, and the full required
-   exact-head CI. Funding/spending remains disabled regardless of migration
-   success.
+The 24 hosted `supabase_admin` defaults remain separately tracked and were not
+modified. Do not attempt `SET ROLE`, grant membership, or use the ordinary
+postgres migration path to change them. Any future provider-owned ACL change
+needs a documented Supabase-supported authority and its own review.
 
-## Exact-SHA owner approval sequence
+Before the proposed wallet schema deployment:
 
-1. Manually review and merge only the migration-only PR after its exact-head
-   frontend, database/security, migration-upgrade, and production-safety checks
-   pass. Keep PR #82 DRAFT and PR #89 separate. This PR is opened as DRAFT and
-   no auto-merge request is issued.
-2. Record the exact resulting `main` merge SHA. On `main`, dispatch
-   `runfazone-development-db.yml` with that SHA and
-   `operation=metadata-acl-audit`; leave `apply_confirmation` empty. Review the
-   sanitized artifact and require the audited baseline (204 direct entries,
-   16 postgres defaults, 24 provider defaults, 36 postgres-owned RLS tables).
-3. Only after a separate owner authorization, dispatch the same trusted
-   main-only workflow from `main` using the same current main SHA,
-   `operation=apply`, and `apply_confirmation=APPLY_DEVELOPMENT_MIGRATIONS`.
-   The workflow requires exact-head CI, exact project identity, the canonical
-   migration set and each SHA-256. The migration itself repeats atomic role,
-   ownership, RLS, grant-provenance, and ACL-count checks before any revoke.
-4. Confirm exactly the ACL migration is newly recorded and run a fresh
-   metadata-only audit. Expected post-state: direct excessive entries `0`,
-   postgres-owned defaults `0`, provider-owned defaults still `24`, RLS and
-   application CRUD grants unchanged. Stop on any drift or extra migration.
+1. Verify exact current main, project identity, hosted migration ledger and
+   schema through the protected workflow. Do not repeat the applied ACL
+   migration, reset, repair, or blanket-push migration history.
+2. Rehearse the exact wallet migration set on disposable PostgreSQL 17 and
+   require the full exact-head CI, including RLS/RPC, checkout/payment,
+   concurrency and legacy-upgrade regressions.
+3. Review deployable SQL and Edge Function changes for data preservation,
+   authorization and side effects. Keep wallet funding/spending, financial
+   cron, supplier fulfillment, live providers and customer email disabled.
+4. Require the owner's approval of the exact PR #82 merge candidate. Only the
+   reviewed migrations and function sources in that approved merge may deploy
+   through the existing automatic Supabase integration.
+5. After deployment, verify migration history, schema, RLS/permissions,
+   customer/admin behavior, checkout/payment compatibility, Edge Function
+   health and all financial release locks. Stop on unexpected drift.
 
-The owner merge decision and hosted apply authorization are separate and both
-remain pending. No workflow dispatch or hosted SQL change is part of this PR.
+## Exact-SHA merge and automatic deployment policy
+
+PR #90 has been merged and its ACL migration deployed through the approved
+Supabase GitHub integration. This operation is complete; do not dispatch
+another ACL `plan` or `apply`. PR #82 remains OPEN/DRAFT. For a future PR #82
+release, exact-head security/build checks and migration reviews must pass, and
+the owner must approve that exact merge candidate. The existing native
+deployment may then apply only the reviewed migration/function sources in the
+approved merge, followed immediately by post-deployment verification. No
+automatic wallet funding, spending, cron, supplier or live-payment activation
+is permitted by schema deployment.
+
+No hosted migration was executed by this audit session. PR #82 wallet SQL
+remains pending and separate from the already-applied ACL migration.
 
 ## Free-plan recovery and rollback
 
@@ -108,9 +105,9 @@ a scoped rollback. A manual recovery snapshot is recommended before
 substantial or irreversible schema/data changes, but is not a prerequisite
 for this ACL-only operation.
 
-These ACL operations do not delete or update rows, so their direct rollback is
-the exact inverse ACL change, after a fresh metadata check and only if the
-current ACL matches the post-state:
+The ACL migration does not delete or update rows. Its inverse statements are
+retained below for recovery reference only; do not run them without a fresh
+metadata check and explicit scoped authorization:
 
 ```sql
 GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE
@@ -137,12 +134,14 @@ storage is recommended; it is not a blanket Free-plan prerequisite.
 
 ## Data inventory status
 
-- Current schema/migration metadata: last verified by run `40639888077` as
-  above (100 hosted migration versions matched the 100-file reviewed manifest
-  at that point).
-- Current counts above are owner-provided fresh read-only evidence; no new count
-  query was run by this batch.
-- Hosted ACL changes, migrations, row writes, exports/restores, payments,
-  supplier actions, email sends, Worker activation: **NONE** in this work.
-- RF Coins schema remains pending. Wallet funding and spending remain
-  disabled; PayMongo product checkout is separate and unchanged.
+- Pre-migration schema/ACL metadata: run `40639888077` as above (100 hosted
+  versions at that time). Post-migration ACL metadata: run `40659937258`
+  (101 hosted versions, including the applied ACL migration).
+- Counts above are from the sanitized read-only artifacts for runs
+  `40639888077` and `40659937258`; no application row values were exported.
+- This audit session made no hosted ACL changes, migration applications, row
+  writes, exports/restores, payments, supplier actions, email sends or Worker
+  activation.
+- The three RF Coins migrations are candidates in draft PR #82, not hosted
+  schema changes. Wallet funding and spending remain disabled; PayMongo product
+  checkout is separate and unchanged.

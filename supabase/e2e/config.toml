@@ -1,0 +1,75 @@
+project_id = "runfazone-pr82-isolated-auth"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
+
+[studio]
+enabled = false
+
+[inbucket]
+enabled = true
+port = 54324
+smtp_port = 54325
+pop3_port = 54326
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+jwt_expiry = 60
+additional_redirect_urls = ["http://localhost:3000/**", "http://127.0.0.1:3000/**"]
+enable_signup = true
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 12
+# Match GoTrue's standard grace for concurrent refresh requests. A zero-second
+# window makes the middleware and downstream SSR client invalidate one another
+# when a browser reload triggers multiple requests at access-token expiry.
+refresh_token_reuse_interval = 10
+
+[auth.rate_limit]
+# Supabase's CLI default is 2 emails/hour, too low for the synthetic signup,
+# resend, and recovery journeys in this disposable local-only test stack.
+# This does not change the shared/hosted Auth project's rate limits.
+email_sent = 30
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = true
+max_frequency = "1s"
+otp_expiry = 3600
+
+[auth.email.smtp]
+enabled = true
+host = "inbucket"
+port = 1025
+user = "supabase_auth_admin"
+pass = "local-only-e2e-smtp-password"
+admin_email = "admin@runfazone.test"
+sender_name = "RunFazone isolated acceptance"
+
+[storage]
+enabled = false
+
+[analytics]
+enabled = false
+
+[edge_runtime]
+enabled = false

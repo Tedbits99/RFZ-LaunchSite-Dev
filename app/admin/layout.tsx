@@ -9,5 +9,5 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const session = await getAdminSession();
   if (!session) notFound();
 
-  return <AdminShell>{children}</AdminShell>;
+  return <AdminShell role={session.role}>{children}</AdminShell>;
 }

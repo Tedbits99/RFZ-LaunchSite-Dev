@@ -627,8 +627,9 @@ Content hashes identify the audited working tree, including pre-existing uncommi
 | [supabase/migrations-archive/applied-20261018-duplicates/20261017160000_completion_receipt_outbox.sql](../../supabase/migrations-archive/applied-20261018-duplicates/20261017160000_completion_receipt_outbox.sql) | 232 | `2eadd67d51fb` |
 | [supabase/migrations-archive/applied-20261018-duplicates/20261017170000_authoritative_completion_receipt_data.sql](../../supabase/migrations-archive/applied-20261018-duplicates/20261017170000_authoritative_completion_receipt_data.sql) | 153 | `8d5e5187bb59` |
 | [supabase/migrations-archive/applied-20261018-duplicates/20261018090000_secure_completion_receipt_outbox_worker_rpcs.sql](../../supabase/migrations-archive/applied-20261018-duplicates/20261018090000_secure_completion_receipt_outbox_worker_rpcs.sql) | 244 | `76a51bd83ea5` |
-| [supabase/migrations-pending/20261018160000_rf_coins_schema.sql](../../supabase/migrations-pending/20261018160000_rf_coins_schema.sql) | 479 | `c62002e4455d` |
-| [supabase/migrations-pending/20261018160100_rf_coins_functions.sql](../../supabase/migrations-pending/20261018160100_rf_coins_functions.sql) | 1098 | `df918b5b4e9a` |
+| [supabase/migrations/20261028120000_rf_coins_schema.sql](../../supabase/migrations/20261028120000_rf_coins_schema.sql) | 436 | `9c5fd8a8065d` |
+| [supabase/migrations/20261028120100_rf_coins_functions.sql](../../supabase/migrations/20261028120100_rf_coins_functions.sql) | 1188 | `3fa8cda9d129` |
+| [supabase/migrations/20261028120200_rf_coin_admin_center_read.sql](../../supabase/migrations/20261028120200_rf_coin_admin_center_read.sql) | 390 | `9ce49de1c1fa` |
 | [supabase/tests/completion-receipt-data-contract.sql](../../supabase/tests/completion-receipt-data-contract.sql) | 246 | `d02f95db2596` |
 | [supabase/tests/completion-receipt-outbox-worker.sql](../../supabase/tests/completion-receipt-outbox-worker.sql) | 398 | `6bfed1f33a72` |
 | [supabase/tests/completion-receipt-outbox.sql](../../supabase/tests/completion-receipt-outbox.sql) | 390 | `8a05f395e52f` |

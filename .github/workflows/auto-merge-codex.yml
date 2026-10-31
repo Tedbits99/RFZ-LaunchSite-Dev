@@ -50,9 +50,9 @@ jobs:
           # cannot replace the privileged merge policy.
           gh api "repos/$GITHUB_REPOSITORY/contents/scripts/verify-auto-merge-gates.sh?ref=main" --jq .content | base64 --decode > "$RUNNER_TEMP/verify.sh"
           bash "$RUNNER_TEMP/verify.sh"
-          # Use GitHub CLI's supported native auto-merge path. This never
-          # bypasses rules, and match-head-commit pins the request to the
-          # exact verified PR head.
+          # The trusted verifier requires an independent APPROVED review in
+          # addition to exact-head CI and repository rules. Native auto-merge
+          # never bypasses those gates, and the SHA is pinned here as well.
           gh pr merge "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --auto \

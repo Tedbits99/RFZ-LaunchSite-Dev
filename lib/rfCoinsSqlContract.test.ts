@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /*
-  SQL contract tests for the staged (NOT yet applied) RF Coins migrations.
+  SQL contract tests for the canonical RF Coins migrations proposed by PR #82.
   They assert the security-critical behavior is present in the SQL that will
   run: atomic settlement marking orders paid, bounded refund reversal,
   debit-only balance checks, wallet creation for credits, and restrictive
@@ -10,8 +10,10 @@ import { describe, expect, it } from 'vitest';
   live database.
 */
 
-const functionsSql = readFileSync('supabase/migrations-pending/20261018160100_rf_coins_functions.sql', 'utf8');
-const schemaSql = readFileSync('supabase/migrations-pending/20261018160000_rf_coins_schema.sql', 'utf8');
+const functionsSql = readFileSync('supabase/migrations/20261028120100_rf_coins_functions.sql', 'utf8');
+const schemaSql = readFileSync('supabase/migrations/20261028120000_rf_coins_schema.sql', 'utf8');
+const adminCenterSql = readFileSync('supabase/migrations/20261028120200_rf_coin_admin_center_read.sql', 'utf8');
+const orderReleaseGuard = extractFunction(schemaSql, 'public.rf_coin_block_locked_spending_order');
 
 function extractFunction(sql: string, name: string): string {
   const start = sql.indexOf(`CREATE OR REPLACE FUNCTION ${name}(`);
@@ -54,6 +56,79 @@ describe('rf_coin_settle_order_payment', () => {
 
   it('rejects orders that are not WAITING_PAYMENT', () => {
     expect(fn).toMatch(/ord\.status <> 'WAITING_PAYMENT'/);
+  });
+
+  it('keeps customer wallet spending behind a hard false release constant', () => {
+    expect(fn).toContain('v_spending_release_enabled CONSTANT boolean := false');
+    expect(fn).toContain("'RF_COIN_SPENDING_RELEASE_LOCKED'");
+  });
+
+  it('uses the stored final order total and database rate for settlement coins', () => {
+    expect(fn).toContain('CEIL(ord.total_cents::numeric / s.centavos_per_coin)::integer');
+    expect(fn).not.toMatch(/p_(?:total|price|coins)|price_cents\s*\/\s*100/);
+  });
+});
+
+describe('generic order creation spending release backstop', () => {
+  it('rejects wallet orders at the orders table even when payment_config is toggled on', () => {
+    expect(orderReleaseGuard).toContain("v_spending_release_enabled CONSTANT boolean := false");
+    expect(orderReleaseGuard).toContain("NEW.payment_method = 'rf_coin_wallet'");
+    expect(orderReleaseGuard).toContain("RAISE EXCEPTION 'RF_COIN_SPENDING_RELEASE_LOCKED'");
+    expect(schemaSql).toMatch(/CREATE TRIGGER rf_coin_orders_spending_release_guard\s+BEFORE INSERT OR UPDATE OF payment_method ON public\.orders/);
+    expect(schemaSql).toMatch(/REVOKE ALL ON FUNCTION public\.rf_coin_block_locked_spending_order\(\)\s+FROM PUBLIC, anon, authenticated, service_role/);
+  });
+});
+
+describe('RF Coins funding release lock', () => {
+  const fn = extractFunction(functionsSql, 'rf_coin_create_topup');
+  const creditFn = extractFunction(functionsSql, 'rf_coin_credit_paid_topup');
+
+  it('does not configure PayMongo as an RF Coins funding provider', () => {
+    expect(schemaSql).toContain("provider text NOT NULL DEFAULT 'disabled'");
+    expect(schemaSql).toMatch(/CHECK \(provider IN \('disabled','owner_ewallet','owner_crypto'\)\)/);
+    expect(schemaSql).not.toMatch(/Coins are purchased with PayMongo/i);
+    expect(schemaSql).not.toMatch(/provider text NOT NULL DEFAULT 'paymongo'/i);
+  });
+
+  it('cannot be enabled by database settings or client input', () => {
+    expect(fn).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(fn).toContain("'RF_COIN_FUNDING_RELEASE_LOCKED'");
+    expect(fn.indexOf('IF NOT v_funding_release_enabled')).toBeLessThan(fn.indexOf('rf_coin_get_settings()'));
+  });
+
+  it('also blocks service-role coin issuance while preserving settled-event idempotency', () => {
+    expect(creditFn).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(creditFn).toContain("'RF_COIN_FUNDING_RELEASE_LOCKED'");
+    expect(creditFn.indexOf("IF t.status = 'PAID' AND t.credited_at IS NOT NULL")).toBeLessThan(creditFn.indexOf('IF NOT v_funding_release_enabled'));
+  });
+});
+
+describe('RF Coins Admin Center reporting RPC', () => {
+  it('uses an active Super Admin database guard, bounded pages, and precise aggregates', () => {
+    expect(adminCenterSql).toContain('PERFORM public.rf_coin_assert_super_admin()');
+    expect(adminCenterSql).toContain('least(greatest(coalesce(p_page_size, 25), 1), 50)');
+    expect(adminCenterSql).toContain("sum(w.balance_coins)");
+    expect(adminCenterSql).toContain('w.user_id::text ILIKE');
+    expect(adminCenterSql).toContain('u.email ILIKE');
+    expect(adminCenterSql).toContain('t.created_at >= v_from AND t.created_at < v_to');
+    expect(adminCenterSql).toContain('fundingReleaseEnabled\', false');
+    expect(adminCenterSql).toContain('SET search_path = pg_catalog, public');
+    expect(adminCenterSql).toContain('p_provider text DEFAULT NULL');
+    expect(adminCenterSql).toContain('pt.amount_cents IS DISTINCT FROM t.price_cents');
+    expect(adminCenterSql).toContain('CREATE OR REPLACE FUNCTION public.rf_coin_record_admin_export');
+    expect(adminCenterSql).toContain("'paid_not_credited'");
+    expect(adminCenterSql).toContain("'wallet_ledger_mismatch'");
+    expect(adminCenterSql).toContain("'unusual_manual_adjustment'");
+    expect(adminCenterSql).toContain("p_row_count > 1000");
+  });
+
+  it('grants only authenticated execution and explicitly revokes anonymous/public execution', () => {
+    expect(adminCenterSql).toMatch(/REVOKE ALL ON FUNCTION public\.rf_coin_admin_center_read\([^\n]+\)\s+FROM PUBLIC, anon;/);
+    expect(adminCenterSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_admin_center_read\([^\n]+\)\s+TO authenticated;/);
+    expect(adminCenterSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_admin_center_read[^;]+TO service_role/);
+    expect(adminCenterSql).toMatch(/REVOKE ALL ON FUNCTION public\.rf_coin_record_admin_export\(text, integer, timestamptz, timestamptz\)\s+FROM PUBLIC, anon;/);
+    expect(adminCenterSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_record_admin_export\(text, integer, timestamptz, timestamptz\)\s+TO authenticated;/);
+    expect(adminCenterSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.rf_coin_record_admin_export[^;]+TO service_role/);
   });
 });
 
@@ -134,6 +209,30 @@ describe('rf_coin_release_order_payment', () => {
 });
 
 describe('grants and schema', () => {
+  it('orders RF Coins migrations at the end of the canonical deployable sequence', () => {
+    const currentVersions = readdirSync('supabase/migrations')
+      .filter((name) => name.endsWith('.sql'))
+      .map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
+    const walletNames = [
+      '20261028120000_rf_coins_schema.sql',
+      '20261028120100_rf_coins_functions.sql',
+      '20261028120200_rf_coin_admin_center_read.sql',
+    ];
+    const manifest = readFileSync('docs/transformation/CANONICAL_DISPOSABLE_MIGRATION_SEQUENCE.md', 'utf8');
+    const pendingDirectory = 'supabase/migrations-pending';
+    const pendingNames = existsSync(pendingDirectory) ? readdirSync(pendingDirectory) : [];
+    const walletVersions = walletNames.map((name) => Number(name.match(/^([0-9]{14})_/)?.[1] || 0));
+    const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version));
+    const latestNonWalletVersion = Math.max(...nonWalletVersions);
+
+    expect(walletVersions.every((version) => version > latestNonWalletVersion)).toBe(true);
+    for (const name of walletNames) {
+      expect(currentVersions).toContain(Number(name.slice(0, 14)));
+      expect(manifest).toContain(`| INCLUDE | \`${name}\` |`);
+      expect(pendingNames).not.toContain(name);
+    }
+  });
+
   it('super admin guard denies inactive or suspended admins', () => {
     const guard = extractFunction(functionsSql, 'rf_coin_assert_super_admin');
     expect(guard).toMatch(/admins\.role = 'SUPER_ADMIN'/);
@@ -172,7 +271,7 @@ describe('grants and schema', () => {
 
   it('registers the rf_coin_wallet payment method disabled by default', () => {
     expect(schemaSql).toMatch(/'rf_coin_wallet', 'RF Coins Wallet'.*false/);
-    expect(schemaSql).toMatch(/ON CONFLICT \(method_key\) DO NOTHING/);
+    expect(schemaSql).toContain('ON CONFLICT (method_key) DO UPDATE SET is_enabled = false;');
   });
 
   it('keeps payment_transactions.order_id nullable change and topup link column', () => {
@@ -185,9 +284,24 @@ describe('grants and schema', () => {
     expect(schemaSql).not.toMatch(/POLICY .* ON rf_coin_admin_audit/);
   });
 
-  it('marks both files as pending and feature disabled', () => {
-    expect(schemaSql).toMatch(/STATUS: PENDING/);
-    expect(functionsSql).toMatch(/STATUS: PENDING/);
+  it('does not let the Super Admin settings RPC override financial release locks', () => {
+    const setSettings = extractFunction(functionsSql, 'rf_coin_set_settings');
+    expect(setSettings).toMatch(/IF p_enabled IS TRUE OR p_topups_enabled IS TRUE OR p_spending_enabled IS TRUE THEN\s*RAISE EXCEPTION 'RF_COIN_RELEASE_LOCKED'/);
+  });
+
+  it('pins every SECURITY DEFINER function to a catalog-first path with temp last', () => {
+    const definitions = Array.from(functionsSql.matchAll(/SECURITY DEFINER SET search_path = ([^$]+) AS/g));
+    expect(definitions.length).toBeGreaterThan(0);
+    expect(definitions.every(([, path]) => path.trim() === 'pg_catalog, public, pg_temp')).toBe(true);
+    expect(adminCenterSql.match(/SECURITY DEFINER\s+SET search_path = pg_catalog, public, pg_temp/g)).toHaveLength(2);
+  });
+
+  it('keeps release switches locked in the canonical migration source', () => {
+    expect(schemaSql).toMatch(/enabled boolean NOT NULL DEFAULT false/);
+    expect(schemaSql).toMatch(/topups_enabled boolean NOT NULL DEFAULT false/);
+    expect(schemaSql).toMatch(/spending_enabled boolean NOT NULL DEFAULT false/);
+    expect(functionsSql).toContain('v_funding_release_enabled CONSTANT boolean := false');
+    expect(functionsSql).toContain('v_spending_release_enabled CONSTANT boolean := false');
   });
 });
 
@@ -195,6 +309,11 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
   const enqueue = extractFunction(functionsSql, 'rf_coin_enqueue_fulfillment');
   const claim = extractFunction(functionsSql, 'rf_coin_claim_fulfillment_handoffs');
   const ack = extractFunction(functionsSql, 'rf_coin_ack_fulfillment_handoff');
+
+  it('does not install an outbound fulfillment dispatcher or scheduler', () => {
+    expect(schemaSql).not.toMatch(/net\.http_post\(|https?:\/\/|cron\.schedule|trigger_fulfillment_handoff/);
+    expect(schemaSql).not.toMatch(/(?:^\s*CREATE EXTENSION|^\s*SELECT\s+cron\.)/im);
+  });
 
   it('enqueue is idempotent per order and only accepts verified wallet-paid orders', () => {
     expect(enqueue).toMatch(/'rf-coin-fulfillment:' \|\| p_order_id::text/);
@@ -204,9 +323,17 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
   });
 
   it('claim re-checks fulfillment preconditions at claim time', () => {
+    expect(claim).toContain('v_spending_release_enabled CONSTANT boolean := false');
+    expect(claim.indexOf('IF NOT v_spending_release_enabled')).toBeLessThan(claim.indexOf('UPDATE rf_coin_fulfillment_handoffs'));
     expect(claim).toMatch(/o\.payment_status = 'VERIFIED'/);
     expect(claim).toMatch(/o\.fulfillment_status NOT IN \('PROCESSING','COMPLETED'\)/);
     expect(claim).toMatch(/st\.status IN \('submitted','success','pending'\)/);
+  });
+
+  it('does not enqueue wallet fulfillment while the spending release lock is closed', () => {
+    expect(enqueue).toContain('v_spending_release_enabled CONSTANT boolean := false');
+    expect(enqueue).toContain("'RF_COIN_SPENDING_RELEASE_LOCKED'");
+    expect(enqueue.indexOf('IF NOT v_spending_release_enabled')).toBeLessThan(enqueue.indexOf('INSERT INTO rf_coin_fulfillment_handoffs'));
   });
 
   it('claim uses FOR UPDATE SKIP LOCKED with a bounded lease', () => {
@@ -239,25 +366,15 @@ describe('rf_coin_fulfillment_handoffs (durable handoff)', () => {
     expect(schemaSql).not.toMatch(/POLICY .* ON rf_coin_fulfillment_handoffs/);
   });
 
-  it('cron activation is explicit: no hardcoded secret, no automatic schedule', () => {
-    // Only executable (non-comment) SQL counts: the migration must NOT embed
-    // a secret or auto-schedule the worker. Activation is a separate operator
-    // step with a generated secret, documented in the migration comments.
+  it('keeps the shared cron secret store inert and inaccessible', () => {
     const executable = schemaSql
       .split('\n')
       .filter((line) => !/^\s*--/.test(line))
       .join('\n');
     expect(executable).not.toMatch(/INSERT INTO public\._cron_secrets/);
     expect(executable).not.toMatch(/cron\.schedule/);
-    expect(executable).not.toMatch(/rfz_fhnd_/);
-    // The trigger function exists; the operator activation steps are documented.
-    expect(schemaSql).toMatch(/trigger_fulfillment_handoff\(\)/);
-    expect(schemaSql).toMatch(/ACTIVATION \(EXPLICIT OPERATOR STEP/);
-  });
-
-  it('cron trigger is executable by postgres only (Codex fix 2)', () => {
-    expect(schemaSql).toMatch(/REVOKE EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\)\s*\n\s*FROM PUBLIC, anon, authenticated/);
-    expect(schemaSql).toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO postgres/);
-    expect(schemaSql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.trigger_fulfillment_handoff\(\) TO (?!postgres)/);
+    expect(executable).toMatch(/CREATE TABLE public\._cron_secrets/);
+    expect(executable).toMatch(/REVOKE ALL PRIVILEGES ON TABLE public\._cron_secrets\s+FROM PUBLIC, anon, authenticated, service_role/);
+    expect(schemaSql).toMatch(/RF_COINS_CRON_SECRET_TABLE_ALREADY_EXISTS_REQUIRES_REVIEW/);
   });
 });

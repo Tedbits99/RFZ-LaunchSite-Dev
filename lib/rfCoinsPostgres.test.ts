@@ -1,7 +1,7 @@
 /*
-  Real PostgreSQL execution tests for the staged RF Coins migrations.
+  Real PostgreSQL execution tests for the RF Coins migrations proposed by PR #82.
 
-  Runs both PENDING migration files inside an in-process PostgreSQL (PGlite),
+  Runs the three candidate migration files inside an in-process PostgreSQL (PGlite),
   then exercises the actual RPC behavior under real roles: settlement,
   double-payment protection, cross-method rejection, top-up crediting,
   duplicate webhook idempotency, partial refund reversal without double
@@ -14,8 +14,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 const projectRoot = process.cwd();
-const schemaSql = readFileSync(join(projectRoot, 'supabase/migrations-pending/20261018160000_rf_coins_schema.sql'), 'utf8');
-const functionsSql = readFileSync(join(projectRoot, 'supabase/migrations-pending/20261018160100_rf_coins_functions.sql'), 'utf8');
+const schemaSql = readFileSync(join(projectRoot, 'supabase/migrations/20261028120000_rf_coins_schema.sql'), 'utf8');
+const functionsSql = readFileSync(join(projectRoot, 'supabase/migrations/20261028120100_rf_coins_functions.sql'), 'utf8');
+const adminCenterSql = readFileSync(join(projectRoot, 'supabase/migrations/20261028120200_rf_coin_admin_center_read.sql'), 'utf8');
 
 let db: PGlite;
 
@@ -67,19 +68,30 @@ async function insertOrder(opts: {
   paymentStatus?: string;
   totalCents?: number;
 }) {
-  await sql(
-    `INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
-       player_inputs, quantity, subtotal_cents, discount_cents, total_cents,
-       payment_method, status, payment_status, fulfillment_status, customer_user_id)
-     VALUES ($1, $2, 'cust@example.invalid', 'Customer', $3, $4, '{}'::jsonb, 1,
-       $5, 0, $5, $6, $7, $8, 'NOT_STARTED', $9)`,
-    [opts.id, 'RF-' + opts.id.slice(-12), GAME, PACKAGE,
-     opts.totalCents ?? 50000,
-     opts.method ?? 'rf_coin_wallet',
-     opts.status ?? 'WAITING_PAYMENT',
-     opts.paymentStatus ?? 'UNPAID',
-     opts.userId ?? null],
-  );
+  // The behavioral suite later substitutes the release constants to test
+  // future settlement mechanics in this disposable database. Seed these
+  // artificial pre-existing paid-method orders with the table owner so the
+  // independently tested production trigger does not prevent its own test
+  // fixtures from representing a pre-release row.
+  await resetRole();
+  await db.exec('ALTER TABLE orders DISABLE TRIGGER rf_coin_orders_spending_release_guard');
+  try {
+    await sql(
+      `INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
+         player_inputs, quantity, subtotal_cents, discount_cents, total_cents,
+         payment_method, status, payment_status, fulfillment_status, customer_user_id)
+       VALUES ($1, $2, 'cust@example.invalid', 'Customer', $3, $4, '{}'::jsonb, 1,
+         $5, 0, $5, $6, $7, $8, 'NOT_STARTED', $9)`,
+      [opts.id, 'RF-' + opts.id.slice(-12), GAME, PACKAGE,
+       opts.totalCents ?? 50000,
+       opts.method ?? 'rf_coin_wallet',
+       opts.status ?? 'WAITING_PAYMENT',
+       opts.paymentStatus ?? 'UNPAID',
+       opts.userId ?? null],
+    );
+  } finally {
+    await db.exec('ALTER TABLE orders ENABLE TRIGGER rf_coin_orders_spending_release_guard');
+  }
 }
 
 async function createWallet(userId: string, balance: number) {
@@ -138,6 +150,14 @@ beforeAll(async () => {
       claimed_at timestamptz NOT NULL DEFAULT now(),
       is_active boolean NOT NULL DEFAULT true
     );
+    CREATE OR REPLACE FUNCTION public.is_admin()
+    RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path = pg_catalog, public
+    AS $$ SELECT EXISTS (
+      SELECT 1 FROM public.admins
+      WHERE id = auth.uid() AND is_active IS TRUE
+    ) $$;
     CREATE TABLE orders (
       id uuid PRIMARY KEY,
       reference text UNIQUE NOT NULL,
@@ -195,21 +215,34 @@ beforeAll(async () => {
     );
     CREATE TABLE payment_transactions (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
+      order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
       idempotency_key text UNIQUE,
       provider_name text NOT NULL DEFAULT '',
       provider_reference text,
       action text NOT NULL DEFAULT 'create',
-      status text NOT NULL DEFAULT 'pending',
+      status text NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'paid', 'failed', 'expired', 'refunded', 'cancelled')),
       amount_cents int NOT NULL DEFAULT 0,
       currency text NOT NULL DEFAULT 'PHP',
       checkout_url text,
       webhook_payload jsonb,
       error_message text,
       metadata jsonb NOT NULL DEFAULT '{}',
+      qr_image_url text,
+      expires_at timestamptz,
+      provider_payment_id text,
+      webhook_event_id text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE INDEX idx_payment_tx_order_id ON payment_transactions(order_id);
+    CREATE INDEX idx_payment_tx_provider_ref ON payment_transactions(provider_reference);
+    CREATE INDEX idx_payment_tx_idempotency ON payment_transactions(idempotency_key);
+    ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY admin_select_payment_transactions ON payment_transactions
+      FOR SELECT TO authenticated USING (public.is_admin());
+    GRANT TRUNCATE, TRIGGER, REFERENCES ON payment_transactions TO anon, authenticated;
+    GRANT ALL ON payment_transactions TO service_role;
     CREATE TABLE supplier_transactions (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       order_id uuid REFERENCES orders(id) ON DELETE CASCADE,
@@ -228,17 +261,10 @@ beforeAll(async () => {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
-    -- cron/net stubs so the staged cron-scheduling SQL can execute in PGlite.
-    CREATE SCHEMA IF NOT EXISTS cron;
-    CREATE FUNCTION cron.schedule(name text, schedule text, command text)
-      RETURNS bigint LANGUAGE sql AS $stub$ SELECT 1::bigint $stub$;
-    CREATE SCHEMA IF NOT EXISTS net;
-    CREATE SCHEMA IF NOT EXISTS extensions;
-    CREATE FUNCTION net.http_post(url text, body jsonb, headers jsonb, timeout_milliseconds int)
-      RETURNS bigint LANGUAGE sql AS $stub$ SELECT 1::bigint $stub$;
   `);
   await db.exec(schemaSql);
   await db.exec(functionsSql);
+  await db.exec(adminCenterSql);
 
   // Fixture identities and catalog.
   await sql(`INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
@@ -263,16 +289,168 @@ beforeAll(async () => {
   // Without these grants the RLS tests fail on ACL instead of proving the
   // policy behavior.
   await sql(`GRANT SELECT ON games, packages, admins, orders, order_timeline,
-    payment_config, payment_transactions TO anon, authenticated, service_role`);
+    payment_config TO anon, authenticated, service_role`);
 }, 120_000);
 
 afterAll(async () => { await db.close(); });
 
 describe('rf coins real SQL behavior', () => {
+  it('does not let a Super Admin override disabled financial release settings through RPC', async () => {
+    await sql(`UPDATE rf_coin_settings
+      SET enabled = false, topups_enabled = false, spending_enabled = false
+      WHERE id = 1`);
+
+    try {
+      await asRole('authenticated', SUPER_ADMIN);
+      await expect(sql(`SELECT rf_coin_set_settings(true, true, true, null, null, null)`))
+        .rejects.toThrow(/RF_COIN_RELEASE_LOCKED/);
+
+      const adjustmentKey = `locked-adjustment-${crypto.randomUUID()}`;
+      await expect(sql(`SELECT * FROM rf_coin_request_adjustment(
+        $1, 'credit', 5, 'release-lock regression', 'promotion', $2
+      )`, [CUSTOMER, adjustmentKey]))
+        .rejects.toThrow(/RF_COIN_DISABLED/);
+
+      await resetRole();
+      const settings = await sql<{ enabled: boolean; topups_enabled: boolean; spending_enabled: boolean }>(
+        `SELECT enabled, topups_enabled, spending_enabled FROM rf_coin_settings WHERE id = 1`);
+      expect(settings[0]).toEqual({ enabled: false, topups_enabled: false, spending_enabled: false });
+
+      const adjustment = await sql<{ count: string }>(
+        `SELECT count(*) AS count FROM rf_coin_adjustment_requests WHERE idempotency_key = $1`, [adjustmentKey]);
+      expect(Number(adjustment[0].count)).toBe(0);
+    } finally {
+      await resetRole();
+      await sql(`UPDATE rf_coin_settings
+        SET enabled = true, topups_enabled = true, spending_enabled = true
+        WHERE id = 1`);
+    }
+  });
+
+  it('keeps funding and spending locked even when database settings are switched on', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000f1';
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 50000 });
+    await createWallet(CUSTOMER, 1000);
+    const activePackage = await sql<{ id: string }>(`SELECT id FROM rf_coin_packages LIMIT 1`);
+
+    // A DB/admin payment-config toggle is not a financial release approval.
+    await sql(`UPDATE payment_config SET is_enabled = true WHERE method_key = 'rf_coin_wallet'`);
+    await expect(sql(
+      `INSERT INTO orders (id, reference, email, customer_name, game_id, package_id,
+         subtotal_cents, total_cents, payment_method, customer_user_id)
+       VALUES ('aaaaaaaa-0000-0000-0000-0000000000f2', 'RF-RELEASE-LOCK',
+         'cust@example.invalid', 'Customer', '${GAME}'::uuid, '${PACKAGE}'::uuid,
+         50000, 50000, 'rf_coin_wallet', '${CUSTOMER}'::uuid)`,
+    )).rejects.toThrow(/RF_COIN_SPENDING_RELEASE_LOCKED/);
+    const rejectedWalletOrders = await sql<{ count: string }>(
+      `SELECT count(*) AS count FROM orders WHERE reference = 'RF-RELEASE-LOCK'`);
+    expect(Number(rejectedWalletOrders[0].count)).toBe(0);
+    await sql(`UPDATE payment_config SET is_enabled = false WHERE method_key = 'rf_coin_wallet'`);
+
+    const methodChangeOrder = 'aaaaaaaa-0000-0000-0000-0000000000f3';
+    await insertOrder({ id: methodChangeOrder, userId: CUSTOMER, method: 'paymongo_qrph' });
+    await expect(sql(`UPDATE orders SET payment_method = 'rf_coin_wallet' WHERE id = $1`, [methodChangeOrder]))
+      .rejects.toThrow(/RF_COIN_SPENDING_RELEASE_LOCKED/);
+    const unchangedMethod = await sql<{ payment_method: string }>(
+      `SELECT payment_method FROM orders WHERE id = $1`, [methodChangeOrder]);
+    expect(unchangedMethod[0].payment_method).toBe('paymongo_qrph');
+    await sql(`DELETE FROM orders WHERE id = $1`, [methodChangeOrder]);
+
+    await asRole('authenticated', CUSTOMER);
+    const topup = await sql<{ out_error: string }>(
+      `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, activePackage[0].id]);
+    const spending = await sql<{ out_error: string }>(
+      `SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
+    expect(topup[0].out_error).toBe('RF_COIN_FUNDING_RELEASE_LOCKED');
+    expect(spending[0].out_error).toBe('RF_COIN_SPENDING_RELEASE_LOCKED');
+    await resetRole();
+
+    const [pending] = await sql<{ id: string }>(
+      `INSERT INTO rf_coin_topups (user_id, package_id, coins, bonus_coins, price_cents, provider_reference, idempotency_key)
+       VALUES ($1, $2, 100, 10, 10000, 'release-lock-provider-reference', 'release-lock-topup') RETURNING id`,
+      [CUSTOMER, activePackage[0].id]);
+    await expect(sql(
+      `INSERT INTO rf_coin_topups (user_id, coins, price_cents, provider, idempotency_key)
+       VALUES ($1, 100, 10000, 'paymongo', 'disallowed-paymongo-wallet-funding')`,
+      [CUSTOMER],
+    )).rejects.toThrow(/rf_coin_topups_provider_check/);
+    await asRole('service_role');
+    const creditAttempt = await sql<{ out_credited: boolean; out_error: string }>(
+      `SELECT * FROM rf_coin_credit_paid_topup($1, 'release-lock-provider-reference')`, [pending.id]);
+    await resetRole();
+    expect(creditAttempt[0].out_credited).toBe(false);
+    expect(creditAttempt[0].out_error).toBe('RF_COIN_FUNDING_RELEASE_LOCKED');
+
+    // Even a privileged pre-existing eligible queue row cannot be claimed by
+    // the static-locked fulfillment RPC, so it cannot reach supplier code.
+    await sql(`UPDATE orders SET status = 'PAYMENT_VERIFIED', payment_status = 'VERIFIED'
+      WHERE id = $1`, [orderId]);
+    await sql(`INSERT INTO rf_coin_fulfillment_handoffs (order_id, idempotency_key)
+      VALUES ($1::uuid, 'rf-coin-fulfillment:' || $1::uuid::text)`, [orderId]);
+    await asRole('service_role');
+    const claims = await sql(`SELECT * FROM rf_coin_claim_fulfillment_handoffs(10, 300)`);
+    await resetRole();
+    expect(claims).toHaveLength(0);
+    const preservedQueue = await sql<{ status: string; lease_token: string | null }>(
+      `SELECT status, lease_token FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    expect(preservedQueue[0]).toEqual({ status: 'PENDING', lease_token: null });
+    await sql(`DELETE FROM rf_coin_fulfillment_handoffs WHERE order_id = $1`, [orderId]);
+    await sql(`UPDATE orders SET status = 'WAITING_PAYMENT', payment_status = 'UNPAID' WHERE id = $1`, [orderId]);
+
+    const order = await sql<{ status: string }>(`SELECT status FROM orders WHERE id = $1`, [orderId]);
+    const wallet = await sql<{ balance_coins: string }>(`SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
+    const topupState = await sql<{ status: string; credited_at: string | null; provider: string }>(
+      `SELECT status, credited_at, provider FROM rf_coin_topups WHERE id = $1`, [pending.id]);
+    expect(order[0].status).toBe('WAITING_PAYMENT');
+    expect(Number(wallet[0].balance_coins)).toBe(1000);
+    expect(topupState[0]).toEqual({ status: 'PENDING', credited_at: null, provider: 'disabled' });
+    await createWallet(CUSTOMER, 0);
+
+    // Remaining accounting tests intentionally unlock only the disposable
+    // in-process database to exercise future release mechanics.
+    const sandboxFunctions = functionsSql
+      .replaceAll('v_funding_release_enabled CONSTANT boolean := false', 'v_funding_release_enabled CONSTANT boolean := true')
+      .replaceAll('v_spending_release_enabled CONSTANT boolean := false', 'v_spending_release_enabled CONSTANT boolean := true');
+    await db.exec(sandboxFunctions);
+  });
+
+  it('package creation stays inactive; activation is explicit and top-up snapshots survive package edits', async () => {
+    await asRole('authenticated', SUPER_ADMIN);
+    const created = await sql<{ rf_coin_upsert_package: string }>(
+      `SELECT rf_coin_upsert_package(NULL, 'Disposable bundle', 500, 50, 25000, true, 9)`);
+    const packageId = created[0].rf_coin_upsert_package;
+    await resetRole();
+    const [inactive] = await sql<{ is_active: boolean }>(`SELECT is_active FROM rf_coin_packages WHERE id = $1`, [packageId]);
+    expect(inactive.is_active).toBe(false);
+
+    await asRole('authenticated', CUSTOMER);
+    const unavailable = await sql<{ out_topup_id: string | null; out_error: string }>(
+      `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, packageId]);
+    await resetRole();
+    expect(unavailable[0].out_topup_id).toBeNull();
+    expect(unavailable[0].out_error).toBe('RF_COIN_PACKAGE_UNAVAILABLE');
+
+    await asRole('authenticated', SUPER_ADMIN);
+    await sql(`SELECT rf_coin_upsert_package($1, NULL, NULL, NULL, NULL, true, NULL)`, [packageId]);
+    await resetRole();
+    await asRole('authenticated', CUSTOMER);
+    const purchase = await sql<{ out_topup_id: string; out_coins: number; out_bonus_coins: number; out_price_cents: number }>(
+      `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, packageId]);
+    await resetRole();
+    expect(purchase[0]).toMatchObject({ out_coins: 500, out_bonus_coins: 50, out_price_cents: 25000 });
+
+    await asRole('authenticated', SUPER_ADMIN);
+    await sql(`SELECT rf_coin_upsert_package($1, 'Updated bundle', 900, 100, 45000, NULL, 10)`, [packageId]);
+    await resetRole();
+    const [snapshot] = await sql<{ coins: number; bonus_coins: number; price_cents: number }>(
+      `SELECT coins, bonus_coins, price_cents FROM rf_coin_topups WHERE id = $1`, [purchase[0].out_topup_id]);
+    expect(snapshot).toEqual({ coins: 500, bonus_coins: 50, price_cents: 25000 });
+  });
+
   it('admin credits work: low-value credit applies immediately with audit + ledger', async () => {
     await asRole('authenticated', SUPER_ADMIN);
     const res = await sql(`SELECT * FROM rf_coin_request_adjustment(
-      $1, 'credit', 100, 'goodwill gesture here', 'promotion', 'test-adj-1')`,
+      $1, 'credit', 100, 'goodwill gesture here', 'promotion', 'test-adjustment-idempotency-1')`,
       [CUSTOMER]);
     expect(res[0].out_error).toBeNull();
     expect(res[0].out_status).toBe('APPLIED');
@@ -285,17 +463,153 @@ describe('rf coins real SQL behavior', () => {
     expect(audit.length).toBeGreaterThan(0);
   });
 
+  it('high-value adjustments require a distinct Super Admin and idempotency payloads cannot change', async () => {
+    const key = 'high-value-adjustment-idempotency-001';
+    await asRole('authenticated', SUPER_ADMIN);
+    const requested = await sql<{ out_request_id: string; out_status: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_request_adjustment($1, 'credit', 5000, 'approved test adjustment', 'compensation', $2)`,
+      [CUSTOMER2, key]);
+    const retried = await sql<{ out_request_id: string; out_status: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_request_adjustment($1, 'credit', 5000, 'approved test adjustment', 'compensation', $2)`,
+      [CUSTOMER2, key]);
+    const keyConflict = await sql<{ out_error: string | null }>(
+      `SELECT * FROM rf_coin_request_adjustment($1, 'credit', 5001, 'approved test adjustment', 'compensation', $2)`,
+      [CUSTOMER2, key]);
+    const selfApproval = await sql<{ out_error: string | null }>(
+      `SELECT * FROM rf_coin_decide_adjustment($1, true, 'self approval attempt')`, [requested[0].out_request_id]);
+    expect(requested[0].out_status).toBe('PENDING');
+    expect(retried[0].out_request_id).toBe(requested[0].out_request_id);
+    expect(keyConflict[0].out_error).toBe('RF_COIN_IDEMPOTENCY_CONFLICT');
+    expect(selfApproval[0].out_error).toBe('RF_COIN_SECOND_ADMIN_REQUIRED');
+    await resetRole();
+
+    const SECOND_SUPER_ADMIN = '33333333-3333-4333-8333-333333333334';
+    await sql(`INSERT INTO auth.users (id, email, email_confirmed_at) VALUES ($1, 'super2@example.invalid', now())`, [SECOND_SUPER_ADMIN]);
+    await sql(`INSERT INTO admins (id, email, name, role, is_active) VALUES ($1, 'super2@example.invalid', 'Second Super', 'SUPER_ADMIN', true)`, [SECOND_SUPER_ADMIN]);
+    await asRole('authenticated', SECOND_SUPER_ADMIN);
+    const approved = await sql<{ out_status: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_decide_adjustment($1, true, 'independent approval')`, [requested[0].out_request_id]);
+    await resetRole();
+    expect(approved[0].out_status).toBe('APPLIED');
+    expect(approved[0].out_error).toBeNull();
+    const record = await sql<{ status: string; requested_by: string; approved_by: string }>(
+      `SELECT status, requested_by, approved_by FROM rf_coin_adjustment_requests WHERE id = $1`, [requested[0].out_request_id]);
+    expect(record[0].status).toBe('APPLIED');
+    expect(record[0].approved_by).not.toBe(record[0].requested_by);
+  });
+
   it('regular admin and anon cannot run admin RPCs', async () => {
     await asRole('authenticated', REGULAR_ADMIN);
     const res = await sql(`SELECT * FROM rf_coin_request_adjustment(
-      $1, 'credit', 5, 'not allowed here', 'promotion', 'test-adj-2')`, [CUSTOMER]);
+      $1, 'credit', 5, 'not allowed here', 'promotion', 'test-adjustment-idempotency-2')`, [CUSTOMER]);
     expect(res[0].out_error).toBe('RF_COIN_FORBIDDEN');
     await resetRole();
 
     await asRole('anon');
     await expect(sql(`SELECT * FROM rf_coin_request_adjustment(
-      $1, 'credit', 5, 'not allowed here', 'promotion', 'test-adj-3')`, [CUSTOMER]))
+      $1, 'credit', 5, 'not allowed here', 'promotion', 'test-adjustment-idempotency-3')`, [CUSTOMER]))
       .rejects.toThrow(/permission denied|rf_coin_request_adjustment/i);
+    await resetRole();
+  });
+
+  it('admin center reporting is Super Admin-only, bounded, searchable, and uses exact aggregates', async () => {
+    const REPORT_CUSTOMER = '77777777-7777-4777-8777-777777777777';
+    await sql(`INSERT INTO auth.users (id, email, email_confirmed_at) VALUES ($1, 'report@example.invalid', now())`, [REPORT_CUSTOMER]);
+    await createWallet(REPORT_CUSTOMER, 25);
+    // A wallet without a corresponding ledger history is surfaced as a
+    // reconciliation exception rather than silently treated as consistent.
+    await createWallet(CUSTOMER2, 7);
+    await sql(`UPDATE rf_coin_wallets SET total_purchased_coins = 80, total_spent_coins = 55,
+      total_manual_credited_coins = 10, total_manual_debited_coins = 5 WHERE user_id = $1`, [REPORT_CUSTOMER]);
+    await sql(`INSERT INTO rf_coin_ledger (wallet_user_id, direction, amount_coins, kind,
+      balance_after, reason, actor_type, idempotency_key)
+      VALUES ($1, 'credit', 80, 'topup_purchase', 80, 'synthetic test purchase', 'system', 'report-ledger-1'),
+        ($1, 'debit', 55, 'order_payment', 25, 'synthetic test spend', 'customer', 'report-ledger-2')`, [REPORT_CUSTOMER]);
+    await sql(`INSERT INTO rf_coin_topups (user_id, coins, price_cents, status, idempotency_key)
+      VALUES ($1, 100, 2500, 'PENDING', 'report-topup-pending'),
+        ($1, 20, 500, 'FAILED', 'report-topup-failed')`, [REPORT_CUSTOMER]);
+
+    const expectedRows = await sql<{ wallets: string; outstanding: string; purchased: string; spent: string; pending: string; pending_cents: string; failed_expired: string; discrepancies: string }>(
+      `SELECT (SELECT count(*) FROM rf_coin_wallets) AS wallets,
+        (SELECT coalesce(sum(balance_coins), 0) FROM rf_coin_wallets) AS outstanding,
+        (SELECT coalesce(sum(total_purchased_coins), 0) FROM rf_coin_wallets) AS purchased,
+        (SELECT coalesce(sum(amount_coins), 0) FROM rf_coin_ledger WHERE kind = 'order_payment') AS spent,
+        (SELECT count(*) FROM rf_coin_topups WHERE status = 'PENDING') AS pending,
+        (SELECT coalesce(sum(price_cents), 0) FROM rf_coin_topups WHERE status = 'PENDING') AS pending_cents,
+        (SELECT count(*) FROM rf_coin_topups WHERE status IN ('FAILED','EXPIRED')) AS failed_expired,
+        (SELECT count(*) FROM rf_coin_wallets w
+          LEFT JOIN (SELECT wallet_user_id, sum(CASE WHEN direction = 'credit' THEN amount_coins ELSE -amount_coins END) AS balance
+            FROM rf_coin_ledger GROUP BY wallet_user_id) l ON l.wallet_user_id = w.user_id
+          WHERE w.balance_coins <> coalesce(l.balance, 0)) AS discrepancies`);
+
+    await asRole('authenticated', SUPER_ADMIN);
+    const result = await sql<{ report: Record<string, unknown> }>(
+      `SELECT rf_coin_admin_center_read('report@example.invalid', 1, 1, NULL, now() - interval '7 days', now()) AS report`);
+    const report = result[0].report as Record<string, unknown>;
+    const metrics = report.metrics as Record<string, string>;
+    const wallets = report.wallets as { total: number; rows: Array<{ user_id: string }> };
+    const exceptions = report.exceptions as { total: string; rows: Array<{ category: string }> };
+    expect(metrics.outstanding).toBe(String(expectedRows[0].outstanding));
+    expect(metrics.walletCount).toBe(String(expectedRows[0].wallets));
+    expect(metrics.purchased).toBe(String(expectedRows[0].purchased));
+    expect(metrics.spent).toBe(String(expectedRows[0].spent));
+    expect(metrics.pendingTopups).toBe(String(expectedRows[0].pending));
+    expect(metrics.pendingTopupCents).toBe(String(expectedRows[0].pending_cents));
+    expect(metrics.failedExpiredTopups).toBe(String(expectedRows[0].failed_expired));
+    expect(Number(metrics.ledgerBalanceDiscrepancies)).toBe(Number(expectedRows[0].discrepancies));
+    expect(Number(metrics.ledgerBalanceDiscrepancies)).toBeGreaterThanOrEqual(1);
+    expect(metrics.unresolvedExceptions).toBe(exceptions.total);
+    expect(Number(exceptions.total)).toBe(2);
+    const allExceptionsResult = await sql<{ report: Record<string, unknown> }>(
+      `SELECT rf_coin_admin_center_read(NULL, 1, 50, NULL, now() - interval '7 days', now()) AS report`);
+    const allExceptions = (allExceptionsResult[0].report.exceptions as { rows: Array<{ category: string }> }).rows;
+    expect(allExceptions.map((item) => item.category)).toContain('wallet_ledger_mismatch');
+    expect(allExceptions.map((item) => item.category)).toContain('unusual_manual_adjustment');
+    expect(wallets.total).toBe(1);
+    expect(wallets.rows).toHaveLength(1);
+    expect(report.fundingReleaseEnabled).toBe(false);
+    const filtered = await sql<{ report: Record<string, unknown> }>(
+      `SELECT rf_coin_admin_center_read('report@example.invalid', 1, 1, NULL, now() - interval '7 days', now(), 'PENDING', 'all') AS report`);
+    const filteredReport = filtered[0].report;
+    const filteredTopups = filteredReport.topups as { total: number; rows: Array<{ status: string }> };
+    expect(filteredTopups.total).toBe(1);
+    expect(filteredTopups.rows[0].status).toBe('PENDING');
+    const providerFiltered = await sql<{ report: Record<string, unknown> }>(
+      `SELECT rf_coin_admin_center_read('report@example.invalid', 1, 1, NULL, now() - interval '7 days', now(), 'PENDING', 'all', 'manual') AS report`);
+    expect((providerFiltered[0].report.topups as { total: number }).total).toBe(0);
+    const zeroBalanceFilter = await sql<{ report: Record<string, unknown> }>(
+      `SELECT rf_coin_admin_center_read('report@example.invalid', 1, 1, NULL, now() - interval '7 days', now(), NULL, 'zero') AS report`);
+    expect((zeroBalanceFilter[0].report.wallets as { total: number }).total).toBe(0);
+    await resetRole();
+
+    await asRole('authenticated', REGULAR_ADMIN);
+    await expect(sql(`SELECT rf_coin_admin_center_read(NULL, 1, 50, NULL, now() - interval '1 day', now())`))
+      .rejects.toThrow(/RF_COIN_FORBIDDEN/);
+    await resetRole();
+
+    await asRole('anon');
+    await expect(sql(`SELECT rf_coin_admin_center_read(NULL, 1, 50, NULL, now() - interval '1 day', now())`))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
+  });
+
+  it('records exports in the append-only audit using metadata only and denies other roles', async () => {
+    await asRole('authenticated', SUPER_ADMIN);
+    await sql(`SELECT rf_coin_record_admin_export('wallets', 0, now() - interval '1 day', now())`);
+    await resetRole();
+    const audit = await sql<{ entity_id: string; details: Record<string, unknown> }>(
+      `SELECT entity_id, details FROM rf_coin_admin_audit WHERE action = 'report_export' ORDER BY created_at DESC LIMIT 1`);
+    expect(audit[0].entity_id).toBe('wallets');
+    expect(audit[0].details).toMatchObject({ row_count: 0, format: 'csv' });
+    expect(JSON.stringify(audit[0].details)).not.toMatch(/email|provider_reference|payload|credential/i);
+
+    await asRole('authenticated', REGULAR_ADMIN);
+    await expect(sql(`SELECT rf_coin_record_admin_export('wallets', 0, now() - interval '1 day', now())`))
+      .rejects.toThrow(/RF_COIN_FORBIDDEN/);
+    await resetRole();
+    await asRole('anon');
+    await expect(sql(`SELECT rf_coin_record_admin_export('wallets', 0, now() - interval '1 day', now())`))
+      .rejects.toThrow(/permission denied/i);
     await resetRole();
   });
 
@@ -310,7 +624,7 @@ describe('rf coins real SQL behavior', () => {
     // Suspended super admin: identity matches, role matches, is_active=false.
     await asRole('authenticated', SUSPENDED_ADMIN);
     const res = await sql(`SELECT * FROM rf_coin_request_adjustment(
-      $1, 'credit', 5, 'suspended admin denied', 'promotion', 'test-adj-suspended')`, [CUSTOMER]);
+      $1, 'credit', 5, 'suspended admin denied', 'promotion', 'test-adjustment-idempotency-suspended')`, [CUSTOMER]);
     expect(res[0].out_error).toBe('RF_COIN_FORBIDDEN');
 
     // set_settings is a void RPC: the guard raises instead of returning an
@@ -400,9 +714,17 @@ describe('rf coins real SQL behavior', () => {
       `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, pkg[0].id]);
     expect(created[0].out_topup_id).toBeTruthy();
     const topupId = created[0].out_topup_id;
+    const retried = await sql<{ out_topup_id: string; out_error: string | null }>(
+      `SELECT * FROM rf_coin_create_topup($1, $2)`, [CUSTOMER, pkg[0].id]);
+    expect(retried[0].out_error).toBeNull();
+    expect(retried[0].out_topup_id).toBe(topupId);
     await resetRole();
 
+    await sql(`UPDATE rf_coin_topups SET provider_reference = 'pay-ref-1' WHERE id = $1`, [topupId]);
     await asRole('service_role');
+    const mismatched = await sql<{ out_error: string | null }>(
+      `SELECT * FROM rf_coin_credit_paid_topup($1, 'different-payment')`, [topupId]);
+    expect(mismatched[0].out_error).toBe('RF_COIN_PROVIDER_REFERENCE_MISMATCH');
     const c1 = await sql<{ out_credited: boolean; out_error: string | null }>(
       `SELECT * FROM rf_coin_credit_paid_topup($1, 'pay-ref-1')`, [topupId]);
     const c2 = await sql<{ out_credited: boolean; out_error: string | null }>(
@@ -414,6 +736,10 @@ describe('rf coins real SQL behavior', () => {
     const ledgerCount = await sql<{ n: string }>(
       `SELECT count(*) AS n FROM rf_coin_ledger WHERE idempotency_key = 'topup:' || $1::text`, [topupId]);
     expect(Number(ledgerCount[0].n)).toBe(1);
+    const verification = await sql<{ payment_verified_at: string | null; credited_at: string | null }>(
+      `SELECT payment_verified_at, credited_at FROM rf_coin_topups WHERE id = $1`, [topupId]);
+    expect(verification[0].payment_verified_at).toBeTruthy();
+    expect(verification[0].credited_at).toBeTruthy();
   });
 
   it('partial refund reversal debits bounded, never double-debits, and stays pending', async () => {
@@ -421,13 +747,16 @@ describe('rf coins real SQL behavior', () => {
     await createWallet(CUSTOMER2, 100);
     const topup = await sql<{ id: string; credited_total: string }>(
       `INSERT INTO rf_coin_topups (user_id, package_id, coins, bonus_coins, price_cents,
-         status, idempotency_key, credited_at, credited_total)
-       VALUES ($1, NULL, 900, 100, 90000, 'PAID', 'test-reversal-topup-1', now(), 1000)
+         status, idempotency_key, provider_reference, credited_at, credited_total)
+       VALUES ($1, NULL, 900, 100, 90000, 'PAID', 'test-reversal-topup-1', 'ref-1', now(), 1000)
        RETURNING id, credited_total`, [CUSTOMER2]);
     const topupId = topup[0].id;
     expect(Number(topup[0].credited_total)).toBe(1000);
 
     await asRole('service_role');
+    const wrongRef = await sql<{ out_error: string | null }>(
+      `SELECT * FROM rf_coin_mark_topup_status($1, 'REFUNDED', 'other-ref')`, [topupId]);
+    expect(wrongRef[0].out_error).toBe('RF_COIN_PROVIDER_REFERENCE_MISMATCH');
     // First refund attempt: only 100 reversible → partial, stays REFUND_PENDING.
     const r1 = await sql<{ out_ok: boolean; out_error: string | null }>(
       `SELECT * FROM rf_coin_mark_topup_status($1, 'REFUNDED', 'ref-1')`, [topupId]);
@@ -491,6 +820,7 @@ describe('rf coins real SQL behavior', () => {
       grants.some((g) => g.proname === fn && g.grantee === role && g.privilege_type === priv);
 
     // Customer-callable + admin RPCs → authenticated; webhook RPCs → service_role.
+    expect(has('rf_coin_get_or_create_wallet', 'authenticated')).toBe(true);
     expect(has('rf_coin_create_topup', 'authenticated')).toBe(true);
     // Legacy direct settlement is locked down: only the atomic wrapper is
     // customer-callable, so settlement can never bypass the handoff enqueue.
@@ -500,17 +830,58 @@ describe('rf coins real SQL behavior', () => {
     expect(has('rf_coin_decide_adjustment', 'authenticated')).toBe(true);
     expect(has('rf_coin_set_settings', 'authenticated')).toBe(true);
     expect(has('rf_coin_upsert_package', 'authenticated')).toBe(true);
+    expect(has('rf_coin_admin_center_read', 'authenticated')).toBe(true);
+    expect(has('rf_coin_record_admin_export', 'authenticated')).toBe(true);
     expect(has('rf_coin_credit_paid_topup', 'service_role')).toBe(true);
     expect(has('rf_coin_mark_topup_status', 'service_role')).toBe(true);
     expect(has('rf_coin_release_order_payment', 'service_role')).toBe(true);
-    // Nothing granted to PUBLIC; helpers not granted at all.
+    // Nothing is granted to PUBLIC; only the caller-scoped wallet initializer
+    // is exposed to authenticated customers, and internal helpers stay private.
     for (const g of grants) expect(g.grantee).not.toBe('PUBLIC');
     expect(has('rf_coin_assert_super_admin', 'authenticated')).toBe(false);
     expect(has('rf_coin_assert_super_admin', 'service_role')).toBe(false);
+    expect(has('rf_coin_get_or_create_wallet', 'anon')).toBe(false);
+    expect(has('rf_coin_get_or_create_wallet', 'service_role')).toBe(false);
     expect(has('rf_coin_get_settings', 'authenticated')).toBe(false);
+    expect(has('rf_coin_admin_center_read', 'anon')).toBe(false);
+    expect(has('rf_coin_record_admin_export', 'anon')).toBe(false);
     // Legacy settlement is not executable by any client or service identity.
     expect(has('rf_coin_settle_order_payment', 'anon')).toBe(false);
     expect(has('rf_coin_settle_order_payment', 'service_role')).toBe(false);
+  });
+
+  it('initializes only the authenticated caller wallet at a genuine zero balance', async () => {
+    const INITIALIZED_CUSTOMER = '77777777-7777-7777-7777-777777777701';
+    await sql(`INSERT INTO auth.users (id, email, email_confirmed_at) VALUES ($1, 'new-wallet@example.invalid', now())`, [INITIALIZED_CUSTOMER]);
+    await asRole('authenticated', INITIALIZED_CUSTOMER);
+    const initial = await sql<{ user_id: string; balance_coins: string }>(
+      'SELECT user_id, balance_coins FROM rf_coin_get_or_create_wallet($1)', [INITIALIZED_CUSTOMER],
+    );
+    expect(Number(initial[0].balance_coins)).toBe(0);
+    expect(initial[0].user_id).toBe(INITIALIZED_CUSTOMER);
+    const customerApiRows = await sql<{ user_id: string; balance_coins: number }>(
+      `SELECT user_id, balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [INITIALIZED_CUSTOMER]);
+    expect(customerApiRows).toEqual([{ user_id: INITIALIZED_CUSTOMER, balance_coins: 0 }]);
+
+    const repeated = await sql<{ user_id: string; balance_coins: string }>(
+      'SELECT user_id, balance_coins FROM rf_coin_get_or_create_wallet($1)', [INITIALIZED_CUSTOMER],
+    );
+    expect(Number(repeated[0].balance_coins)).toBe(0);
+    expect(repeated[0].user_id).toBe(INITIALIZED_CUSTOMER);
+    await expect(sql('SELECT * FROM rf_coin_get_or_create_wallet($1)', [CUSTOMER2]))
+      .rejects.toThrow(/RF_COIN_FORBIDDEN/);
+    await resetRole();
+
+    await asRole('authenticated', CUSTOMER2);
+    const otherCustomerRows = await sql<{ user_id: string }>(
+      `SELECT user_id FROM rf_coin_wallets WHERE user_id = $1`, [INITIALIZED_CUSTOMER]);
+    expect(otherCustomerRows).toHaveLength(0);
+    await resetRole();
+
+    await asRole('anon');
+    await expect(sql('SELECT * FROM rf_coin_get_or_create_wallet($1)', [CUSTOMER]))
+      .rejects.toThrow(/permission denied/i);
+    await resetRole();
   });
 
   it('webhook RPCs are denied to authenticated even though granted roles differ', async () => {
@@ -579,22 +950,89 @@ describe('rf coins real SQL behavior', () => {
     expect(Number(handoffs[0].n)).toBe(1);
   });
 
-  it('cron trigger is executable by postgres only (Codex fix 2)', async () => {
-    await asRole('authenticated', CUSTOMER);
-    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
-      .rejects.toThrow(/permission denied/i);
-    await resetRole();
+  it('installs no outbound dispatcher or scheduled fulfillment job', async () => {
+    const installed = await sql<{
+      cron_schema: string | null;
+      net_schema: string | null;
+      handoff_dispatcher: string | null;
+      handoff_secret_count: string;
+    }>(`SELECT to_regnamespace('cron')::text AS cron_schema,
+               to_regnamespace('net')::text AS net_schema,
+               to_regprocedure('public.trigger_fulfillment_handoff()')::text AS handoff_dispatcher,
+               (SELECT count(*)::text FROM public._cron_secrets
+                WHERE key = 'fulfillment_handoff_secret') AS handoff_secret_count`);
+    expect(installed[0]).toEqual({
+      cron_schema: null,
+      net_schema: null,
+      handoff_dispatcher: null,
+      handoff_secret_count: '0',
+    });
+  });
 
-    await asRole('anon');
-    await expect(sql(`SELECT public.trigger_fulfillment_handoff()`))
-      .rejects.toThrow(/permission denied/i);
-    await resetRole();
+  it('preserves existing order-payment constraints and supports only the new nullable top-up link', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000f2';
+    const topupId = 'bbbbbbbb-0000-0000-0000-0000000000f2';
+    await insertOrder({ id: orderId, userId: CUSTOMER });
 
-    // postgres retains execution; it performs no HTTP call because no secret
-    // row exists (the trigger returns early with a NOTICE).
-    await db.exec(`SET ROLE postgres`);
-    await sql(`SELECT public.trigger_fulfillment_handoff()`);
-    await db.exec(`RESET ROLE`);
+    const orderColumn = await sql<{ is_nullable: string }>(
+      `SELECT is_nullable FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'payment_transactions' AND column_name = 'order_id'`);
+    expect(orderColumn[0]?.is_nullable).toBe('YES');
+
+    const orderFk = await sql<{ delete_action: string }>(
+      `SELECT CASE confdeltype WHEN 'c' THEN 'CASCADE' ELSE confdeltype::text END AS delete_action
+       FROM pg_catalog.pg_constraint c
+       JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid
+       WHERE c.conrelid = 'public.payment_transactions'::regclass
+         AND c.contype = 'f' AND a.attname = 'order_id' AND a.attnum = ANY(c.conkey)`);
+    expect(orderFk).toEqual([{ delete_action: 'CASCADE' }]);
+
+    await sql(`INSERT INTO public.payment_transactions
+      (order_id, idempotency_key, status, amount_cents)
+      VALUES ($1, 'synthetic-product-payment', 'pending', 50000)`, [orderId]);
+    await sql(`INSERT INTO public.rf_coin_topups
+      (id, user_id, coins, price_cents, idempotency_key)
+      VALUES ($1, $2, 100, 10000, 'synthetic-topup-payment')`, [topupId, CUSTOMER]);
+    await sql(`INSERT INTO public.payment_transactions
+      (order_id, rf_coin_topup_id, idempotency_key, status, amount_cents)
+      VALUES (NULL, $1, 'synthetic-wallet-payment', 'pending', 10000)`, [topupId]);
+
+    const rows = await sql<{ order_id: string | null; rf_coin_topup_id: string | null }>(
+      `SELECT order_id, rf_coin_topup_id FROM public.payment_transactions
+       WHERE idempotency_key IN ('synthetic-product-payment', 'synthetic-wallet-payment')
+       ORDER BY idempotency_key`);
+    expect(rows).toEqual([
+      { order_id: orderId, rf_coin_topup_id: null },
+      { order_id: null, rf_coin_topup_id: topupId },
+    ]);
+  });
+
+  it('confirms excessive TRUNCATE grants bypass RLS only inside this disposable fixture', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000f3';
+    await insertOrder({ id: orderId, userId: CUSTOMER });
+    await sql(`INSERT INTO public.payment_transactions
+      (order_id, idempotency_key, status, amount_cents)
+      VALUES ($1, 'synthetic-truncate-probe', 'pending', 1)`, [orderId]);
+
+    const privileges = await sql<{ anon_truncate: boolean; authenticated_truncate: boolean; anon_select: boolean; authenticated_select: boolean }>(
+      `SELECT has_table_privilege('anon', 'public.payment_transactions', 'TRUNCATE') AS anon_truncate,
+              has_table_privilege('authenticated', 'public.payment_transactions', 'TRUNCATE') AS authenticated_truncate,
+              has_table_privilege('anon', 'public.payment_transactions', 'SELECT') AS anon_select,
+              has_table_privilege('authenticated', 'public.payment_transactions', 'SELECT') AS authenticated_select`);
+    expect(privileges[0]).toEqual({
+      anon_truncate: true,
+      authenticated_truncate: true,
+      anon_select: false,
+      authenticated_select: false,
+    });
+
+    await db.exec('BEGIN');
+    await db.exec('SET LOCAL ROLE anon');
+    await db.exec('TRUNCATE TABLE public.payment_transactions');
+    await db.exec('ROLLBACK');
+    const preserved = await sql<{ count: string }>(
+      `SELECT count(*)::text AS count FROM public.payment_transactions WHERE idempotency_key = 'synthetic-truncate-probe'`);
+    expect(preserved[0]?.count).toBe('1');
   });
 
   it('customer settings row is invisible to clients (fail-closed RLS)', async () => {
@@ -846,5 +1284,24 @@ describe('rf coins real SQL behavior', () => {
     await resetRole();
     expect(ack[0].out_status).toBe('DONE');
     expect(badAck[0].out_status).toBe('rejected');
+  });
+
+  it('uses the stored discounted final order total and non-default centavos rate', async () => {
+    const orderId = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+    await sql(`UPDATE rf_coin_settings SET centavos_per_coin = 250 WHERE id = 1`);
+    // totalCents is the post-voucher final total (₱109.99), not the package
+    // subtotal. 10,999 / 250 rounds upward to 44 coins.
+    await insertOrder({ id: orderId, userId: CUSTOMER, totalCents: 10_999 });
+    await createWallet(CUSTOMER, 100);
+
+    await asRole('authenticated', CUSTOMER);
+    const result = await sql<{ out_coins: number; out_error: string | null }>(
+      `SELECT * FROM rf_coin_settle_order_payment_and_enqueue($1, $2)`, [orderId, CUSTOMER]);
+    await resetRole();
+    expect(result[0]).toMatchObject({ out_coins: 44, out_error: null });
+    const balance = await sql<{ balance_coins: string }>(
+      `SELECT balance_coins FROM rf_coin_wallets WHERE user_id = $1`, [CUSTOMER]);
+    expect(Number(balance[0].balance_coins)).toBe(56);
+    await sql(`UPDATE rf_coin_settings SET centavos_per_coin = 100 WHERE id = 1`);
   });
 });

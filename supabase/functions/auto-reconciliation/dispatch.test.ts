@@ -163,6 +163,13 @@ describe('dispatch request handling (behavioral, mocked db)', () => {
     expect(db.rpc).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it('keeps the RF Coins fulfillment Edge path locked before claiming queue work', async () => {
+    const response = await processFulfillmentHandoffBatch(db as never);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(await response.text())).toMatchObject({ claimed: 0, releaseLocked: true });
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
 });
 
 describe('dispatch source contract (auto-reconciliation/index.ts)', () => {

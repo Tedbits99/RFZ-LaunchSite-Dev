@@ -74,6 +74,7 @@ export const PRIMARY_NAV: NavItem[] = [
       { label: 'Payments', href: '/admin/payments' },
       { label: 'Reconciliation', href: '/admin/reconciliation' },
       { label: 'Refunds', href: '/admin/refunds' },
+      { label: 'RF Coins', href: '/admin/rf-coins' },
       { label: 'Export', href: '/admin/export' },
     ],
   },

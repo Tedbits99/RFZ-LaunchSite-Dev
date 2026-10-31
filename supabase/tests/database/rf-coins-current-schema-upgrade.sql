@@ -1,0 +1,236 @@
+-- Read-only post-migration assertions executed only against the isolated local
+-- Supabase project after replaying the canonical active migrations and the
+-- three exact RF Coins candidate migrations. No hosted database is targeted.
+\set ON_ERROR_STOP on
+SELECT set_config('rfz.expected_migration_count', :'expected_migration_count', false);
+DO $$
+DECLARE
+  v_order_nullable boolean;
+  v_order_fk_preserved boolean;
+  v_topup_fk_present boolean;
+  v_payment_rls boolean;
+  v_payment_policy boolean;
+  v_payment_indexes integer;
+  v_release_locked boolean;
+  v_feature_table_count integer;
+  v_bad_rls_tables integer;
+  v_has_wallet_method boolean;
+  v_existing_payment_preserved boolean;
+  v_handoff_job boolean := false;
+  v_handoff_secret_count bigint;
+  v_table text;
+  v_role text;
+  v_privilege text;
+  v_relation text;
+  v_select_expected boolean;
+  v_expected_migration_count integer;
+BEGIN
+  IF current_setting('server_version_num')::integer < 170000
+     OR current_setting('server_version_num')::integer >= 180000 THEN
+    RAISE EXCEPTION 'RF_COINS_POSTGRESQL_17_REQUIRED';
+  END IF;
+
+  v_expected_migration_count := NULLIF(
+    current_setting('rfz.expected_migration_count', true), ''
+  )::integer;
+  IF v_expected_migration_count IS NULL
+     OR (SELECT count(*) FROM supabase_migrations.schema_migrations)
+        <> v_expected_migration_count THEN
+    RAISE EXCEPTION 'RF_COINS_FINAL_MIGRATION_COUNT_INVALID';
+  END IF;
+
+  IF to_regclass('public.payment_transactions') IS NULL
+     OR to_regclass('public.rf_coin_wallets') IS NULL
+     OR to_regclass('public.rf_coin_ledger') IS NULL
+     OR to_regclass('public.rf_coin_topups') IS NULL
+     OR to_regclass('public.rf_coin_fulfillment_handoffs') IS NULL THEN
+    RAISE EXCEPTION 'RF_COINS_UPGRADED_SCHEMA_OBJECT_MISSING';
+  END IF;
+
+  SELECT NOT a.attnotnull INTO v_order_nullable
+  FROM pg_catalog.pg_attribute a
+  WHERE a.attrelid = 'public.payment_transactions'::regclass
+    AND a.attname = 'order_id' AND NOT a.attisdropped;
+  IF v_order_nullable IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'RF_COINS_ORDER_ID_NOT_NULLABLE';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid
+    WHERE c.conrelid = 'public.payment_transactions'::regclass
+      AND c.confrelid = 'public.orders'::regclass
+      AND c.contype = 'f' AND c.confdeltype = 'c'
+      AND a.attname = 'order_id' AND a.attnum = ANY(c.conkey)
+  ) INTO v_order_fk_preserved;
+  IF NOT v_order_fk_preserved THEN
+    RAISE EXCEPTION 'RF_COINS_ORDER_PAYMENT_CASCADE_FK_NOT_PRESERVED';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid
+    WHERE c.conrelid = 'public.payment_transactions'::regclass
+      AND c.confrelid = 'public.rf_coin_topups'::regclass
+      AND c.contype = 'f' AND c.confdeltype = 'n'
+      AND a.attname = 'rf_coin_topup_id' AND a.attnum = ANY(c.conkey)
+  ) INTO v_topup_fk_present;
+  IF NOT v_topup_fk_present THEN
+    RAISE EXCEPTION 'RF_COINS_TOPUP_PAYMENT_FK_MISSING';
+  END IF;
+
+  SELECT c.relrowsecurity INTO v_payment_rls
+  FROM pg_catalog.pg_class c
+  WHERE c.oid = 'public.payment_transactions'::regclass;
+  IF v_payment_rls IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'RF_COINS_PAYMENT_RLS_DISABLED';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies p
+    WHERE p.schemaname = 'public'
+      AND p.tablename = 'payment_transactions'
+      AND p.policyname = 'admin_select_payment_transactions'
+      AND p.cmd = 'SELECT'
+      AND 'authenticated' = ANY(p.roles)
+      AND p.qual ILIKE '%is_admin%'
+  ) INTO v_payment_policy;
+  IF NOT v_payment_policy THEN
+    RAISE EXCEPTION 'RF_COINS_PAYMENT_ADMIN_SELECT_POLICY_NOT_PRESERVED';
+  END IF;
+
+  SELECT count(*) INTO v_payment_indexes
+  FROM pg_catalog.pg_class i
+  WHERE i.relnamespace = 'public'::regnamespace
+    AND i.relkind = 'i'
+    AND i.relname IN (
+      'idx_payment_tx_order_id', 'idx_payment_tx_provider_ref',
+      'idx_payment_tx_idempotency', 'idx_payment_tx_rf_coin_topup'
+    );
+  IF v_payment_indexes <> 4 THEN
+    RAISE EXCEPTION 'RF_COINS_PAYMENT_INDEX_COMPATIBILITY_FAILURE';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.payment_transactions pt
+    JOIN public.orders o ON o.id = pt.order_id
+    WHERE pt.idempotency_key = 'rfz-disposable-existing-product-payment'
+      AND pt.order_id = 'f8200000-0000-4000-8000-000000000001'
+      AND pt.status = 'pending' AND pt.currency = 'PHP'
+      AND pt.amount_cents = o.total_cents
+  ) INTO v_existing_payment_preserved;
+  IF NOT v_existing_payment_preserved THEN
+    RAISE EXCEPTION 'RF_COINS_EXISTING_PRODUCT_PAYMENT_NOT_PRESERVED';
+  END IF;
+
+  SELECT count(*) INTO v_feature_table_count
+  FROM pg_catalog.pg_class c
+  WHERE c.relnamespace = 'public'::regnamespace
+    AND c.relkind IN ('r', 'p')
+    AND c.relname IN (
+      'rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger',
+      'rf_coin_packages', 'rf_coin_topups', 'rf_coin_adjustment_requests',
+      'rf_coin_admin_audit', 'rf_coin_fulfillment_handoffs'
+    );
+  IF v_feature_table_count <> 8 THEN
+    RAISE EXCEPTION 'RF_COINS_EXPECTED_FEATURE_TABLE_COUNT_MISMATCH';
+  END IF;
+
+  SELECT count(*) INTO v_bad_rls_tables
+  FROM pg_catalog.pg_class c
+  WHERE c.relnamespace = 'public'::regnamespace
+    AND c.relkind IN ('r', 'p')
+    AND c.relname IN (
+      'rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger',
+      'rf_coin_packages', 'rf_coin_topups', 'rf_coin_adjustment_requests',
+      'rf_coin_admin_audit', 'rf_coin_fulfillment_handoffs'
+    )
+    AND NOT c.relrowsecurity;
+  IF v_bad_rls_tables <> 0 THEN
+    RAISE EXCEPTION 'RF_COINS_RLS_NOT_ENABLED_ON_ALL_FEATURE_TABLES';
+  END IF;
+
+  -- Validate effective ACLs after the representative postgres-owned default
+  -- ACL fixture. SELECT stays available only on the seven intended read
+  -- surfaces; all browser writes and PostgreSQL 17 schema-maintenance rights
+  -- are denied. The internal queue and cron secret have no client grants.
+  FOREACH v_table IN ARRAY ARRAY[
+    'rf_coin_settings', 'rf_coin_wallets', 'rf_coin_ledger',
+    'rf_coin_packages', 'rf_coin_topups', 'rf_coin_adjustment_requests',
+    'rf_coin_admin_audit', 'rf_coin_fulfillment_handoffs', '_cron_secrets'
+  ] LOOP
+    v_relation := format('public.%I', v_table);
+    v_select_expected := v_table NOT IN ('rf_coin_fulfillment_handoffs', '_cron_secrets');
+    FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+      IF has_table_privilege(v_role, v_relation, 'SELECT') IS DISTINCT FROM v_select_expected THEN
+        RAISE EXCEPTION 'RF_COINS_BROWSER_SELECT_CONTRACT_FAILED role=% table=%',
+          v_role, v_table;
+      END IF;
+      FOREACH v_privilege IN ARRAY ARRAY[
+        'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'
+      ] LOOP
+        IF has_table_privilege(v_role, v_relation, v_privilege) THEN
+          RAISE EXCEPTION 'RF_COINS_BROWSER_PRIVILEGE_NOT_REVOKED role=% table=% privilege=%',
+            v_role, v_table, v_privilege;
+        END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+
+  FOREACH v_table IN ARRAY ARRAY['rf_coin_fulfillment_handoffs', '_cron_secrets'] LOOP
+    v_relation := format('public.%I', v_table);
+    FOREACH v_privilege IN ARRAY ARRAY[
+      'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
+      'REFERENCES', 'TRIGGER', 'MAINTAIN'
+    ] LOOP
+      IF has_table_privilege('service_role', v_relation, v_privilege) THEN
+        RAISE EXCEPTION 'RF_COINS_INTERNAL_TABLE_SERVICE_GRANT_PRESENT table=% privilege=%',
+          v_table, v_privilege;
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  SELECT NOT enabled AND NOT topups_enabled AND NOT spending_enabled
+  INTO v_release_locked
+  FROM public.rf_coin_settings WHERE id = 1;
+  IF v_release_locked IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'RF_COINS_RELEASE_FLAGS_NOT_DISABLED';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.payment_config
+    WHERE method_key = 'rf_coin_wallet' AND is_enabled IS TRUE
+  ) INTO v_has_wallet_method;
+  IF v_has_wallet_method THEN
+    RAISE EXCEPTION 'RF_COINS_WALLET_PAYMENT_METHOD_ENABLED';
+  END IF;
+
+  IF to_regclass('cron.job') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM cron.job WHERE jobname = $1)'
+      INTO v_handoff_job USING 'fulfillment-handoff';
+  END IF;
+  IF v_handoff_job THEN
+    RAISE EXCEPTION 'RF_COINS_FULFILLMENT_JOB_WAS_SCHEDULED';
+  END IF;
+
+  IF to_regprocedure('public.trigger_fulfillment_handoff()') IS NOT NULL THEN
+    RAISE EXCEPTION 'RF_COINS_OUTBOUND_HANDOFF_DISPATCHER_WAS_INSTALLED';
+  END IF;
+
+  SELECT count(*) INTO v_handoff_secret_count
+  FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret';
+  IF v_handoff_secret_count <> 0 THEN
+    RAISE EXCEPTION 'RF_COINS_FULFILLMENT_SECRET_WAS_CREATED';
+  END IF;
+
+  IF has_function_privilege('anon', 'public.rf_coin_credit_paid_topup(uuid,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.rf_coin_credit_paid_topup(uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.rf_coin_admin_center_read(text,integer,integer,uuid,timestamp with time zone,timestamp with time zone,text,text,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'RF_COINS_PRIVILEGED_RPC_GRANTS_TOO_BROAD';
+  END IF;
+
+  RAISE NOTICE 'RF_COINS_FULL_CURRENT_SCHEMA_UPGRADE_PASS pg=17 acl_default_fixture=removed browser_select=controlled browser_write=denied trigger=denied references=denied maintain=denied order_fk=preserved topup_fk=present existing_payment=preserved payment_rls=enabled admin_policy=preserved indexes=4 release_locks=off handoff_job=absent handoff_secret=absent';
+END;
+$$;

@@ -6,6 +6,8 @@ import { Mail, ShieldCheck } from 'lucide-react'
 import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 import ThemeSelector from '@/components/ThemeSelector'
 import PasswordInput from '@/components/PasswordInput'
+import { authenticateAdmin } from '@/lib/adminLoginFlow'
+import { logAuthFlowFailure } from '@/lib/authFlowDiagnostics'
 
 export default function SecureAdminLoginPage() {
   const router = useRouter()
@@ -16,20 +18,26 @@ export default function SecureAdminLoginPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    // Render the form after hydration even if the optional session lookup is
+    // slow. A logout return must not wait on, or redirect from, stale browser
+    // session state. Protected pages still authorize on the server.
+    setReady(true)
+    if (new URLSearchParams(window.location.search).get('from') === 'logout') return
+    let active = true
     let supabase
     try {
       supabase = createAdminBrowserClient()
     } catch {
-      setReady(true)
       return
     }
     supabase.auth.getSession().then(({ data }: { data: { session: unknown | null } }) => {
-      if (data?.session) {
+      if (active && data?.session) {
         router.replace('/admin')
-      } else {
-        setReady(true)
       }
-    }).catch(() => setReady(true))
+    }).catch((error: unknown) => {
+      if (active) logAuthFlowFailure('admin_login', 'initial_session_lookup', error)
+    })
+    return () => { active = false }
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,39 +45,53 @@ export default function SecureAdminLoginPage() {
     setError(null)
     setSubmitting(true)
 
-    let supabase
     try {
-      supabase = createAdminBrowserClient()
-    } catch {
-      setError('Database is not configured.')
+      let supabase: ReturnType<typeof createAdminBrowserClient>
+      try {
+        supabase = createAdminBrowserClient()
+      } catch {
+        setError('Admin sign-in is temporarily unavailable.')
+        return
+      }
+
+      const result = await authenticateAdmin({
+        signIn: async (loginEmail, loginPassword) => {
+          const { data, error: authError } = await supabase.auth.signInWithPassword({
+            email: loginEmail,
+            password: loginPassword,
+          })
+          return { userId: data.user?.id ?? null, error: authError }
+        },
+        lookupAdmin: async (userId) => {
+          const { data, error: lookupError } = await supabase
+            .from('admins')
+            .select('id, is_active, role')
+            .eq('id', userId)
+            .maybeSingle()
+          return { admin: data, error: lookupError }
+        },
+        signOutLocal: async () => {
+          const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+          if (signOutError) throw signOutError
+        },
+      }, email, password)
+
+      if (!result.ok) {
+        logAuthFlowFailure('admin_login', result.stage, result.error)
+        if (result.cleanupError) logAuthFlowFailure('admin_login', 'local_session_cleanup', result.cleanupError)
+        setError(result.stage === 'unexpected'
+          ? 'Admin sign-in could not be completed. Please try again.'
+          : 'Invalid email or password.')
+        return
+      }
+
+      router.push('/admin')
+    } catch (error) {
+      logAuthFlowFailure('admin_login', 'unexpected', error)
+      setError('Admin sign-in could not be completed. Please try again.')
+    } finally {
       setSubmitting(false)
-      return
     }
-
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-
-    if (signInError || !signInData.user) {
-      setError(signInError?.message === 'Invalid login credentials' ? 'Invalid email or password.' : signInError?.message || 'Invalid email or password.')
-      setSubmitting(false)
-      return
-    }
-
-    const { data: admin, error: adminError } = await supabase
-      .from('admins')
-      .select('id, is_active, role')
-      .eq('id', signInData.user.id)
-      .maybeSingle()
-    if (adminError || !admin || !admin.is_active || !['ADMIN', 'SUPER_ADMIN'].includes(admin.role)) {
-      await supabase.auth.signOut({ scope: 'local' })
-      setError('Invalid email or password.')
-      setSubmitting(false)
-      return
-    }
-
-    router.push('/admin')
   }
 
   if (!ready) {

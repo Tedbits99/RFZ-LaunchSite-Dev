@@ -4,6 +4,8 @@ import FazerCardsWebhookFeed from './suppliers/FazerCardsWebhookFeed';
 import Link from 'next/link';
 import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, Package, ShoppingCart, Users, XCircle } from 'lucide-react';
 import { MetricCard, PageHeader, StatusBadge, Surface } from '@/components/admin/ui';
+import { adminMetricValue } from '@/lib/adminMetricValue';
+import { logPostgrestQueryFailure } from '@/lib/postgrestDiagnostics';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +19,15 @@ async function getMetrics(): Promise<{
   packages: PackageRow[];
   customerEmails: string[];
   error: string | null;
+  orderQueryFailed: boolean;
+  gamesQueryFailed: boolean;
+  packagesQueryFailed: boolean;
+  customersQueryFailed: boolean;
 }> {
-  const empty = { orders: [], games: [], packages: [], customerEmails: [], error: null as string | null };
+  const empty = {
+    orders: [], games: [], packages: [], customerEmails: [], error: null as string | null,
+    orderQueryFailed: false, gamesQueryFailed: false, packagesQueryFailed: false, customersQueryFailed: false,
+  };
   let db: Awaited<ReturnType<typeof createAdminServerClient>>;
   try {
     // This page is nested under app/admin/layout.tsx which already performs
@@ -29,7 +38,14 @@ async function getMetrics(): Promise<{
     // The following Supabase reads remain RLS-backed by the user's session.
     db = await createAdminServerClient();
   } catch {
-    return { ...empty, error: 'Database not configured' };
+    return {
+      ...empty,
+      error: 'Database not configured',
+      orderQueryFailed: true,
+      gamesQueryFailed: true,
+      packagesQueryFailed: true,
+      customersQueryFailed: true,
+    };
   }
 
   try {
@@ -40,22 +56,41 @@ async function getMetrics(): Promise<{
       db.from('orders').select('email'),
     ]);
 
+    if (orders.error) logPostgrestQueryFailure('admin_dashboard_orders', orders.error);
+    if (games.error) logPostgrestQueryFailure('admin_dashboard_games', games.error);
+    if (packages.error) logPostgrestQueryFailure('admin_dashboard_packages', packages.error);
+    if (customers.error) logPostgrestQueryFailure('admin_dashboard_customers', customers.error);
+
     return {
       orders: (orders.data as unknown as OrderRow[] | null) ?? [],
       games: (games.data as unknown as GameRow[] | null) ?? [],
       packages: (packages.data as unknown as PackageRow[] | null) ?? [],
       customerEmails: (customers.data ?? []).map((r: { email: string }) => r.email),
-      error: null,
+      error: orders.error || games.error || packages.error || customers.error
+        ? 'Some live dashboard data is temporarily unavailable.'
+        : null,
+      orderQueryFailed: Boolean(orders.error),
+      gamesQueryFailed: Boolean(games.error),
+      packagesQueryFailed: Boolean(packages.error),
+      customersQueryFailed: Boolean(customers.error),
     };
-  } catch (e) {
-    return { ...empty, error: e instanceof Error ? e.message : 'Failed to load metrics' };
+  } catch (error) {
+    logPostgrestQueryFailure('admin_dashboard_query', error);
+    return {
+      ...empty,
+      error: 'Live dashboard data is temporarily unavailable.',
+      orderQueryFailed: true,
+      gamesQueryFailed: true,
+      packagesQueryFailed: true,
+      customersQueryFailed: true,
+    };
   }
 }
 
 const fmtP = (cents: number) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 export default async function AdminDashboard() {
   const data = await getMetrics();
-  const { orders, games, packages, error } = data;
+  const { orders, games, packages, error, orderQueryFailed, gamesQueryFailed, packagesQueryFailed, customersQueryFailed } = data;
   const uniqueCustomers = new Set(data.customerEmails);
   const revenue = orders.filter((o) => o.status === 'PAID' || o.status === 'COMPLETED' || o.status === 'PROCESSING').reduce((s, o) => s + o.total_cents, 0);
   const pending = orders.filter((o) => o.status === 'PENDING' || o.status === 'PAYMENT_PENDING').length;
@@ -66,15 +101,15 @@ export default async function AdminDashboard() {
   const failed = orders.filter((o) => o.status === 'FAILED').length;
 
   const cards = [
-    { label: 'Total Orders', value: orders.length, icon: ShoppingCart, tone: 'blue' as const },
-    { label: 'Revenue', value: fmtP(revenue), icon: Banknote, tone: 'emerald' as const },
-    { label: 'Pending', value: pending, icon: Clock, tone: 'amber' as const, detail: 'Needs attention' },
-    { label: 'Customers', value: uniqueCustomers.size, icon: Users, tone: 'violet' as const },
-    { label: 'Paid', value: paid, icon: CheckCircle2, tone: 'cyan' as const },
-    { label: 'Completed', value: completed, icon: ArrowUpRight, tone: 'emerald' as const },
-    { label: 'Cancelled', value: cancelled, icon: ArrowDownRight, tone: 'rose' as const },
-    { label: 'Failed', value: failed, icon: XCircle, tone: 'rose' as const },
-    { label: 'Games', value: games.length, icon: Gamepad2, tone: 'blue' as const },
+    { label: 'Total Orders', value: adminMetricValue(orders.length, orderQueryFailed), icon: ShoppingCart, tone: 'blue' as const },
+    { label: 'Revenue', value: adminMetricValue(fmtP(revenue), orderQueryFailed), icon: Banknote, tone: 'emerald' as const },
+    { label: 'Pending', value: adminMetricValue(pending, orderQueryFailed), icon: Clock, tone: 'amber' as const, detail: 'Needs attention' },
+    { label: 'Customers', value: adminMetricValue(uniqueCustomers.size, customersQueryFailed), icon: Users, tone: 'violet' as const },
+    { label: 'Paid', value: adminMetricValue(paid, orderQueryFailed), icon: CheckCircle2, tone: 'cyan' as const },
+    { label: 'Completed', value: adminMetricValue(completed, orderQueryFailed), icon: ArrowUpRight, tone: 'emerald' as const },
+    { label: 'Cancelled', value: adminMetricValue(cancelled, orderQueryFailed), icon: ArrowDownRight, tone: 'rose' as const },
+    { label: 'Failed', value: adminMetricValue(failed, orderQueryFailed), icon: XCircle, tone: 'rose' as const },
+    { label: 'Games', value: adminMetricValue(games.length, gamesQueryFailed), icon: Gamepad2, tone: 'blue' as const },
   ];
 
   return (
@@ -87,7 +122,7 @@ export default async function AdminDashboard() {
 
       {error && (
         <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          Could not load live data: {error}. Showing empty state.
+          {error} Metrics may be incomplete; unavailable values are not shown as zero.
         </div>
       )}
 
@@ -95,7 +130,7 @@ export default async function AdminDashboard() {
 
       <Surface className="mt-6 p-4 sm:p-5">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="font-display text-sm font-semibold">Order health</h2><p className="mt-1 text-xs text-slate-500">A quick view of the current fulfillment pipeline.</p></div><Link href="/admin/orders" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Review orders <span aria-hidden="true">→</span></Link></div>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-6">{[['Pending', pending, 'PENDING'], ['Paid', paid, 'PAID'], ['Processing', orders.filter((o) => o.status === 'PROCESSING').length, 'PROCESSING'], ['Completed', completed, 'COMPLETED'], ['Cancelled', cancelled, 'CANCELLED'], ['Failed', failed, 'FAILED']].map(([label, count, status]) => <div key={label as string} className="rounded-lg border border-[#1b2a45] bg-[#080f20] p-3"><StatusBadge status={status as string} /><p className="font-display mt-3 text-xl font-bold">{count as number}</p><p className="mt-1 text-[10px] text-slate-500">{label as string}</p></div>)}</div>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-6">{[['Pending', pending, 'PENDING'], ['Paid', paid, 'PAID'], ['Processing', orders.filter((o) => o.status === 'PROCESSING').length, 'PROCESSING'], ['Completed', completed, 'COMPLETED'], ['Cancelled', cancelled, 'CANCELLED'], ['Failed', failed, 'FAILED']].map(([label, count, status]) => <div key={label as string} className="rounded-lg border border-[#1b2a45] bg-[#080f20] p-3"><StatusBadge status={status as string} /><p className="font-display mt-3 text-xl font-bold">{adminMetricValue(count as number, orderQueryFailed)}</p><p className="mt-1 text-[10px] text-slate-500">{label as string}</p></div>)}</div>
       </Surface>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
@@ -105,9 +140,9 @@ export default async function AdminDashboard() {
             <span className="rounded-full bg-cyan-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">Live data</span>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Link href="/admin/orders?status=WAITING_PAYMENT" className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 transition hover:border-amber-300/50"><p className="text-xs font-semibold text-amber-200">Payment review</p><p className="mt-2 font-display text-2xl font-bold text-white">{waiting}</p><p className="mt-1 text-[11px] text-slate-500">Orders waiting for payment</p></Link>
-            <Link href="/admin/orders?status=PROCESSING" className="rounded-xl border border-blue-400/20 bg-blue-400/5 p-4 transition hover:border-blue-300/50"><p className="text-xs font-semibold text-blue-200">Fulfillment queue</p><p className="mt-2 font-display text-2xl font-bold text-white">{orders.filter((o) => o.status === 'PROCESSING').length}</p><p className="mt-1 text-[11px] text-slate-500">Orders with active fulfillment</p></Link>
-            <Link href="/admin/orders?status=FAILED" className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 transition hover:border-rose-300/50"><p className="text-xs font-semibold text-rose-200">Failed orders</p><p className="mt-2 font-display text-2xl font-bold text-white">{failed}</p><p className="mt-1 text-[11px] text-slate-500">Needs investigation or recovery</p></Link>
+            <Link href="/admin/orders?status=WAITING_PAYMENT" className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 transition hover:border-amber-300/50"><p className="text-xs font-semibold text-amber-200">Payment review</p><p className="mt-2 font-display text-2xl font-bold text-white">{orderQueryFailed ? '—' : waiting}</p><p className="mt-1 text-[11px] text-slate-500">Orders waiting for payment</p></Link>
+            <Link href="/admin/orders?status=PROCESSING" className="rounded-xl border border-blue-400/20 bg-blue-400/5 p-4 transition hover:border-blue-300/50"><p className="text-xs font-semibold text-blue-200">Fulfillment queue</p><p className="mt-2 font-display text-2xl font-bold text-white">{orderQueryFailed ? '—' : orders.filter((o) => o.status === 'PROCESSING').length}</p><p className="mt-1 text-[11px] text-slate-500">Orders with active fulfillment</p></Link>
+            <Link href="/admin/orders?status=FAILED" className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4 transition hover:border-rose-300/50"><p className="text-xs font-semibold text-rose-200">Failed orders</p><p className="mt-2 font-display text-2xl font-bold text-white">{orderQueryFailed ? '—' : failed}</p><p className="mt-1 text-[11px] text-slate-500">Needs investigation or recovery</p></Link>
           </div>
         </Surface>
         <Surface className="p-5">
@@ -130,7 +165,7 @@ export default async function AdminDashboard() {
             <table className="w-full min-w-[620px] text-left text-xs">
               <thead className="text-[10px] uppercase tracking-wider text-slate-500"><tr className="border-b border-[#1b2a45]"><th className="pb-3 font-medium">Reference</th><th className="pb-3 font-medium">Customer</th><th className="pb-3 font-medium">Game</th><th className="pb-3 font-medium">Status</th><th className="pb-3 text-right font-medium">Total</th></tr></thead>
               <tbody>
-                {orders.length === 0 && <tr><td colSpan={5} className="py-10 text-center text-slate-500">No orders yet. Orders from the storefront will appear here.</td></tr>}
+                {orders.length === 0 && <tr><td colSpan={5} className="py-10 text-center text-slate-500">{orderQueryFailed ? 'Order data is temporarily unavailable.' : 'No orders yet. Orders from the storefront will appear here.'}</td></tr>}
                 {orders.slice(0, 12).map((o) => (
                   <tr key={o.id} className="border-b border-[#0f1b31] last:border-0">
                     <td className="py-3 font-mono text-cyan-300">{o.reference}</td>
@@ -149,10 +184,10 @@ export default async function AdminDashboard() {
           <Surface className="p-5">
             <div className="mb-4 flex items-center justify-between"><h2 className="font-display text-sm font-semibold">Catalog</h2><Link href="/admin/games" className="text-xs text-cyan-300 hover:text-cyan-200">Manage</Link></div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Gamepad2 size={14} className="text-cyan-300" /> Games</span><span className="font-display font-bold text-slate-200">{games.length}</span></div>
-              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Package size={14} className="text-violet-300" /> Packages</span><span className="font-display font-bold text-slate-200">{packages.length}</span></div>
-              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><XCircle size={14} className="text-rose-300" /> Cancelled</span><span className="font-display font-bold text-slate-200">{cancelled}</span></div>
-              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><XCircle size={14} className="text-rose-400" /> Failed</span><span className="font-display font-bold text-slate-200">{failed}</span></div>
+              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Gamepad2 size={14} className="text-cyan-300" /> Games</span><span className="font-display font-bold text-slate-200">{adminMetricValue(games.length, gamesQueryFailed)}</span></div>
+              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><Package size={14} className="text-violet-300" /> Packages</span><span className="font-display font-bold text-slate-200">{adminMetricValue(packages.length, packagesQueryFailed)}</span></div>
+              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><XCircle size={14} className="text-rose-300" /> Cancelled</span><span className="font-display font-bold text-slate-200">{orderQueryFailed ? '—' : cancelled}</span></div>
+              <div className="flex items-center justify-between text-xs text-slate-400"><span className="flex items-center gap-2"><XCircle size={14} className="text-rose-400" /> Failed</span><span className="font-display font-bold text-slate-200">{orderQueryFailed ? '—' : failed}</span></div>
             </div>
           </Surface>
           <GamesVisibilityPanel initialGames={games.map((g) => ({ id: g.id, name: g.name, slug: g.slug, is_active: g.is_active, is_featured: g.is_featured }))} />

@@ -2,13 +2,32 @@
 
 import { useState, type ReactNode } from 'react'
 import { Activity, Bell, LogOut, Menu, Search } from 'lucide-react'
-import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
 import AdminNavigation from '@/components/admin/AdminNavigation'
 import ThemeSelector from '@/components/ThemeSelector'
 import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets'
 
-export default function AdminShell({ children }: { children: ReactNode }) {
+export default function AdminShell({ children, role }: { children: ReactNode; role: string }) {
   const [navigationOpen, setNavigationOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
+
+  async function signOut() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    setLogoutError(null)
+    try {
+      const response = await fetch('/api/auth/admin-logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      if (!response.ok) throw new Error('logout failed')
+      window.location.replace('/secure-admin-login?from=logout')
+    } catch {
+      setLogoutError('Sign out could not be completed. Please try again.')
+      setLoggingOut(false)
+    }
+  }
 
   return (
     <div className="rfz-admin-app min-h-screen bg-[var(--rfz-bg)] text-[var(--rfz-ink)]">
@@ -66,21 +85,22 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               </span>
               <button
                 aria-label="Log out of admin dashboard"
-                onClick={async () => {
-                  try { await createAdminBrowserClient().auth.signOut({ scope: 'local' }) } catch { /* The protected route still receives a fresh login boundary. */ }
-                  window.location.href = '/secure-admin-login'
-                }}
-                className="flex items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-rose-400 hover:text-rose-200"
+                onClick={signOut}
+                disabled={loggingOut}
+                className="flex items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-rose-400 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60"
               >
-                <LogOut size={13} /> <span className="hidden sm:inline">Log out</span>
+                <LogOut size={13} /> <span className="hidden sm:inline">{loggingOut ? 'Signing out…' : 'Log out'}</span>
               </button>
             </div>
         </div>
       </header>
 
       <div className="flex min-w-0">
-        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} />
-        <div className="min-w-0 flex-1">{children}</div>
+        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} role={role} />
+        <div className="min-w-0 flex-1">
+          {logoutError && <p className="mx-4 mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200" role="alert">{logoutError}</p>}
+          {children}
+        </div>
       </div>
     </div>
   )

@@ -4,7 +4,15 @@ import { NextRequest } from 'next/server';
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
 const USER_ID = 'customer-1';
-const ACCESS_TOKEN = 'recovery-access-token';
+const SESSION_ID = '3c3c3c3c-3c3c-43c3-83c3-3c3c3c3c3c3c';
+
+function accessToken(sessionId = SESSION_ID, issuedAt = 1) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ session_id: sessionId, iat: issuedAt }), 'utf8').toString('base64url');
+  return `${header}.${payload}.synthetic-signature`;
+}
+
+const ACCESS_TOKEN = accessToken();
 const GENERIC_INVALID = 'This reset link is invalid or has expired. Please request a new one.';
 
 const mocks = vi.hoisted(() => ({
@@ -28,7 +36,8 @@ vi.mock('@/lib/authSessionClients', () => ({
 import { POST } from './route';
 
 function fingerprintOf(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+  const sessionId = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).session_id as string;
+  return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
 }
 
 // Documented SDK contracts: getSession/getUser return their payloads through
@@ -113,6 +122,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(mocks.updateUser).toHaveBeenCalledOnce();
     expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-1' });
+    expect(mocks.getUser).toHaveBeenCalledWith(ACCESS_TOKEN);
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
 
     const cleared = setCookies(response).find((c) => c.startsWith('rfz-recovery-proof='));
@@ -121,6 +131,34 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
     expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/);
     expect(cleared).toContain('Path=/auth/reset-password');
     expect(cleared).toContain('HttpOnly');
+  });
+
+  it('accepts an access-token refresh within the same verified Auth session', async () => {
+    const refreshedToken = accessToken(SESSION_ID, 2);
+    mocks.getSession.mockResolvedValue(recoverySessionResult({ accessToken: refreshedToken }));
+
+    const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: VALID_COOKIE }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUser).toHaveBeenCalledWith(refreshedToken);
+    expect(mocks.updateUser).toHaveBeenCalledOnce();
+  });
+
+  it('still reports the committed password update as success if local sign-out fails, while expiring only recovery cookies', async () => {
+    mocks.signOut.mockRejectedValueOnce(new Error('synthetic cookie cleanup failure'));
+    const response = await POST(postRequest(
+      { password: 'new-password-1' },
+      { cookie: `rfz-recovery-auth=synthetic-session; rfz-recovery-proof=${makeProof()}` },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ message: 'Password updated.' });
+    expect(mocks.updateUser).toHaveBeenCalledOnce();
+    const cookies = setCookies(response);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-recovery-proof=') && cookie.includes('Max-Age=0'))).toBe(true);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-recovery-auth=') && cookie.includes('Max-Age=0'))).toBe(true);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-customer-auth='))).toBe(false);
+    expect(cookies.some((cookie) => cookie.startsWith('rfz-admin-auth='))).toBe(false);
   });
 
   it('rejects a request with NO recovery proof cookie', async () => {
@@ -173,7 +211,7 @@ describe('POST /auth/reset-password/complete (server-verified password reset)', 
   });
 
   it('rejects a proof bound to a different session fingerprint', async () => {
-    const replayed = makeProof({ fingerprint: fingerprintOf('a-different-session-token') });
+    const replayed = makeProof({ fingerprint: fingerprintOf(accessToken('4d4d4d4d-4d4d-44d4-84d4-4d4d4d4d4d4d')) });
     const response = await POST(postRequest({ password: 'new-password-1' }, { cookie: `rfz-recovery-proof=${replayed}` }));
 
     expect(response.status).toBe(403);

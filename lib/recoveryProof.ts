@@ -9,16 +9,31 @@ const MIN_SECRET_BYTES = 32;
 const MAX_AGE_SECONDS = Math.min(RECOVERY_PROOF_MAX_AGE_SECONDS, 600);
 
 /**
- * SHA-256 fingerprint of the recovery session's access token. Both the
- * callback (from exchangeCodeForSession().data.session.access_token) and the
- * completion endpoint (from getSession().data.session.access_token) derive
- * the same binding value; the raw token itself is never stored or
- * transmitted in the proof cookie. If the access token is refreshed the
- * fingerprint no longer matches and the reset fails closed — the user
- * requests a new reset link.
+ * Stable fingerprint for the verified Supabase Auth session. Access tokens
+ * rotate during normal refreshes, including while a user is on the recovery
+ * page, so binding the proof to the raw JWT makes a valid reset fail after a
+ * refresh. The callback and completion route first verify the JWT with
+ * auth.getUser(accessToken); this helper then binds the HMAC proof to the
+ * stable session_id claim rather than the rotating bearer token. The session
+ * ID itself is never stored in the proof cookie.
+ *
+ * Returns null for malformed or non-Supabase tokens so callers fail closed.
  */
-export function sessionFingerprint(accessToken: string): string {
-  return createHash('sha256').update(accessToken, 'utf8').digest('hex');
+export function sessionFingerprint(accessToken: string): string | null {
+  const segments = accessToken.split('.');
+  if (segments.length !== 3 || !segments[1]) return null;
+
+  try {
+    const claims = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8')) as unknown;
+    if (!claims || typeof claims !== 'object' || !('session_id' in claims)) return null;
+    const sessionId = (claims as { session_id?: unknown }).session_id;
+    if (typeof sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
+      return null;
+    }
+    return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -37,9 +52,20 @@ export type RecoveryProofClaims = {
 };
 
 export type RecoveryProof = { name: string; value: string; options: CookieOptions };
+export type RecoveryProofFailureCode =
+  | 'missing_or_oversized'
+  | 'secret_unavailable'
+  | 'malformed_proof'
+  | 'malformed_claims'
+  | 'wrong_purpose'
+  | 'expired'
+  | 'invalid_signature'
+  | 'user_mismatch'
+  | 'session_mismatch';
+
 type RecoveryProofVerification =
   | { ok: true; claims: RecoveryProofClaims }
-  | { ok: false };
+  | { ok: false; reason: RecoveryProofFailureCode };
 
 interface CookieOptions {
   httpOnly: boolean;
@@ -120,28 +146,28 @@ export function verifyRecoveryProof(
   expected: { userId: string; sessionFingerprint: string },
 ): RecoveryProofVerification {
   if (typeof cookieValue !== 'string' || cookieValue.length === 0 || cookieValue.length > 4096) {
-    return { ok: false };
+    return { ok: false, reason: 'missing_or_oversized' };
   }
 
   let secret: string;
   try {
     secret = getSecret();
   } catch {
-    return { ok: false };
+    return { ok: false, reason: 'secret_unavailable' };
   }
 
   const parts = cookieValue.split('.');
-  if (parts.length !== 2) return { ok: false };
+  if (parts.length !== 2) return { ok: false, reason: 'malformed_proof' };
   const [payload, sig] = parts;
 
   let claims: unknown;
   try {
     claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
-    return { ok: false };
+    return { ok: false, reason: 'malformed_claims' };
   }
 
-  if (!claims || typeof claims !== 'object') return { ok: false };
+  if (!claims || typeof claims !== 'object') return { ok: false, reason: 'malformed_claims' };
   const record = claims as Partial<RecoveryProofClaims>;
   if (
     typeof record.token !== 'string' ||
@@ -154,14 +180,14 @@ export function verifyRecoveryProof(
     typeof record.exp !== 'number' ||
     !Number.isFinite(record.exp)
   ) {
-    return { ok: false };
+    return { ok: false, reason: 'malformed_claims' };
   }
 
-  if (record.purpose !== RECOVERY_PROOF_PURPOSE) return { ok: false };
-  if (record.exp <= Math.floor(Date.now() / 1000)) return { ok: false };
-  if (!safeEqual(sig, sign(payload, secret))) return { ok: false };
-  if (!safeEqual(record.userId, expected.userId)) return { ok: false };
-  if (!safeEqual(record.sessionFingerprint, expected.sessionFingerprint)) return { ok: false };
+  if (record.purpose !== RECOVERY_PROOF_PURPOSE) return { ok: false, reason: 'wrong_purpose' };
+  if (record.exp <= Math.floor(Date.now() / 1000)) return { ok: false, reason: 'expired' };
+  if (!safeEqual(sig, sign(payload, secret))) return { ok: false, reason: 'invalid_signature' };
+  if (!safeEqual(record.userId, expected.userId)) return { ok: false, reason: 'user_mismatch' };
+  if (!safeEqual(record.sessionFingerprint, expected.sessionFingerprint)) return { ok: false, reason: 'session_mismatch' };
 
   return {
     ok: true,

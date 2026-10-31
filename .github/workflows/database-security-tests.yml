@@ -81,6 +81,9 @@ jobs:
       - name: Run serialized application tests
         run: npm test -- --pool=threads --no-file-parallelism --maxWorkers=1
 
+      - name: Run multi-connection PostgreSQL RF Coins concurrency tests
+        run: bash scripts/test-rf-coins-concurrency.sh
+
       - name: Run TypeScript validation
         run: npx tsc --noEmit
 
@@ -113,8 +116,11 @@ jobs:
           deno check supabase/functions/archive-old-orders/index.ts
           deno check supabase/functions/auto-reconciliation/index.ts
           deno check supabase/functions/create-qrph-payment/index.ts
+          deno check supabase/functions/create-coin-topup-payment/index.ts
           deno check supabase/functions/fazercards-test/index.ts
-          deno test supabase/functions/fazercards-test/authorization_test.ts
+          node scripts/verify-disabled-fazercards-diagnostics.mjs --self-test
+          node scripts/verify-disabled-fazercards-diagnostics.mjs
+          deno eval 'import { disabledFazerCardsDiagnosticResponse } from "./supabase/functions/fazercards-test/disabledResponse.ts"; const r = disabledFazerCardsDiagnosticResponse(); if (r.status !== 503 || r.headers.get("cache-control") !== "no-store") Deno.exit(1); const body = await r.json(); if (body.error !== "FazerCards diagnostics are disabled; no provider request was made.") Deno.exit(1);'
           deno check supabase/functions/payment-webhook/index.ts
           deno check supabase/functions/send-transactional-email/index.ts
           deno check supabase/functions/completion-receipt-email-worker/index.ts
@@ -136,4 +142,5 @@ jobs:
           fetch-depth: 0
       - name: Verify executable migration sequence
         run: |
+          bash scripts/verify-deployable-migrations.sh --self-test
           bash scripts/verify-deployable-migrations.sh

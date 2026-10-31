@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isSafeRfCoinPaymongoSandbox } from "../_shared/rfCoinPaymongoSafety.ts";
 
 /*
   Create a PayMongo QR Ph payment for an RF Coins top-up.
@@ -17,9 +18,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
      p_user_id against auth.uid(), which is only present for the real
      customer. The service role has no auth.uid() and would be rejected.
   3. PayMongo: Payment Intent -> QR Ph Method -> Attach -> extract QR image URL
-  4. Log the payment transaction with the payment_transactions schema
-     (provider_name, action, status) and treat log-write failures as errors:
-     a payment the database cannot resolve later must never be handed out.
+  4. Reserve the payment transaction with the payment_transactions schema
+     (provider_name, action, status) before contacting PayMongo. A provider
+     request must never proceed without a durable idempotency record.
   5. Return QR image URL + expiry to the wallet frontend
 
   Crediting happens ONLY via rf_coin_credit_paid_topup, called by the payment
@@ -32,6 +33,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+// This legacy PayMongo wallet-funding path is release-locked. Product
+// checkout uses a separate endpoint and is not affected. Do not enable this
+// path until the approved wallet funding architecture and hosted financial
+// acceptance gates are complete.
+const RF_COINS_FUNDING_RELEASE_ENABLED = false;
+
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
     status,
@@ -41,15 +48,6 @@ const json = (body: unknown, status: number) =>
 interface TopupRequest {
   packageId?: unknown;
   userId?: unknown;
-}
-
-interface QrPhResult {
-  success: boolean;
-  paymentIntentId: string | null;
-  qrImageUrl: string | null;
-  clientKey: string | null;
-  expiresAt: string | null;
-  error: string | null;
 }
 
 async function paymongoJson(
@@ -94,11 +92,15 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Method not allowed." }, 405);
     }
 
+    if (!RF_COINS_FUNDING_RELEASE_ENABLED) {
+      return json({ error: "RF Coins funding is not available yet." }, 503);
+    }
+
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || SERVICE_KEY;
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
     const PAYMONGO_SECRET = Deno.env.get("PAYMENT_PAYMONGO_SECRET_KEY");
-    if (!SUPABASE_URL || !SERVICE_KEY || !PAYMONGO_SECRET) {
+    if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY || !PAYMONGO_SECRET) {
       return json({ error: "Service unavailable." }, 503);
     }
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -139,6 +141,30 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Account not eligible." }, 403);
     }
 
+    // This funding feature remains sandbox-only until the hosted RF Coins
+    // schema, webhook reconciliation, ledger, and E2E acceptance gates pass.
+    // Check before creating a top-up record so a misconfigured/live provider
+    // cannot leave pending wallet-funding rows behind.
+    const { data: config, error: configError } = await supabase
+      .from("payment_config")
+      .select("provider_type, provider_name, api_url, is_enabled, is_test_mode, currency, webhook_url")
+      .eq("method_key", "paymongo_qrph")
+      .eq("is_enabled", true)
+      .eq("provider_type", "automated")
+      .maybeSingle();
+    if (configError || !config || !isSafeRfCoinPaymongoSandbox({
+      providerName: config?.provider_name,
+      providerType: config?.provider_type,
+      enabled: config?.is_enabled,
+      testMode: config?.is_test_mode,
+      secretKey: PAYMONGO_SECRET,
+      apiUrl: config?.api_url,
+    })) {
+      return json({ error: "RF Coins payments are unavailable until sandbox funding is verified." }, 503);
+    }
+    const currency = String(config.currency || "PHP");
+    const normalizedCurrency = currency.toUpperCase();
+
     // --- Create the top-up (validates RF Coins settings + active package) ---
     const { data: rpcData, error: rpcError } = await jwtClient.rpc("rf_coin_create_topup", {
       p_user_id: caller.id,
@@ -163,33 +189,133 @@ Deno.serve(async (req: Request) => {
     const priceCents = Number(row.out_price_cents);
     const idempotencyKey = `rfcoin_topup_${topupId}`;
 
-    // --- Reuse an existing pending payment session when present ---
-    const { data: existing } = await supabase
+    // The SQL RPC reuses one pending top-up per customer/package. Reuse its
+    // recorded QR session too; never create another provider intent on retry.
+    const { data: topup, error: topupError } = await supabase
       .from("rf_coin_topups")
       .select("status, provider_reference")
       .eq("id", topupId)
       .maybeSingle();
-    if ((existing as Record<string, unknown> | null)?.status === "PAID") {
+    if (topupError || !topup) return json({ error: "Could not verify the top-up state." }, 503);
+    if (topup.status === "PAID") {
       return json({ success: true, alreadyPaid: true }, 200);
     }
-
-    const { data: config } = await supabase
-      .from("payment_config")
-      .select("provider_name, api_url, is_test_mode, currency, webhook_url")
-      .eq("method_key", "paymongo_qrph")
-      .eq("is_enabled", true)
-      .eq("provider_type", "automated")
-      .maybeSingle();
-    if (!config || (config as Record<string, unknown>).provider_name !== "paymongo") {
-      return json({ error: "QR Ph payment is not configured or enabled." }, 400);
+    if (topup.status !== "PENDING") {
+      return json({ error: "This top-up attempt is no longer pending. Start a new purchase." }, 409);
     }
+
+    const { data: existingSession, error: existingSessionError } = await supabase
+      .from("payment_transactions")
+      .select("status, amount_cents, currency, provider_reference, qr_image_url, expires_at")
+      .eq("rf_coin_topup_id", topupId)
+      .eq("provider_name", "paymongo")
+      .eq("action", "create")
+      .maybeSingle();
+    if (existingSessionError) return json({ error: "Could not verify the payment session." }, 503);
+    if (existingSession) {
+      const expiresAt = existingSession.expires_at ? new Date(existingSession.expires_at) : null;
+      if (
+        existingSession.status === "pending" &&
+        existingSession.amount_cents === priceCents &&
+        String(existingSession.currency || "").toUpperCase() === normalizedCurrency &&
+        existingSession.qr_image_url && expiresAt && expiresAt > new Date()
+      ) {
+        return json({
+          success: true,
+          topupId,
+          qrImageUrl: existingSession.qr_image_url,
+          paymentIntentId: existingSession.provider_reference,
+          expiresAt: existingSession.expires_at,
+          amountCents: existingSession.amount_cents,
+        }, 200);
+      }
+      if (existingSession.status === "pending" && expiresAt && expiresAt <= new Date()) {
+        const { data: expired, error: expireError } = await supabase.rpc("rf_coin_mark_topup_status", {
+          p_topup_id: topupId,
+          p_status: "EXPIRED",
+          p_provider_reference: existingSession.provider_reference,
+        });
+        const expiredRow = Array.isArray(expired) ? expired[0] : expired;
+        if (expireError || !expiredRow?.out_ok || expiredRow?.out_error) {
+          return json({ error: "The expired payment session could not be safely closed." }, 500);
+        }
+        return json({ error: "This QR payment expired. Please start a new purchase." }, 409);
+      }
+      // A reservation or incomplete session may represent an external intent.
+      // Do not create a second intent until the first attempt is reconciled.
+      return json({ error: "A payment attempt is already being processed. Please retry shortly; do not start another payment." }, 409);
+    }
+    if (topup.provider_reference) {
+      return json({ error: "An existing provider payment is awaiting reconciliation." }, 409);
+    }
+
     const cfg = config as Record<string, unknown>;
     const baseUrl = String(cfg.api_url || "https://api.paymongo.com/v1");
-    const currency = String(cfg.currency || "PHP");
     const webhookUrl = typeof cfg.webhook_url === "string" ? cfg.webhook_url : "";
     if (webhookUrl && !webhookUrl.includes("/functions/v1/payment-webhook")) {
       return json({ error: "QR Ph payment is not configured or enabled." }, 400);
     }
+
+    // Claim the unique attempt before any provider request. Concurrent retries
+    // collide on idempotency_key and the losing request never contacts PayMongo.
+    const { error: reservationError } = await supabase.from("payment_transactions").insert({
+      rf_coin_topup_id: topupId,
+      idempotency_key: idempotencyKey,
+      provider_name: "paymongo",
+      action: "create",
+      amount_cents: priceCents,
+      currency,
+      status: "processing",
+      metadata: { method_key: "paymongo_qrph", purpose: "rf_coin_topup", reservation: true },
+    });
+    if (reservationError) {
+      const { data: racedSession } = await supabase
+        .from("payment_transactions")
+        .select("status, amount_cents, currency, provider_reference, qr_image_url, expires_at")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      const expiresAt = racedSession?.expires_at ? new Date(racedSession.expires_at) : null;
+      if (
+        racedSession?.status === "pending" &&
+        racedSession.amount_cents === priceCents &&
+        String(racedSession.currency || "").toUpperCase() === normalizedCurrency &&
+        racedSession.qr_image_url && expiresAt && expiresAt > new Date()
+      ) {
+        return json({
+          success: true,
+          topupId,
+          qrImageUrl: racedSession.qr_image_url,
+          paymentIntentId: racedSession.provider_reference,
+          expiresAt: racedSession.expires_at,
+          amountCents: racedSession.amount_cents,
+        }, 200);
+      }
+      return json({ error: "A payment attempt is already being processed. Please retry shortly; do not start another payment." }, 409);
+    }
+
+    const closeFailedAttempt = async (providerReference: string | null, message: string): Promise<boolean> => {
+      if (providerReference) {
+        const { error: topupUpdateError } = await supabase
+          .from("rf_coin_topups")
+          .update({ provider_reference: providerReference })
+          .eq("id", topupId)
+          .eq("status", "PENDING");
+        if (topupUpdateError) return false;
+      }
+      const { error: txUpdateError } = await supabase
+        .from("payment_transactions")
+        .update({ status: "failed", provider_reference: providerReference, error_message: message })
+        .eq("idempotency_key", idempotencyKey)
+        .eq("status", "processing");
+      if (txUpdateError) return false;
+      const { data: statusData, error: statusError } = await supabase.rpc("rf_coin_mark_topup_status", {
+        p_topup_id: topupId,
+        p_status: "FAILED",
+        p_provider_reference: providerReference,
+      });
+      const statusRow = Array.isArray(statusData) ? statusData[0] : statusData;
+      return !statusError && Boolean(statusRow?.out_ok) && !statusRow?.out_error;
+    };
 
     // --- PayMongo: intent -> qrph method -> attach -> QR image URL ---
     const metadata = {
@@ -210,21 +336,33 @@ Deno.serve(async (req: Request) => {
         },
       },
     });
-    if (!intentRes.ok) return json({ error: errorDetail(intentRes.data) }, 502);
+    if (!intentRes.ok) {
+      const closed = await closeFailedAttempt(null, "Payment intent creation failed.");
+      return json({ error: closed ? errorDetail(intentRes.data) : "Payment attempt could not be safely closed." }, closed ? 502 : 500);
+    }
     const intentData = intentRes.data.data as
       | { id?: string; attributes?: { client_key?: string } }
       | undefined;
     const intentId = intentData?.id ?? null;
     const clientKey = intentData?.attributes?.client_key ?? null;
-    if (!intentId || !clientKey) return json({ error: "Malformed payment response." }, 502);
+    if (!intentId || !clientKey) {
+      const closed = await closeFailedAttempt(intentId, "Payment intent response was incomplete.");
+      return json({ error: closed ? "Malformed payment response." : "Payment attempt could not be safely closed." }, closed ? 502 : 500);
+    }
 
     const methodRes = await paymongoJson(PAYMONGO_SECRET, `${baseUrl}/payment_methods`, {
       data: { attributes: { type: "qrph", metadata } },
     });
-    if (!methodRes.ok) return json({ error: errorDetail(methodRes.data) }, 502);
+    if (!methodRes.ok) {
+      const closed = await closeFailedAttempt(intentId, "QR payment method creation failed.");
+      return json({ error: closed ? errorDetail(methodRes.data) : "Payment attempt could not be safely closed." }, closed ? 502 : 500);
+    }
     const methodData = methodRes.data.data as { id?: string } | undefined;
     const paymentMethodId = methodData?.id ?? null;
-    if (!paymentMethodId) return json({ error: "Malformed payment response." }, 502);
+    if (!paymentMethodId) {
+      const closed = await closeFailedAttempt(intentId, "QR payment method response was incomplete.");
+      return json({ error: closed ? "Malformed payment response." : "Payment attempt could not be safely closed." }, closed ? 502 : 500);
+    }
 
     const attachRes = await paymongoJson(
       PAYMONGO_SECRET,
@@ -239,39 +377,47 @@ Deno.serve(async (req: Request) => {
         },
       },
     );
-    if (!attachRes.ok) return json({ error: errorDetail(attachRes.data) }, 502);
+    if (!attachRes.ok) {
+      const closed = await closeFailedAttempt(intentId, "QR payment attachment failed.");
+      return json({ error: closed ? errorDetail(attachRes.data) : "Payment attempt could not be safely closed." }, closed ? 502 : 500);
+    }
     const attachData = attachRes.data.data as
       | { attributes?: { next_action?: { code?: { image_url?: string } } } }
       | undefined;
     const qrImageUrl = attachData?.attributes?.next_action?.code?.image_url ?? null;
-    if (!qrImageUrl) return json({ error: "No QR image returned by PayMongo." }, 502);
+    if (!qrImageUrl) {
+      const closed = await closeFailedAttempt(intentId, "Payment provider returned no QR image.");
+      return json({ error: closed ? "No QR image returned by PayMongo." : "Payment attempt could not be safely closed." }, closed ? 502 : 500);
+    }
 
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-    // --- Record the payment transaction (service role; no QR image reuse) ---
-    // A payment the database cannot resolve later must never be handed to the
-    // customer, so a log-write failure is a hard error, not a silent success.
-    const { error: txInsertError } = await supabase.from("payment_transactions").insert({
-      rf_coin_topup_id: topupId,
-      idempotency_key: idempotencyKey,
-      provider_name: "paymongo",
-      action: "create",
-      amount_cents: priceCents,
-      status: "pending",
-      provider_reference: intentId,
-      expires_at: expiresAt,
-      metadata: { method_key: "paymongo_qrph", purpose: "rf_coin_topup" },
-    });
-    if (txInsertError) {
-      console.error("payment_transactions insert failed", txInsertError);
-      return json({ error: "Could not record the payment session. Please try again." }, 500);
-    }
-
     // Stamp the top-up with the provider reference.
-    await supabase
+    const { error: topupReferenceError } = await supabase
       .from("rf_coin_topups")
       .update({ provider_reference: intentId })
-      .eq("id", topupId);
+      .eq("id", topupId)
+      .eq("status", "PENDING");
+    if (topupReferenceError) {
+      return json({ error: "Could not safely record the payment reference. Do not retry this payment; contact support." }, 500);
+    }
+
+    const { data: savedSession, error: txUpdateError } = await supabase
+      .from("payment_transactions")
+      .update({
+        status: "pending",
+        provider_reference: intentId,
+        qr_image_url: qrImageUrl,
+        expires_at: expiresAt,
+        metadata: { method_key: "paymongo_qrph", purpose: "rf_coin_topup" },
+      })
+      .eq("idempotency_key", idempotencyKey)
+      .eq("status", "processing")
+      .select("id")
+      .maybeSingle();
+    if (txUpdateError || !savedSession) {
+      return json({ error: "Could not safely record the payment session. Do not retry this payment; contact support." }, 500);
+    }
 
     return json({
       success: true,
@@ -282,8 +428,12 @@ Deno.serve(async (req: Request) => {
       expiresAt,
       amountCents: priceCents,
     }, 200);
-  } catch (err) {
-    console.error("create-coin-topup-payment error", err);
-    return json({ error: "Something went wrong." }, 500);
+  } catch {
+    // Do not log provider/Supabase exception objects: they can contain request
+    // details. An interrupted provider request leaves its durable reservation
+    // in `processing`, which intentionally blocks a duplicate payment attempt
+    // until it can be reconciled safely.
+    console.error("create-coin-topup-payment: request failed; details redacted");
+    return json({ error: "Payment setup could not be confirmed. Please contact support before retrying." }, 503);
   }
 });

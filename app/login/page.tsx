@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button, TextInput } from '@/components/ui';
 import ThemeSelector from '@/components/ThemeSelector';
 import PasswordInput from '@/components/PasswordInput';
+import { getSafeInternalPath } from '@/lib/authRedirect';
 
 export default function Login() {
   const router = useRouter();
@@ -14,11 +15,23 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    // The form is React-controlled; do not expose an enabled submit button
+    // until its submit handler has been attached during hydration.
+    setHydrated(true);
     const params = new URLSearchParams(window.location.search);
     if (params.get('auth') === 'restricted') setError('This account is not available for customer access.');
-  }, []);
+    if (params.get('reset') === 'success') setError('Your password was updated. Sign in with your new password.');
+    const controller = new AbortController();
+    fetch('/api/account/profile', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+      .then((response) => {
+        if (response.ok && params.get('auth') !== 'restricted') router.replace(getSafeInternalPath(params.get('next')));
+      })
+      .catch(() => { /* Keep the login form available when session lookup is unavailable. */ });
+    return () => controller.abort();
+  }, [router]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +56,10 @@ export default function Login() {
         setError(body.error || 'Unable to sign in.');
         return;
       }
-      router.replace('/account');
+      const params = new URLSearchParams(window.location.search);
+      const destination = getSafeInternalPath(params.get('next'));
+      try { window.sessionStorage.removeItem('rfz-customer-signed-out'); } catch { /* Storage can be disabled. */ }
+      router.replace(destination);
     } catch {
       setError('Unable to sign in right now. Please try again.');
     } finally {
@@ -57,11 +73,11 @@ export default function Login() {
         <div className="mb-5 flex justify-end"><ThemeSelector /></div>
         <h1 className="font-display text-2xl font-bold">Sign in</h1>
         <p className="mt-1 text-sm text-slate-400">Access your RunFazone account.</p>
-        <form className="mt-6 space-y-3" onSubmit={submit}>
+        <form className="mt-6 space-y-3" onSubmit={submit} data-auth-ready={hydrated ? 'true' : 'false'}>
           <TextInput label="Email" name="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={submitting} placeholder="you@example.com" />
           <PasswordInput label="Password" name="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} disabled={submitting} placeholder="Your password" />
           <div className="text-right"><Link href="/forgot-password" className="text-xs text-cyan-300 hover:underline">Forgot password?</Link></div>
-          <Button type="submit" disabled={submitting} className="w-full">
+          <Button type="submit" disabled={!hydrated || submitting} className="w-full">
             {submitting ? 'Signing in…' : 'Sign In'}
           </Button>
         </form>

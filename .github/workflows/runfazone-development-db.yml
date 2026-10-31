@@ -97,6 +97,11 @@ jobs:
         with:
           version: 2.121.0
 
+      - name: Set up the supplier-source guard runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+
       - name: Install required audit tools
         shell: bash
         run: |
@@ -473,27 +478,17 @@ jobs:
             SUPABASE_DB_USER="postgres.${PROJECT_ID}" \
             bash scripts/audit-hosted-integrations.sh
 
-      - name: Deploy the reviewed supplier-test safety guard
+      - name: Deploy the reviewed permanently disabled supplier diagnostic
         if: inputs.operation == 'integration-safety-lockdown'
         env:
           PROJECT_ID: ${{ steps.identity.outputs.project_id }}
         shell: bash
         run: |
           set -euo pipefail
-          test -s "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
-            echo 'BLOCKED: reviewed supplier-test function source is missing.' >&2
-            exit 1
-          }
-          rg -q 'isActiveSuperAdmin' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
-            echo 'BLOCKED: supplier-test authorization guard is missing from the reviewed source.' >&2
-            exit 1
-          }
-          rg -q 'Supplier integration is disabled' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
-            echo 'BLOCKED: supplier-test development isolation guard is missing from the reviewed source.' >&2
-            exit 1
-          }
+          node "$GITHUB_WORKSPACE/scripts/verify-disabled-fazercards-diagnostics.mjs" --self-test
+          node "$GITHUB_WORKSPACE/scripts/verify-disabled-fazercards-diagnostics.mjs"
           supabase functions deploy fazercards-test --project-ref "$PROJECT_ID" --no-verify-jwt
-          echo 'HOSTED_SUPPLIER_TEST_GUARD_DEPLOY_PASS function=fazercards-test jwt_verification=handler_admin_guard provider_disabled_without_enabled_supplier=true'
+          echo 'HOSTED_SUPPLIER_TEST_GUARD_DEPLOY_PASS function=fazercards-test provider_access_removed=true permanent_diagnostic_lock=true'
 
       - name: Disable automated development PayMongo configuration
         if: inputs.operation == 'payment-safety-lockdown'

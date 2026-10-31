@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createCustomerServerClient } from '@/lib/authSessionClients';
-import { rfCoinErrorMessage } from '@/lib/rfCoins';
+import { adminSupabase } from '@/lib/supabaseAdmin';
+import { RF_COINS_FUNDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 /*
   Thin proxy to the create-coin-topup-payment Edge Function, which holds the
@@ -20,6 +21,12 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Sign in with a verified account to buy RF Coins.' }, { status: 401 });
   }
+  if (!RF_COINS_FUNDING_RELEASE_ENABLED) {
+    return NextResponse.json({ error: 'RF Coins funding is not available yet.' }, { status: 503 });
+  }
+  if (!adminSupabase) {
+    return NextResponse.json({ error: 'RF Coins payments are unavailable.' }, { status: 503 });
+  }
 
   try {
     const body = await req.json().catch(() => null);
@@ -28,6 +35,20 @@ export async function POST(req: NextRequest) {
       : '';
     if (!packageId) {
       return NextResponse.json({ error: 'Choose a coin package first.' }, { status: 400 });
+    }
+
+    // The UI is not an authorization boundary. Check the server-side wallet
+    // feature switch before forwarding a request to the payment Edge
+    // Function, so direct calls cannot start a top-up while RF Coins funding
+    // is disabled or its schema/configuration is unavailable. The Edge
+    // Function independently enforces the PayMongo sandbox-only guard.
+    const { data: walletSettings, error: walletSettingsError } = await adminSupabase
+      .from('rf_coin_settings')
+      .select('enabled, topups_enabled')
+      .eq('id', 1)
+      .maybeSingle();
+    if (walletSettingsError || !walletSettings?.enabled || !walletSettings.topups_enabled) {
+      return NextResponse.json({ error: 'RF Coins payments are unavailable.' }, { status: 503 });
     }
 
     const res = await fetch(`${url}/functions/v1/create-coin-topup-payment`, {

@@ -1,13 +1,16 @@
--- STATUS: PENDING — NOT applied to the live database. Requires separate owner approval.
--- Apply via the Supabase migration tool with filename 20261018160000_rf_coins_schema.sql
+-- Deploys through the canonical Supabase migration pipeline after the exact PR
+-- containing this migration is reviewed and approved. All financial release
+-- switches are false; schema installation alone does not enable wallet use.
 /*
 # RF Coins — Schema (Phase 3, feature DISABLED by default)
 
 1. Purpose
    Closed-loop virtual currency ("RF Coins") for signed-in, verified, active
-   customers. Coins are purchased with PayMongo QRPh, held in a per-customer
-   wallet, spent on product orders, and managed by Super Admins through an
-   append-only ledger. NOT cashback points; a dedicated purchasable currency.
+   customers. Future funding is intended for direct owner e-wallet and crypto
+   deposits after independent verification; PayMongo is reserved for product
+   checkout and is not an RF Coins funding rail. Funding/spending remain
+   disabled until their separate implementation and release gates pass.
+   Balances are held per customer and managed through an append-only ledger.
 
 2. New Tables
    - rf_coin_settings (singleton row id=1)
@@ -55,7 +58,7 @@
      - credited_total / reversed_total: exact original credit and cumulative
        reversal amounts, so partial refunds never double-debit and the
        outstanding debt stays explicit for controlled manual handling
-     - provider text DEFAULT 'paymongo', provider_reference text NULL,
+     - provider text DEFAULT 'disabled', provider_reference text NULL,
        idempotency_key text UNIQUE, credited_at timestamptz NULL
      - Unique partial index on provider_reference WHERE NOT NULL.
 
@@ -97,7 +100,7 @@
    - RLS ENABLED on every table.
    - Wallets/ledger/topups: customer SELECT scoped to own rows via auth.uid();
      NO client writes — all mutations go through SECURITY DEFINER functions
-     (companion migration 20261018160100_rf_coins_functions.sql).
+     (companion migration 20261028120100_rf_coins_functions.sql).
    - Packages: authenticated SELECT of active rows only.
    - Adjustment requests: requester SELECT own rows only.
    - Settings & audit: no client policies at all (fail closed).
@@ -178,9 +181,9 @@ CREATE TRIGGER rf_coin_ledger_no_mutation
   BEFORE UPDATE OR DELETE ON rf_coin_ledger
   FOR EACH ROW EXECUTE FUNCTION rf_coin_ledger_append_only();
 
--- Lock down the trigger helper: SECURITY DEFINER functions default to
--- EXECUTE for PUBLIC, which would let any client run it directly.
-REVOKE ALL ON FUNCTION rf_coin_ledger_append_only() FROM PUBLIC;
+-- Lock down direct RPC execution even when project-level default ACLs grant
+-- new functions to browser roles. Trigger invocation remains intact.
+REVOKE ALL ON FUNCTION rf_coin_ledger_append_only() FROM PUBLIC, anon, authenticated;
 
 -- ============ PACKAGES ============
 CREATE TABLE IF NOT EXISTS rf_coin_packages (
@@ -208,9 +211,13 @@ CREATE TABLE IF NOT EXISTS rf_coin_topups (
   price_cents integer NOT NULL CHECK (price_cents > 0),
   status text NOT NULL DEFAULT 'PENDING' CHECK (status IN (
     'PENDING','PAID','FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED')),
-  provider text NOT NULL DEFAULT 'paymongo',
+  -- No provider is enabled by this schema. PayMongo is not an RF Coins
+  -- funding rail; future verified direct deposits get explicit provider tags.
+  provider text NOT NULL DEFAULT 'disabled'
+    CHECK (provider IN ('disabled','owner_ewallet','owner_crypto')),
   provider_reference text,
   idempotency_key text NOT NULL UNIQUE,
+  payment_verified_at timestamptz,
   credited_at timestamptz,
   -- Partial-refund debt tracking: exactly how many coins were originally
   -- credited (coins + bonus) and how many have been reversed so far. The
@@ -225,6 +232,8 @@ CREATE TABLE IF NOT EXISTS rf_coin_topups (
 
 CREATE UNIQUE INDEX IF NOT EXISTS rf_coin_topups_provider_reference_unique
   ON rf_coin_topups (provider_reference) WHERE provider_reference IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS rf_coin_topups_one_pending_package_per_user
+  ON rf_coin_topups (user_id, package_id) WHERE status = 'PENDING' AND package_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS rf_coin_topups_user_created_idx
   ON rf_coin_topups (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS rf_coin_topups_status_idx ON rf_coin_topups (status);
@@ -258,6 +267,8 @@ CREATE INDEX IF NOT EXISTS rf_coin_adjust_requests_status_idx
   ON rf_coin_adjustment_requests (status, created_at DESC);
 CREATE INDEX IF NOT EXISTS rf_coin_adjust_requests_target_idx
   ON rf_coin_adjustment_requests (target_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS rf_coin_adjust_requests_requester_created_idx
+  ON rf_coin_adjustment_requests (requested_by, created_at DESC);
 
 -- ============ ADMIN AUDIT (insert-only) ============
 CREATE TABLE IF NOT EXISTS rf_coin_admin_audit (
@@ -286,9 +297,9 @@ CREATE TRIGGER rf_coin_audit_no_mutation
   BEFORE UPDATE OR DELETE ON rf_coin_admin_audit
   FOR EACH ROW EXECUTE FUNCTION rf_coin_audit_append_only();
 
--- Lock down the trigger helper: SECURITY DEFINER functions default to
--- EXECUTE for PUBLIC, which would let any client run it directly.
-REVOKE ALL ON FUNCTION rf_coin_audit_append_only() FROM PUBLIC;
+-- Lock down direct RPC execution even when project-level default ACLs grant
+-- new functions to browser roles. Trigger invocation remains intact.
+REVOKE ALL ON FUNCTION rf_coin_audit_append_only() FROM PUBLIC, anon, authenticated;
 
 -- ============ payment_transactions compatibility for coin top-ups ============
 -- The live table has: id, order_id, idempotency_key, provider_name,
@@ -303,16 +314,42 @@ ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS rf_coin_topup_id
 CREATE INDEX IF NOT EXISTS idx_payment_tx_rf_coin_topup
   ON payment_transactions (rf_coin_topup_id);
 
--- Register the RF Coins wallet as a payment method, DISABLED. create_order
--- only accepts payment methods present in payment_config with is_enabled =
--- true, so the method stays invisible/unusable until a Super Admin enables
--- it deliberately (together with the RF Coins spending flag).
+-- Register the RF Coins wallet as a payment method, DISABLED. This row is
+-- presentation/configuration only; the independent static release guards
+-- below and in the settlement RPCs remain authoritative.
 INSERT INTO public.payment_config
   (method_key, display_name, provider, is_enabled, provider_name, provider_type, instructions, sort_order)
 VALUES
   ('rf_coin_wallet', 'RF Coins Wallet', 'rf_coin_wallet', false, 'rf_coin_wallet', 'rf_coins',
    'Pay the full order total with your RF Coins wallet balance.', 50)
-ON CONFLICT (method_key) DO NOTHING;
+ON CONFLICT (method_key) DO UPDATE SET is_enabled = false;
+
+-- Backstop generic create_order and any other caller that might try to create
+-- a wallet-paid order after an admin toggles payment_config. The static false
+-- lock is intentionally separate from all mutable database settings. Opening
+-- wallet spending later requires an explicitly reviewed migration as well as
+-- the application/Edge release gates.
+CREATE OR REPLACE FUNCTION public.rf_coin_block_locked_spending_order()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_spending_release_enabled CONSTANT boolean := false;
+BEGIN
+  IF NEW.payment_method = 'rf_coin_wallet' AND NOT v_spending_release_enabled THEN
+    RAISE EXCEPTION 'RF_COIN_SPENDING_RELEASE_LOCKED';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.rf_coin_block_locked_spending_order()
+  FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS rf_coin_orders_spending_release_guard ON public.orders;
+CREATE TRIGGER rf_coin_orders_spending_release_guard
+  BEFORE INSERT OR UPDATE OF payment_method ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.rf_coin_block_locked_spending_order();
 
 -- ============ RLS ============
 ALTER TABLE rf_coin_settings ENABLE ROW LEVEL SECURITY;
@@ -344,22 +381,24 @@ DROP POLICY IF EXISTS "rf_coin_adjust_select_own" ON rf_coin_adjustment_requests
 CREATE POLICY "rf_coin_adjust_select_own" ON rf_coin_adjustment_requests
   FOR SELECT TO authenticated USING (auth.uid() = requested_by);
 
--- Settings and audit: NO client policies (fail closed; RLS blocks everyone).
--- Admin UI reads these through the existing service-role admin client.
+-- Settings and audit: NO client policies (fail closed; direct RLS table reads
+-- return no rows). The Super Admin console uses narrowly scoped caller-JWT
+-- SECURITY DEFINER reporting/mutation RPCs, not a service-role table scan.
 
--- Deterministic client read surface: SELECT is granted to browser roles the
--- same way the platform's default privileges do on the live project; row
--- visibility is decided solely by the policies above. Settings and audit
--- have no policies, so any client SELECT there returns zero rows.
+-- Default ACLs on the hosted project grant more than the application needs
+-- when postgres creates a public table. Remove those inherited direct grants
+-- (including privileges added in PostgreSQL 17) from browser roles, then
+-- re-grant only the intended SELECT surface. RLS remains responsible for row
+-- visibility; settings and audit deliberately have no client policies.
+REVOKE ALL PRIVILEGES ON TABLE rf_coin_settings, rf_coin_wallets, rf_coin_ledger,
+  rf_coin_packages, rf_coin_topups, rf_coin_adjustment_requests,
+  rf_coin_admin_audit
+  FROM PUBLIC, anon, authenticated;
+
 GRANT SELECT ON rf_coin_settings, rf_coin_wallets, rf_coin_ledger,
   rf_coin_packages, rf_coin_topups, rf_coin_adjustment_requests,
   rf_coin_admin_audit
   TO anon, authenticated;
-
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON rf_coin_settings,
-  rf_coin_wallets, rf_coin_ledger, rf_coin_packages, rf_coin_topups,
-  rf_coin_adjustment_requests, rf_coin_admin_audit
-  FROM anon, authenticated;
 
 -- ============ FULFILLMENT HANDOFF QUEUE (durable, worker-claimed) ============
 -- Durable handoff for coin-paid orders: the checkout enqueues exactly one row
@@ -393,87 +432,31 @@ ALTER TABLE rf_coin_fulfillment_handoffs ENABLE ROW LEVEL SECURITY;
 
 -- No client policies and no table grants at all (fail closed): the queue is
 -- touched only by the SECURITY DEFINER enqueue/claim/ack/fail functions in
--- 20261018160100_rf_coins_functions.sql, granted to service_role only.
+-- 20261028120100_rf_coins_functions.sql, granted to service_role only.
 REVOKE ALL ON TABLE rf_coin_fulfillment_handoffs
   FROM PUBLIC, anon, authenticated, service_role;
 
--- ============ FULFILLMENT HANDOFF CRON SCHEDULING ============
--- Same pg_cron pattern as the canonical auto-reconciliation schedule
--- (20261008142813): the cron trigger reads its secret from _cron_secrets
--- (RLS deny-by-default) and posts to the fulfillment-handoff Edge Function,
--- which validates the X-Cron-Secret header with a constant-time comparison.
-CREATE TABLE IF NOT EXISTS public._cron_secrets (
+-- ============ SHARED CRON SECRET STORE (INERT) ============
+-- The current schema migration creates no outbound HTTP function, schedule,
+-- or supplier side effect. The table is retained for existing trusted worker
+-- contracts, but remains empty and inaccessible to browser/service roles.
+-- Queue processing and any scheduler require a separately reviewed change.
+DO $$
+BEGIN
+  IF to_regclass('public._cron_secrets') IS NOT NULL THEN
+    RAISE EXCEPTION 'RF_COINS_CRON_SECRET_TABLE_ALREADY_EXISTS_REQUIRES_REVIEW';
+  END IF;
+END;
+$$;
+
+CREATE TABLE public._cron_secrets (
   key text PRIMARY KEY,
   value text NOT NULL
 );
 
 ALTER TABLE public._cron_secrets ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "_cron_secrets_select" ON public._cron_secrets;
-DROP POLICY IF EXISTS "_cron_secrets_insert" ON public._cron_secrets;
-DROP POLICY IF EXISTS "_cron_secrets_update" ON public._cron_secrets;
-DROP POLICY IF EXISTS "_cron_secrets_delete" ON public._cron_secrets;
-
--- No secret is inserted here. The operator must insert a separately generated
--- secret (see ACTIVATION below) before the cron trigger can authenticate.
-
-CREATE OR REPLACE FUNCTION public.trigger_fulfillment_handoff()
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public', 'extensions'
-AS $function$
-DECLARE
-  v_url text;
-  v_secret text;
-  v_request_id bigint;
-BEGIN
-  v_url := 'https://ftbvxkxxzotwkdcdgaot.supabase.co/functions/v1/fulfillment-handoff';
-
-  SELECT value INTO v_secret FROM public._cron_secrets WHERE key = 'fulfillment_handoff_secret';
-  IF v_secret IS NULL THEN
-    RAISE NOTICE 'No fulfillment_handoff_secret found in _cron_secrets';
-    RETURN;
-  END IF;
-
-  v_request_id := net.http_post(
-    url := v_url,
-    body := '{}'::jsonb,
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'X-Cron-Secret', v_secret
-    ),
-    timeout_milliseconds := 30000
-  );
-
-  RAISE NOTICE 'Fulfillment handoff request sent (id=%)', v_request_id;
-END;
-$function$;
-
--- Cron trigger lockdown (Codex review): SECURITY DEFINER functions default
--- to EXECUTE for PUBLIC, so revoke every client role explicitly. Only the
--- postgres role (which pg_cron jobs run as) may execute it. Scheduling stays
--- DISABLED until the documented operator activation steps are run.
-REVOKE EXECUTE ON FUNCTION public.trigger_fulfillment_handoff()
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.trigger_fulfillment_handoff() TO postgres;
-
--- ============ ACTIVATION (EXPLICIT OPERATOR STEP — NOT AUTOMATIC) ============
--- Do NOT schedule the cron automatically when migrations are applied. Fulfillment
--- activation is a production decision requiring a separately generated secret.
--- After applying this migration, an operator with database access must run BOTH:
---
---   1. Insert a securely generated secret (e.g. openssl rand -hex 32):
---      INSERT INTO public._cron_secrets (key, value)
---      VALUES ('fulfillment_handoff_secret', '<generated-secret>');
---
---   2. Schedule the trigger:
---      SELECT cron.schedule(
---        'fulfillment-handoff',
---        '*/3 * * * *',
---        $$SELECT public.trigger_fulfillment_handoff()$$
---      );
---
--- Until both steps are done, no cron trigger exists and the worker endpoint
--- rejects every request (the Edge Function 503s when no secret row is found).
--- To deactivate later: SELECT cron.unschedule('fulfillment-handoff');
+-- No secret is inserted by this migration. No handoff trigger or job is
+-- installed; do not add a secret as part of this disabled-wallet schema.
+REVOKE ALL PRIVILEGES ON TABLE public._cron_secrets
+  FROM PUBLIC, anon, authenticated, service_role;

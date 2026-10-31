@@ -1,5 +1,6 @@
--- STATUS: PENDING — NOT applied to the live database. Requires separate owner approval.
--- Apply via the Supabase migration tool with filename 20261018160100_rf_coins_functions.sql
+-- Deploys through the canonical Supabase migration pipeline after the exact PR
+-- containing this migration is reviewed and approved. Funding and spending
+-- release locks remain hard-coded false pending separate financial approval.
 /*
 # RF Coins — Secured Functions (Phase 3)
 
@@ -15,7 +16,8 @@
      role SUPER_ADMIN. Raises RF_COIN_FORBIDDEN otherwise.
    - rf_coin_get_settings()        — internal settings reader (fail closed:
      raises RF_COIN_DISABLED if row missing or enabled=false).
-   - rf_coin_get_or_create_wallet(p_user_id) — idempotent wallet creation.
+   - rf_coin_get_or_create_wallet(p_user_id) — authenticated caller's own,
+     idempotent zero-balance wallet initialization (auth.uid() enforced).
    - rf_coin_create_topup(p_user_id, p_package_id) — validates master+topup
      flags and active package, snapshots coins/bonus/price, inserts a PENDING
      top-up, returns out_topup_id/out_coins/out_bonus/out_price_cents/out_error.
@@ -82,7 +84,7 @@
 
 -- ============ INTERNAL HELPERS ============
 CREATE OR REPLACE FUNCTION rf_coin_assert_super_admin()
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
   IF auth.uid() IS NULL OR NOT EXISTS (
     SELECT 1 FROM admins
@@ -96,7 +98,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION rf_coin_get_settings()
-RETURNS rf_coin_settings LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS rf_coin_settings LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   s rf_coin_settings;
 BEGIN
@@ -109,10 +111,16 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION rf_coin_get_or_create_wallet(p_user_id uuid)
-RETURNS rf_coin_wallets LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS rf_coin_wallets LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   w rf_coin_wallets;
 BEGIN
+  -- This narrowly scoped initializer is the only customer-callable wallet
+  -- mutation. It may create the caller's own zero-balance row, never another
+  -- customer's wallet. Table INSERT remains revoked from browser roles.
+  IF auth.uid() IS NULL OR p_user_id IS NULL OR p_user_id <> auth.uid() THEN
+    RAISE EXCEPTION 'RF_COIN_FORBIDDEN';
+  END IF;
   INSERT INTO rf_coin_wallets (user_id) VALUES (p_user_id)
   ON CONFLICT (user_id) DO NOTHING;
   SELECT * INTO w FROM rf_coin_wallets WHERE user_id = p_user_id;
@@ -127,14 +135,21 @@ CREATE OR REPLACE FUNCTION rf_coin_create_topup(
 )
 RETURNS TABLE (out_topup_id uuid, out_coins integer, out_bonus_coins integer,
                out_price_cents integer, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- Release lock: enabling database settings alone must never enable funding.
+  v_funding_release_enabled CONSTANT boolean := false;
   s rf_coin_settings;
   pkg rf_coin_packages;
+  pending_topup rf_coin_topups;
   v_id uuid;
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_FORBIDDEN'::text;
+    RETURN;
+  END IF;
+  IF NOT v_funding_release_enabled THEN
+    RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_FUNDING_RELEASE_LOCKED'::text;
     RETURN;
   END IF;
   BEGIN
@@ -143,6 +158,10 @@ BEGIN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_DISABLED'::text;
     RETURN;
   END;
+  IF NOT s.enabled THEN
+    RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_DISABLED'::text;
+    RETURN;
+  END IF;
   IF NOT s.topups_enabled THEN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_TOPUPS_DISABLED'::text;
     RETURN;
@@ -150,6 +169,26 @@ BEGIN
   SELECT * INTO pkg FROM rf_coin_packages WHERE id = p_package_id AND is_active;
   IF NOT FOUND THEN
     RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_PACKAGE_UNAVAILABLE'::text;
+    RETURN;
+  END IF;
+
+  -- Serialize retries for this customer. Reuse the current pending package
+  -- attempt instead of issuing a second payable top-up on a double click or
+  -- network retry. The partial unique index is a second line of defense.
+  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT NULL::uuid, NULL::integer, NULL::integer, NULL::integer, 'RF_COIN_FORBIDDEN'::text;
+    RETURN;
+  END IF;
+  SELECT * INTO pending_topup
+    FROM rf_coin_topups
+    WHERE user_id = p_user_id AND package_id = pkg.id AND status = 'PENDING'
+    ORDER BY created_at DESC
+    LIMIT 1
+    FOR UPDATE;
+  IF FOUND THEN
+    RETURN QUERY SELECT pending_topup.id, pending_topup.coins,
+                        pending_topup.bonus_coins, pending_topup.price_cents, NULL::text;
     RETURN;
   END IF;
 
@@ -168,8 +207,11 @@ CREATE OR REPLACE FUNCTION rf_coin_credit_paid_topup(
   p_provider_reference text
 )
 RETURNS TABLE (out_credited boolean, out_balance bigint, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- The service-role webhook is also locked from issuing wallet value until
+  -- financial release. Already-settled duplicate events remain idempotent.
+  v_funding_release_enabled CONSTANT boolean := false;
   s rf_coin_settings;
   t rf_coin_topups;
   v_wallet rf_coin_wallets;
@@ -181,12 +223,24 @@ BEGIN
     RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_TOPUP_NOT_FOUND'::text; RETURN;
   END IF;
 
+  -- The service-side webhook must present the provider reference recorded for
+  -- this exact top-up. This prevents a valid event for another payment from
+  -- being attached to a customer-controlled top-up id.
+  IF p_provider_reference IS NULL
+     OR t.provider_reference IS NULL
+     OR p_provider_reference <> t.provider_reference THEN
+    RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_PROVIDER_REFERENCE_MISMATCH'::text; RETURN;
+  END IF;
+
   IF t.status = 'PAID' AND t.credited_at IS NOT NULL THEN
     SELECT balance_coins INTO v_balance FROM rf_coin_wallets WHERE user_id = t.user_id;
     RETURN QUERY SELECT true, v_balance, NULL::text; RETURN; -- already settled
   END IF;
   IF t.status <> 'PENDING' THEN
     RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_TOPUP_NOT_PENDING'::text; RETURN;
+  END IF;
+  IF NOT v_funding_release_enabled THEN
+    RETURN QUERY SELECT false, NULL::bigint, 'RF_COIN_FUNDING_RELEASE_LOCKED'::text; RETURN;
   END IF;
   BEGIN
     s := rf_coin_get_settings();
@@ -221,7 +275,7 @@ BEGIN
 
   UPDATE rf_coin_topups
     SET status = 'PAID', provider_reference = COALESCE(p_provider_reference, provider_reference),
-        credited_at = now(), credited_total = v_total, updated_at = now()
+        payment_verified_at = now(), credited_at = now(), credited_total = v_total, updated_at = now()
     WHERE id = t.id;
 
   RETURN QUERY SELECT true, v_balance, NULL::text;
@@ -235,7 +289,7 @@ CREATE OR REPLACE FUNCTION rf_coin_mark_topup_status(
   p_provider_reference text DEFAULT NULL
 )
 RETURNS TABLE (out_ok boolean, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   t rf_coin_topups;
   v_wallet rf_coin_wallets;
@@ -250,6 +304,10 @@ BEGIN
   SELECT * INTO t FROM rf_coin_topups WHERE id = p_topup_id FOR UPDATE;
   IF NOT FOUND THEN
     RETURN QUERY SELECT false, 'RF_COIN_TOPUP_NOT_FOUND'::text; RETURN;
+  END IF;
+  IF (t.provider_reference IS NULL AND p_provider_reference IS NOT NULL)
+     OR (t.provider_reference IS NOT NULL AND p_provider_reference IS DISTINCT FROM t.provider_reference) THEN
+    RETURN QUERY SELECT false, 'RF_COIN_PROVIDER_REFERENCE_MISMATCH'::text; RETURN;
   END IF;
   IF t.status = p_status THEN
     RETURN QUERY SELECT true, NULL::text; RETURN; -- idempotent
@@ -335,8 +393,10 @@ CREATE OR REPLACE FUNCTION rf_coin_settle_order_payment(
   p_user_id uuid
 )
 RETURNS TABLE (out_coins integer, out_balance_after bigint, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- Separate release lock: database flags cannot activate wallet spending.
+  v_spending_release_enabled CONSTANT boolean := false;
   s rf_coin_settings;
   ord RECORD;
   v_coins integer;
@@ -348,6 +408,9 @@ DECLARE
 BEGIN
   IF p_user_id IS NULL OR p_user_id <> auth.uid() THEN
     RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_FORBIDDEN'::text; RETURN;
+  END IF;
+  IF NOT v_spending_release_enabled THEN
+    RETURN QUERY SELECT NULL::integer, NULL::bigint, 'RF_COIN_SPENDING_RELEASE_LOCKED'::text; RETURN;
   END IF;
   BEGIN
     s := rf_coin_get_settings();
@@ -449,7 +512,7 @@ CREATE OR REPLACE FUNCTION rf_coin_release_order_payment(
   p_reason text DEFAULT NULL
 )
 RETURNS TABLE (out_released boolean, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_ledger rf_coin_ledger;
   v_wallet rf_coin_wallets;
@@ -524,7 +587,7 @@ CREATE OR REPLACE FUNCTION rf_coin_request_adjustment(
   p_idempotency_key text
 )
 RETURNS TABLE (out_request_id uuid, out_status text, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   s rf_coin_settings;
   v_admin_id uuid := auth.uid();
@@ -534,6 +597,7 @@ DECLARE
   v_daily_count integer;
   v_ledger rf_coin_ledger;
   v_wallet rf_coin_wallets;
+  v_existing rf_coin_adjustment_requests;
   v_balance bigint;
   v_status text;
 BEGIN
@@ -542,28 +606,39 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_FORBIDDEN'::text; RETURN;
   END;
-  IF p_direction NOT IN ('credit','debit') OR p_amount_coins IS NULL OR p_amount_coins <= 0
+  IF p_direction NOT IN ('credit','debit') OR p_amount_coins IS NULL OR p_amount_coins <= 0 OR p_amount_coins > 1000000
      OR p_category NOT IN ('promotion','compensation','correction')
-     OR p_reason IS NULL OR length(trim(p_reason)) < 3 THEN
+     OR p_reason IS NULL OR length(trim(p_reason)) < 3 OR length(trim(p_reason)) > 1000
+     OR p_idempotency_key IS NULL OR length(p_idempotency_key) < 16 OR length(p_idempotency_key) > 200 THEN
     RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_INVALID_REQUEST'::text; RETURN;
   END IF;
 
+  -- Serialize retries using the global idempotency key, then serialize this
+  -- admin's rolling daily limit. A reused key with different request fields
+  -- is a conflict, not permission to replay another adjustment.
+  PERFORM pg_advisory_xact_lock(hashtext('rf-adjustment-idem:' || p_idempotency_key)::bigint);
+
   -- Idempotency: identical retry returns the original request.
-  IF p_idempotency_key IS NOT NULL AND length(p_idempotency_key) <= 200 THEN
-    SELECT id, status INTO v_id, v_status FROM rf_coin_adjustment_requests
-      WHERE idempotency_key = p_idempotency_key;
-    IF FOUND THEN
-      RETURN QUERY SELECT v_id, v_status, NULL::text; RETURN;
+  SELECT * INTO v_existing FROM rf_coin_adjustment_requests
+    WHERE idempotency_key = p_idempotency_key;
+  IF FOUND THEN
+    IF v_existing.requested_by <> v_admin_id
+       OR v_existing.target_user_id <> p_target_user_id
+       OR v_existing.direction <> p_direction
+       OR v_existing.amount_coins <> p_amount_coins
+       OR v_existing.reason <> trim(p_reason)
+       OR v_existing.category <> p_category THEN
+      RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_IDEMPOTENCY_CONFLICT'::text; RETURN;
     END IF;
+    RETURN QUERY SELECT v_existing.id, v_existing.status, NULL::text; RETURN;
   END IF;
 
   s := rf_coin_get_settings();
 
   -- Rate control: per-admin daily adjustment cap.
-  SELECT count(*) INTO v_daily_count FROM rf_coin_admin_audit
-    WHERE actor_admin_id = v_admin_id
-      AND action IN ('adjustment_applied','adjustment_requested')
-      AND created_at > now() - interval '24 hours';
+  PERFORM pg_advisory_xact_lock(hashtext('rf-adjustment-daily:' || v_admin_id::text)::bigint);
+  SELECT count(*) INTO v_daily_count FROM rf_coin_adjustment_requests
+    WHERE requested_by = v_admin_id AND created_at > now() - interval '24 hours';
   IF v_daily_count >= s.max_daily_admin_adjustments THEN
     RETURN QUERY SELECT NULL::uuid, NULL::text, 'RF_COIN_RATE_LIMITED'::text; RETURN;
   END IF;
@@ -655,7 +730,7 @@ CREATE OR REPLACE FUNCTION rf_coin_decide_adjustment(
   p_note text DEFAULT NULL
 )
 RETURNS TABLE (out_status text, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_admin_id uuid := auth.uid();
   v_admin_email text;
@@ -768,11 +843,16 @@ CREATE OR REPLACE FUNCTION rf_coin_set_settings(
   p_high_value_adjustment_coins integer DEFAULT NULL,
   p_max_daily_admin_adjustments integer DEFAULT NULL
 )
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_old rf_coin_settings;
 BEGIN
   PERFORM rf_coin_assert_super_admin();
+  -- A privileged RPC call must not turn database switches into a release.
+  -- Financial enablement requires a separate reviewed code/schema release.
+  IF p_enabled IS TRUE OR p_topups_enabled IS TRUE OR p_spending_enabled IS TRUE THEN
+    RAISE EXCEPTION 'RF_COIN_RELEASE_LOCKED';
+  END IF;
   SELECT * INTO v_old FROM rf_coin_settings WHERE id = 1 FOR UPDATE;
 
   UPDATE rf_coin_settings SET
@@ -807,19 +887,28 @@ CREATE OR REPLACE FUNCTION rf_coin_upsert_package(
   p_is_active boolean DEFAULT NULL,
   p_sort_order integer DEFAULT NULL
 )
-RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_id uuid;
 BEGIN
   PERFORM rf_coin_assert_super_admin();
+  IF (p_name IS NOT NULL AND (length(btrim(p_name)) < 2 OR length(btrim(p_name)) > 80))
+     OR (p_coins IS NOT NULL AND (p_coins <= 0 OR p_coins > 10000000))
+     OR (p_bonus_coins IS NOT NULL AND (p_bonus_coins < 0 OR p_bonus_coins > 10000000))
+     OR (p_price_cents IS NOT NULL AND (p_price_cents <= 0 OR p_price_cents > 100000000))
+     OR (p_sort_order IS NOT NULL AND (p_sort_order < 0 OR p_sort_order > 100000)) THEN
+    RAISE EXCEPTION 'RF_COIN_INVALID_PACKAGE';
+  END IF;
   IF p_package_id IS NULL THEN
     IF p_name IS NULL OR p_coins IS NULL OR p_coins <= 0
        OR p_price_cents IS NULL OR p_price_cents <= 0 THEN
       RAISE EXCEPTION 'RF_COIN_INVALID_PACKAGE';
     END IF;
     INSERT INTO rf_coin_packages (name, coins, bonus_coins, price_cents, is_active, sort_order)
+    -- Configuration never makes a new package purchasable by itself.
+    -- Activation is a separate, explicit operation after financial approval.
     VALUES (p_name, p_coins, COALESCE(p_bonus_coins, 0), p_price_cents,
-            COALESCE(p_is_active, true), COALESCE(p_sort_order, 0))
+            false, COALESCE(p_sort_order, 0))
     RETURNING id INTO v_id;
   ELSE
     UPDATE rf_coin_packages SET
@@ -839,7 +928,7 @@ BEGIN
     actor_admin_id, actor_admin_email, action, entity_type, entity_id, details)
   SELECT auth.uid(), COALESCE(email, 'unknown'), 'package_change', 'rf_coin_packages', v_id::text,
     jsonb_build_object('name', p_name, 'coins', p_coins, 'bonus_coins', p_bonus_coins,
-      'price_cents', p_price_cents, 'is_active', p_is_active)
+      'price_cents', p_price_cents, 'is_active', CASE WHEN p_package_id IS NULL THEN false ELSE p_is_active END)
   FROM admins WHERE id = auth.uid();
   RETURN v_id;
 END;
@@ -857,13 +946,18 @@ CREATE OR REPLACE FUNCTION rf_coin_enqueue_fulfillment(
   p_order_id uuid
 )
 RETURNS TABLE (out_handoff_id uuid, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- A mutable queue row or service-role RPC call cannot open spending.
+  v_spending_release_enabled CONSTANT boolean := false;
   v_id uuid;
   v_order_status text;
   v_payment_status text;
   v_method text;
 BEGIN
+  IF NOT v_spending_release_enabled THEN
+    RETURN QUERY SELECT NULL::uuid, 'RF_COIN_SPENDING_RELEASE_LOCKED'::text; RETURN;
+  END IF;
   IF p_order_id IS NULL THEN
     RETURN QUERY SELECT NULL::uuid, 'RF_COIN_ORDER_NOT_FOUND'::text; RETURN;
   END IF;
@@ -899,11 +993,17 @@ CREATE OR REPLACE FUNCTION rf_coin_claim_fulfillment_handoffs(
 )
 RETURNS TABLE (out_id uuid, out_order_id uuid, out_attempt_count integer,
                out_lease_token uuid, out_lease_until timestamptz)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
+  -- Do not claim work or invoke supplier fulfillment while wallet spending is
+  -- release-locked, even if rows were inserted by a privileged caller.
+  v_spending_release_enabled CONSTANT boolean := false;
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1), 100);
   v_lease_seconds integer := LEAST(GREATEST(COALESCE(p_lease_seconds, 300), 30), 900);
 BEGIN
+  IF NOT v_spending_release_enabled THEN
+    RETURN;
+  END IF;
   -- Quarantine rows that exhausted their bounded attempts; never re-serve them.
   UPDATE rf_coin_fulfillment_handoffs
     SET status = 'DEAD_LETTER', lease_until = NULL, lease_token = NULL,
@@ -958,7 +1058,7 @@ CREATE OR REPLACE FUNCTION rf_coin_ack_fulfillment_handoff(
   p_error text DEFAULT NULL
 )
 RETURNS TABLE (out_status text, out_next_attempt_at timestamptz)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_row rf_coin_fulfillment_handoffs;
   v_next timestamptz;
@@ -1015,7 +1115,7 @@ CREATE OR REPLACE FUNCTION rf_coin_settle_order_payment_and_enqueue(
   p_user_id uuid
 )
 RETURNS TABLE (out_coins integer, out_balance_after bigint, out_handoff_id uuid, out_error text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $atomic$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $atomic$
 DECLARE
   v_settle RECORD;
   v_enqueue RECORD;
@@ -1048,28 +1148,29 @@ $atomic$;
 -- SECURITY DEFINER functions default to EXECUTE for PUBLIC; revoke that and
 -- grant deliberately. Never a blanket revoke across the whole schema, which
 -- would break the existing public RPCs (create_order, verify_payment, ...).
-REVOKE ALL ON FUNCTION rf_coin_assert_super_admin() FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_get_settings() FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_get_or_create_wallet(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_create_topup(uuid, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_credit_paid_topup(uuid, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_mark_topup_status(uuid, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION rf_coin_assert_super_admin() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_get_settings() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_get_or_create_wallet(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_create_topup(uuid, uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_credit_paid_topup(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_mark_topup_status(uuid, text, text) FROM PUBLIC, anon, authenticated;
 -- Legacy direct settlement is locked down (Codex review): the atomic
 -- settle+enqueue wrapper is the ONLY customer entry point, so a settled
 -- order can never bypass its fulfillment handoff enqueue.
 REVOKE ALL ON FUNCTION rf_coin_settle_order_payment(uuid, uuid)
   FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_release_order_payment(uuid, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_request_adjustment(uuid, text, integer, text, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_decide_adjustment(uuid, boolean, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_set_settings(boolean, boolean, boolean, integer, integer, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_upsert_package(uuid, text, integer, integer, integer, boolean, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_enqueue_fulfillment(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_claim_fulfillment_handoffs(integer, integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_release_order_payment(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_request_adjustment(uuid, text, integer, text, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_decide_adjustment(uuid, boolean, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_set_settings(boolean, boolean, boolean, integer, integer, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_upsert_package(uuid, text, integer, integer, integer, boolean, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION rf_coin_enqueue_fulfillment(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_claim_fulfillment_handoffs(integer, integer) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION rf_coin_ack_fulfillment_handoff(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
 -- Customer-callable functions (identity checked against auth.uid() inside).
+GRANT EXECUTE ON FUNCTION rf_coin_get_or_create_wallet(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION rf_coin_create_topup(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION rf_coin_settle_order_payment_and_enqueue(uuid, uuid) TO authenticated;
 

@@ -16,7 +16,11 @@ temporary_dump="$RUNNER_TEMP/runfazone-development-data.sql"
 temporary_schema_dump="$RUNNER_TEMP/runfazone-development-schema.sql"
 functions_json="$(mktemp)"
 secrets_json="$(mktemp)"
-trap 'rm -f "$temporary_dump" "$temporary_schema_dump" "$functions_json" "$secrets_json"' EXIT
+supplier_probe_body="$(mktemp)"
+trap 'rm -f "$temporary_dump" "$temporary_schema_dump" "$functions_json" "$secrets_json" "$supplier_probe_body"' EXIT
+
+# Verify the local reviewed disabled handler before probing hosted authorization.
+node "$GITHUB_WORKSPACE/scripts/verify-disabled-fazercards-diagnostics.mjs"
 
 curl --fail --silent --show-error \
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
@@ -79,37 +83,32 @@ echo "HOSTED_DB_INTEGRATION_SUMMARY cron_relation_present=$cron_relation_present
 # metadata only; their values never leave Supabase. Safety is established by
 # the active database configuration and the function authorization contracts:
 # automated payment is disabled, suppliers are disabled, cron has no jobs, and
-# the supplier test endpoint is deployed from the reviewed source that requires
-# an active SUPER_ADMIN and an enabled supplier before any provider request.
+# the reviewed supplier diagnostic source has provider access removed. Hosted
+# deployment is verified separately; source inspection alone cannot prove it.
 echo "HOSTED_EDGE_FUNCTION_INVENTORY_PASS count=$function_count external_capable=${known_external_functions:-none} external_provider_secret_names=${external_secret_names:-none}"
 
 # The audit must prove that an unauthenticated caller cannot reach the
 # supplier-test handler. This request is intentionally stopped at the handler
-# authorization boundary and never reaches the provider. Do not print the
+# authorization boundary or permanent disabled response. Do not print the
 # response body or any credential-bearing header.
-supplier_test_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+supplier_test_status="$(curl --silent --show-error --output "$supplier_probe_body" --write-out '%{http_code}' \
   --max-time 15 \
   -H "apikey: $SUPABASE_ANON_KEY" \
   -H 'Content-Type: application/json' \
   "${SUPABASE_URL}/functions/v1/fazercards-test")"
-[[ "$supplier_test_status" = 401 || "$supplier_test_status" = 403 ]] || {
+supplier_test_denied=false
+if [[ "$supplier_test_status" = 401 || "$supplier_test_status" = 403 ]]; then
+  supplier_test_denied=true
+elif [[ "$supplier_test_status" = 503 ]] && jq -e \
+  '. == {"error":"FazerCards diagnostics are disabled; no provider request was made."}' \
+  "$supplier_probe_body" >/dev/null; then
+  supplier_test_denied=true
+fi
+[[ "$supplier_test_denied" = true ]] || {
   echo "HOSTED_INTEGRATION_AUDIT_FAIL=supplier_test_anonymous_access status=$supplier_test_status" >&2
   exit 1
 }
 echo "HOSTED_SUPPLIER_TEST_ANONYMOUS_DENIAL_PASS status=$supplier_test_status"
-
-test -s "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
-  echo 'HOSTED_INTEGRATION_AUDIT_FAIL=reviewed_supplier_test_source_missing' >&2
-  exit 1
-}
-rg -q 'isActiveSuperAdmin' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
-  echo 'HOSTED_INTEGRATION_AUDIT_FAIL=reviewed_supplier_test_admin_guard_missing' >&2
-  exit 1
-}
-rg -q 'Supplier integration is disabled' "$GITHUB_WORKSPACE/supabase/functions/fazercards-test/index.ts" || {
-  echo 'HOSTED_INTEGRATION_AUDIT_FAIL=reviewed_supplier_test_disabled_guard_missing' >&2
-  exit 1
-}
 
 # The export is retained only in the ephemeral runner workspace and removed by
 # the EXIT trap. It proves export capability, not a disposable restore.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Loader2, Wifi, WifiOff, RefreshCw, DollarSign, Package, ChevronDown, ChevronUp, ExternalLink, AlertTriangle, Check, X, Settings2, Zap, Shield, Clock, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, Loader2, Wifi, WifiOff, RefreshCw, DollarSign, Package, ChevronDown, ChevronUp, AlertTriangle, Check, X, Settings2, Zap, Shield, Clock, RotateCcw } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -553,7 +553,7 @@ function ExpandedSection({ supplier }: { supplier: Supplier }) {
             </table>
           </div>
         )}
-        <div className="mt-2"><a href="/admin/suppliers/controlled-test-order" className="text-xs text-cyan-300 hover:underline">Create new test order →</a></div>
+        <p className="mt-2 text-xs text-amber-200">Live supplier test orders are disabled.</p>
       </div>
 
       {/* Mappings */}

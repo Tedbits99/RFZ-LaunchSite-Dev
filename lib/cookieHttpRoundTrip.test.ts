@@ -12,7 +12,15 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 // Set-Cookie headers, absorbed the way a browser stores them.
 
 const TEST_SECRET = 'synthetic-test-secret-0123456789abcdef0123456789abcdef';
-const ACCESS_TOKEN = 'recovery-access-token-roundtrip';
+const SESSION_ID = '7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a';
+
+function accessToken(sessionId = SESSION_ID, issuedAt = 1) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ session_id: sessionId, iat: issuedAt }), 'utf8').toString('base64url');
+  return `${header}.${payload}.synthetic-signature`;
+}
+
+const ACCESS_TOKEN = accessToken();
 const USER_ID = 'customer-roundtrip-1';
 
 const fetchMock = vi.spyOn(globalThis, 'fetch');
@@ -24,7 +32,8 @@ function getSetCookieHeaders(response: Response): string[] {
 }
 
 function fingerprintOf(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+  const sessionId = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).session_id as string;
+  return createHash('sha256').update(sessionId.toLowerCase(), 'utf8').digest('hex');
 }
 
 // A minimal browser cookie store: absorbs Set-Cookie headers (path scoping
@@ -111,6 +120,32 @@ function recoveryNetwork() {
   };
 }
 
+function customerConfirmationNetwork() {
+  const user = {
+    id: USER_ID,
+    email: 'customer@example.test',
+    email_confirmed_at: '2026-10-18T00:00:00Z',
+    aud: 'authenticated',
+    role: 'authenticated',
+    app_metadata: { provider: 'email' },
+    user_metadata: { full_name: 'Synthetic Player' },
+    created_at: '2026-10-01T00:00:00Z',
+  };
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (url.includes('/auth/v1/signup') && method === 'POST') return jsonResponse(user);
+    if (url.includes('/auth/v1/verify') && method === 'POST') return jsonResponse(sessionBody(ACCESS_TOKEN, USER_ID));
+    if (url.includes('/auth/v1/token')) return jsonResponse(sessionBody(ACCESS_TOKEN, USER_ID));
+    if (url.includes('/auth/v1/user') && method === 'GET') return jsonResponse(user);
+    if (url.includes('/rest/v1/rpc/activate_customer_profile')) return jsonResponse([{ out_status: 'active', out_error: null }]);
+    if (url.includes('/rest/v1/customer_profiles') && method === 'GET') {
+      return jsonResponse([{ user_id: USER_ID, display_name: 'Synthetic Player', email_snapshot: user.email, status: 'active' }]);
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  };
+}
+
 async function loadRouteModule(routePath: string) {
   const userland = await import(routePath);
   const { AppRouteRouteModule } = await import('next/dist/server/route-modules/app-route/module.js');
@@ -152,6 +187,8 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
   let browser: BrowserCookieStore;
   let callback: Awaited<ReturnType<typeof loadRouteModule>>;
   let complete: Awaited<ReturnType<typeof loadRouteModule>>;
+  let register: Awaited<ReturnType<typeof loadRouteModule>>;
+  let profile: Awaited<ReturnType<typeof loadRouteModule>>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -166,6 +203,48 @@ describe('Phase 1B-3 HTTP round trip: real route modules, browser-facing Set-Coo
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
     callback = await loadRouteModule('@/app/auth/callback/route.ts');
     complete = await loadRouteModule('@/app/auth/reset-password/complete/route.ts');
+    register = await loadRouteModule('@/app/api/auth/register/route.ts');
+    profile = await loadRouteModule('@/app/api/account/profile/route.ts');
+  });
+
+  it('registration verifier and confirmation session persist in the customer namespace through account profile refresh', async () => {
+    fetchMock.mockImplementation(customerConfirmationNetwork());
+
+    const registration = await runRoute(register, '/api/auth/register', new NextRequestConstructor('https://example.test/api/auth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Synthetic Player', email: 'customer@example.test', password: 'synthetic-password-123' }),
+    }));
+    expect(registration.status).toBe(202);
+    browser.absorb(registration);
+    expect(browser.names().some((name) => name.startsWith('rfz-customer-auth') && name.includes('code-verifier'))).toBe(true);
+    expect(browser.names().some((name) => name.startsWith('rfz-admin-auth') || name.startsWith('rfz-recovery-auth'))).toBe(false);
+
+    const confirmation = await runRoute(callback, '/auth/callback', new NextRequestConstructor('https://example.test/auth/callback?code=synthetic-confirmation-code&type=signup', {
+      headers: { cookie: browser.headerFor('/auth/callback') },
+    }));
+    expect(confirmation.headers.get('location')).toBe('https://example.test/account');
+    const confirmationCookies = getSetCookieHeaders(confirmation);
+    expect(confirmationCookies.some((cookie) => /^rfz-customer-auth(?:\.|=)/.test(cookie))).toBe(true);
+    expect(confirmationCookies.some((cookie) => cookie.startsWith('rfz-admin-auth=') || cookie.startsWith('rfz-recovery-auth='))).toBe(false);
+    expect(confirmation.headers.get('location')).not.toContain('synthetic-confirmation-code');
+    browser.absorb(confirmation);
+
+    const accountProfile = await runRoute(profile, '/api/account/profile', new NextRequestConstructor('https://example.test/api/account/profile', {
+      headers: { cookie: browser.headerFor('/api/account/profile') },
+    }));
+    expect(accountProfile.status).toBe(200);
+    expect(await accountProfile.json()).toMatchObject({ display_name: 'Synthetic Player', status: 'active' });
+    expect(browser.names().some((name) => name.startsWith('rfz-customer-auth'))).toBe(true);
+  });
+
+  it('token_hash confirmation establishes a customer session without a PKCE verifier', async () => {
+    fetchMock.mockImplementation(customerConfirmationNetwork());
+    const confirmation = await runRoute(callback, '/auth/callback', new NextRequestConstructor('https://example.test/auth/callback?token_hash=synthetic-token-hash&type=email'));
+    expect(confirmation.headers.get('location')).toBe('https://example.test/account');
+    expect(getSetCookieHeaders(confirmation).some((cookie) => /^rfz-customer-auth(?:\.|=)/.test(cookie))).toBe(true);
+    expect(getSetCookieHeaders(confirmation).some((cookie) => /^rfz-(?:admin|recovery)-auth(?:\.|=)/.test(cookie))).toBe(false);
+    expect(confirmation.headers.get('location')).not.toContain('synthetic-token-hash');
   });
 
   it('recovery callback issues session + proof Set-Cookie headers; completion clears both through real HTTP responses', async () => {

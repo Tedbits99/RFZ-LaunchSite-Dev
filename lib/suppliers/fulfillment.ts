@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { getAdapter, type SupplierConfig, type FulfillmentResult } from './adapter';
+import { isSupplierFulfillmentReleased } from '@/lib/supplierFulfillmentRelease';
 
 type SupplierRow = {
   id: string; code: string; adapter: string; api_url: string; sandbox_api_url: string | null;
@@ -150,6 +151,9 @@ export async function startFulfillment(orderId: string, db?: any): Promise<{
   alreadyFulfilled?: boolean;
   supplierId?: string;
 }> {
+  if (!isSupplierFulfillmentReleased(process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE)) {
+    return { success: false, error: 'Supplier fulfillment is disabled' };
+  }
   const client = db || getDb();
   if (!client) return { success: false, error: 'Database not configured' };
 
@@ -362,6 +366,9 @@ export async function fulfillOrder(
   db?: any,
   capturedMappingId?: string | null,
 ) {
+  if (!isSupplierFulfillmentReleased(process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE)) {
+    return { success: false, error: 'Supplier fulfillment is disabled' };
+  }
   const client = db || getDb();
   if (!client) return { success: false, error: 'Database not configured' };
 

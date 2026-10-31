@@ -35,7 +35,7 @@ describe('registration and confirmation namespace migration boundary', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
   });
 
-  it('stores legacy registration PKCE material only in the legacy storage namespace', async () => {
+  it('keeps legacy and customer PKCE material in separate storage namespaces', async () => {
     const legacy = await createSupabaseServerClient();
     const result = await legacy.auth.signUp({
       email: 'customer@example.com',
@@ -47,6 +47,16 @@ describe('registration and confirmation namespace migration boundary', () => {
     expect(nextCookies.set).toHaveBeenCalled();
     expect(cookieNames().some((name) => name.startsWith('sb-project-ref-auth-token') && name.includes('code-verifier'))).toBe(true);
     expect(cookieNames().some((name) => name.startsWith(`${CUSTOMER_SESSION_COOKIE}-`))).toBe(false);
+
+    cookieJar.clear();
+    const customer = await createCustomerServerClient();
+    await customer.auth.signUp({
+      email: 'customer@example.com',
+      password: 'correct horse battery staple',
+      options: { emailRedirectTo: 'https://example.test/auth/callback' },
+    });
+    expect(cookieNames().some((name) => name.startsWith(`${CUSTOMER_SESSION_COOKIE}-`) && name.includes('code-verifier'))).toBe(true);
+    expect(cookieNames().some((name) => name.startsWith('sb-project-ref-auth-token') && name.includes('code-verifier'))).toBe(false);
   });
 
   it('would use the customer PKCE namespace without changing the legacy namespace', async () => {
@@ -68,15 +78,15 @@ describe('registration and confirmation namespace migration boundary', () => {
     expect(cookieNames()).toEqual(['sb-project-ref-auth-token-code-verifier']);
   });
 
-  it('keeps the current legacy registration/callback and middleware contracts unchanged', () => {
+  it('keeps the legacy middleware contract while routing customer confirmation through its namespace', () => {
     const registration = source('app/api/auth/register/route.ts');
     const callback = source('app/auth/callback/route.ts');
     const middleware = source('proxy.ts');
 
-    expect(registration).toContain("from '@/lib/supabaseServer'");
-    expect(registration).not.toContain('createCustomerServerClient');
-    expect(callback).toContain("from '@/lib/supabaseServer'");
-    expect(callback).not.toContain('createCustomerServerClient');
+    expect(registration).toContain('createCustomerServerClient');
+    expect(registration).not.toContain("from '@/lib/supabaseServer'");
+    expect(callback).toContain('createCustomerServerClient');
+    expect(callback).not.toContain("from '@/lib/supabaseServer'");
     expect(middleware).toContain("from '@supabase/ssr'");
     expect(middleware).not.toContain('createCustomerServerClient');
     expect(middleware).not.toContain('createAdminServerClient');

@@ -6,6 +6,8 @@ import { createCustomerServerClient } from '@/lib/authSessionClients';
 import { hashOrderCapability, orderCapabilityCookieName } from '@/lib/orderCapability';
 import { validateVoucher } from '@/lib/voucher';
 import { paymentMethodLabel } from '@/lib/paymentMethods';
+import { RF_COIN_PAYMENT_METHOD } from '@/lib/rfCoins';
+import { RF_COINS_SPENDING_RELEASE_ENABLED } from '@/lib/rfCoinFundingRelease';
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,6 +20,12 @@ export async function POST(req: NextRequest) {
     }
     if (!paymentMethod || typeof paymentMethod !== 'string' || paymentMethod.length > 50) {
       return NextResponse.json({ error: 'Please select a valid payment method.' }, { status: 400 });
+    }
+    // The storefront control is presentation only. A database payment-config
+    // toggle or direct API request must not bypass the independent financial
+    // release lock for RF Coins spending.
+    if (paymentMethod === RF_COIN_PAYMENT_METHOD && !RF_COINS_SPENDING_RELEASE_ENABLED) {
+      return NextResponse.json({ error: 'RF Coins spending is not available in this release.' }, { status: 503 });
     }
 
     // Read the verified Auth identity from the customer session namespace
@@ -65,7 +73,7 @@ export async function POST(req: NextRequest) {
 
     const { data: packageRecord, error: packageError } = await client
       .from('packages')
-      .select('id, game_id, price_cents, is_active, supplier_offer_id, supplier_category_id, games!inner(slug)')
+      .select('id, game_id, price_cents, is_active, games!inner(slug)')
       .eq('id', packageId)
       .eq('game_id', gameId)
       .maybeSingle();
@@ -75,21 +83,32 @@ export async function POST(req: NextRequest) {
 
     const packageGame = Array.isArray(packageRecord.games) ? packageRecord.games[0] : packageRecord.games;
     if (packageGame?.slug === 'mobile-legends' || packageGame?.slug === 'mlbb') {
-      if (packageRecord.supplier_category_id !== 'mobile_legends_philippines' || !packageRecord.supplier_offer_id) {
+      if (!adminSupabase) {
+        return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });
+      }
+      const { data: supplierPackage, error: supplierPackageError } = await adminSupabase
+        .from('packages')
+        .select('supplier_offer_id, supplier_category_id')
+        .eq('id', packageRecord.id)
+        .maybeSingle();
+      if (supplierPackageError) {
+        return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });
+      }
+      if (supplierPackage?.supplier_category_id !== 'mobile_legends_philippines' || !supplierPackage.supplier_offer_id) {
         return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
       }
-      const { data: supplier } = await client
+      const { data: supplier } = await adminSupabase
         .from('suppliers')
         .select('id')
         .eq('code', 'fazercards')
         .eq('enabled', true)
         .maybeSingle();
-      const { data: mapping } = supplier ? await client
+      const { data: mapping } = supplier ? await adminSupabase
         .from('supplier_package_mappings')
         .select('id')
         .eq('package_id', packageId)
         .eq('supplier_id', supplier.id)
-        .eq('supplier_product_id', packageRecord.supplier_offer_id)
+        .eq('supplier_product_id', supplierPackage.supplier_offer_id)
         .eq('enabled', true)
         .maybeSingle() : { data: null };
       if (!mapping) {

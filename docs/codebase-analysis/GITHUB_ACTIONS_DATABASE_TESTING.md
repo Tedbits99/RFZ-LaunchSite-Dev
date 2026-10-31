@@ -2,6 +2,13 @@
 
 This workflow runs the privileged RPC tests against a disposable local Supabase stack on a GitHub-hosted Ubuntu runner. It does not link a project, use hosted Supabase credentials, push migrations, deploy Edge Functions, publish Bolt, or access the Bolt Database.
 
+**Current source note (2026-10-28):** the executable canonical sequence contains
+104 migrations. PR #82 proposes the three RF Coins migrations at its tail;
+they are present only on the draft candidate branch, not `main` or the hosted
+database. Their defaults and hard release constants keep wallet funding and
+spending disabled. The counts and dispositions in older dated sections below
+are historical snapshots.
+
 ## Files
 
 - [database-security-tests.yml](../../.github/workflows/database-security-tests.yml) — branch-scoped GitHub Actions workflow.
@@ -21,7 +28,7 @@ The workflow:
 5. Installs only the PostgreSQL client needed for assertions.
 6. Copies the repository migrations into a temporary test project.
 7. Scans every migration for cron or outbound HTTP SQL before copying it.
-8. Uses every executable migration and fails closed if any contains a matching outbound/scheduled pattern. Superseded, duplicate, scheduler, and owner-approved RF Coins files are preserved outside the executable directory.
+8. Uses every executable migration and fails closed if any contains a matching outbound/scheduled pattern. Superseded, duplicate, and scheduler files are preserved outside the executable directory. The current draft RF Coins migrations are active canonical source but contain no outbound or scheduled operations.
 9. Starts a local Supabase stack using Docker on the runner.
 10. Applies the complete remaining migration baseline with `supabase db reset`.
 11. Executes real PostgreSQL role, privilege, RPC, SECURITY DEFINER, search-path, RLS, and public-catalog assertions.
@@ -40,7 +47,7 @@ This is a test-only baseline reconstruction. It does not rewrite or delete any h
 
 The migration [20260928124803_honor_of_kings_uid_input_field.sql](../../supabase/migrations/20260928124803_honor_of_kings_uid_input_field.sql) is excluded because it inserts a hardcoded game UUID that is not created by the catalog seed. The catalog migration [20260927062024_runfazone_core_catalog.sql](../../supabase/migrations/20260927062024_runfazone_core_catalog.sql) creates Honor of Kings by slug with `gen_random_uuid()`. The later corrected migration [20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql](../../supabase/migrations/20260929131902_20260928124803_honor_of_kings_uid_input_field.sql.sql) resolves the game ID by slug, raises if the catalog record is absent, and remains included. A test fixture for the hardcoded UUID would conflict with the generated catalog identity and could alter catalog semantics, so the superseded historical copy is excluded instead.
 
-The canonical baseline has 96 executable migrations and 19 byte-for-byte archived files: the reconciliation scheduler, superseded fulfillment and RPC copies, duplicate 20260929 copies, hardcoded Honor of Kings UID migration, and RF Coins files pending separate approval. The wrapper fails closed if the executable directory differs from the canonical manifest or if the corrected slug-based Honor of Kings migration is missing.
+This paragraph's earlier baseline count and RF Coins disposition are historical. The current canonical manifest has 104 executable migrations and 19 archived files; the older RF Coins proposal is superseded, while the three reviewed draft-PR migrations are active in that candidate only. The wrapper fails closed if the executable directory differs from the canonical manifest or if the corrected slug-based Honor of Kings migration is missing.
 
 The wrapper scans every executable migration for `cron.schedule`, `net.http`, `http_post`, `http_get`, and hardcoded function URLs. If a new matching migration is added, the workflow exits before starting the database.
 
