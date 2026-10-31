@@ -702,7 +702,9 @@ if [ "$upgrade_mode" = true ]; then
       exit 13
     }
     cp "$source_migration" "$test_root/supabase/migrations/$post_wallet_migration"
-    supabase_local migration up
+    # These deferred catalog/campaign migrations also precede AdminOps in the
+    # migration ledger, so include-all is required for the synthetic upgrade.
+    supabase_local migration up --include-all
   done
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --set expected_migration_count="$manifest_count" \
