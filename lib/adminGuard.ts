@@ -129,3 +129,66 @@ export async function requireAdmin(
 export function hasRole(session: AdminSession, ...roles: string[]): boolean {
   return roles.includes(session.role)
 }
+
+export async function getAdminPermissionSet(role: string): Promise<string[] | null> {
+  if (role === 'SUPER_ADMIN') return ['*']
+  if (!adminSupabase) return null
+  const { data, error } = await adminSupabase
+    .from('admin_role_permissions')
+    .select('permission_key')
+    .eq('role', role)
+    .eq('is_enabled', true)
+  if (error) return null
+  return (data || []).map((row) => row.permission_key)
+}
+
+/** Server-rendered admin pages must check grants before reading via a service-role client. */
+export async function hasAdminPagePermission(permission: string | string[]): Promise<boolean> {
+  const session = await getAdminSession()
+  if (!session) return false
+  if (session.role === 'SUPER_ADMIN') return true
+  const grants = await getAdminPermissionSet(session.role)
+  if (!grants) return false
+  const required = Array.isArray(permission) ? permission : [permission]
+  return required.some((key) => grants.includes(key))
+}
+
+export async function requireAdminPermission(req: NextRequest, permission: string) {
+  const auth = await requireAdmin(req)
+  if (!auth.ok) return auth
+  if (auth.session.role === 'SUPER_ADMIN') return auth
+  if (!adminSupabase) {
+    return {
+      ok: false as const,
+      response: new Response(JSON.stringify({ error: 'Admin permission service is unavailable.' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      }),
+    }
+  }
+  const { data, error } = await adminSupabase
+    .from('admin_role_permissions')
+    .select('is_enabled')
+    .eq('role', auth.session.role)
+    .eq('permission_key', permission)
+    .maybeSingle()
+  if (error) {
+    return {
+      ok: false as const,
+      response: new Response(JSON.stringify({ error: 'Admin permission service is unavailable.' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      }),
+    }
+  }
+  if (data?.is_enabled !== true) {
+    return {
+      ok: false as const,
+      response: new Response(JSON.stringify({ error: 'Forbidden.' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      }),
+    }
+  }
+  return auth
+}

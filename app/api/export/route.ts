@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 function csvField(value: unknown): string {
   if (value === null || value === undefined) return '""';
@@ -8,12 +8,11 @@ function csvField(value: unknown): string {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const type = req.nextUrl.pathname.endsWith('/games') ? 'games' : 'orders';
+  const auth = await requireAdminPermission(req, type === 'games' ? 'games.manage' : 'orders.view');
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   if (!db) return new NextResponse('Database not configured', { status: 503 });
-
-  const type = req.nextUrl.pathname.endsWith('/games') ? 'games' : 'orders';
 
   if (type === 'orders') {
     const { searchParams } = new URL(req.url);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { adminSupabase } from '@/lib/supabaseAdmin'
-import { requireAdmin } from '@/lib/adminGuard'
+import { requireAdminPermission } from '@/lib/adminGuard'
 import { RF_COIN_PAYMENT_METHOD, rfCoinErrorMessage } from '@/lib/rfCoins'
 
 /*
@@ -133,7 +133,7 @@ async function refundCoinOrder(
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const auth = await requireAdmin(req)
+  const auth = await requireAdminPermission(req, 'payments.refund')
   if (!auth.ok) return auth.response
   const db = adminSupabase || supabase
   if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 })

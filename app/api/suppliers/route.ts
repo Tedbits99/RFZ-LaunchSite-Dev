@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SUPPORTED_ADAPTERS } from '@/lib/suppliers/adapter';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 const VALID_ADAPTERS = new Set<string>(SUPPORTED_ADAPTERS);
 
@@ -14,7 +14,7 @@ function normalizeAdapter(value: unknown): string {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'suppliers.view');
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'suppliers.manage');
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'suppliers.manage');
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
@@ -96,7 +96,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'suppliers.manage');
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });

@@ -10,15 +10,44 @@ type AdminNavigationProps = {
   open: boolean;
   onClose: () => void;
   role: string;
+  permissions: string[];
 };
 
-export default function AdminNavigation({ open, onClose, role }: AdminNavigationProps) {
+function permissionForPath(href: string): string | null {
+  if (href === '/admin') return 'orders.view'
+  if (href === '/admin/orders' || href.startsWith('/admin/orders/')) return 'orders.view'
+  if (href === '/admin/games' || href.startsWith('/admin/games/')) return 'games.manage'
+  if (href === '/admin/pricing' || href === '/admin/bulk-pricing') return 'pricing.manage'
+  if (href === '/admin/promotions' || href.startsWith('/admin/promotions/') || href.startsWith('/admin/announcements') || href.startsWith('/admin/notifications')) return 'marketing.manage'
+  if (href.startsWith('/admin/customers')) return 'customers.view'
+  if (href === '/admin/staff') return 'staff.manage'
+  if (href === '/admin/vouchers') return 'VOUCHERS_ADMIN_ONLY'
+  if (href === '/admin/roles' || href === '/admin/activity-log' || href === '/admin/rf-coins') return 'SUPER_ADMIN_ONLY'
+  if (href === '/admin/tickets') return 'tickets.manage'
+  if (href === '/admin/tasks') return 'tasks.manage'
+  if (href === '/admin/approvals' || href === '/admin/blocklist' || href === '/admin/risk-alerts' || href === '/admin/security' || href === '/admin/system-health') return 'system.view'
+  if (href.startsWith('/admin/suppliers') || href.startsWith('/admin/ml-offer-pricing')) return 'suppliers.view'
+  if (href === '/admin/payments' || href === '/admin/reconciliation' || href === '/admin/refunds') return 'payments.view'
+  if (href === '/admin/export') return 'orders.view'
+  if (href === '/admin/analytics') return 'analytics.view'
+  if (href === '/admin/settings') return 'settings.manage'
+  return null
+}
+
+function canVisitPath(href: string, role: string, permissions: string[]) {
+  if (role === 'SUPER_ADMIN') return true
+  if (href === '/admin/export') return permissions.includes('orders.view') || permissions.includes('games.manage')
+  const required = permissionForPath(href)
+  if (required === 'VOUCHERS_ADMIN_ONLY') return ['ADMIN', 'SUPER_ADMIN'].includes(role) && permissions.includes('marketing.manage')
+  return required === null || (required !== 'SUPER_ADMIN_ONLY' && permissions.includes(required))
+}
+
+export default function AdminNavigation({ open, onClose, role, permissions }: AdminNavigationProps) {
   const pathname = usePathname();
   const [openGroups, setOpenGroups] = useState<string[]>([]);
 
   const isActive = (href: string) => pathname === href || (href !== '/admin' && pathname.startsWith(`${href}/`));
-  const visibleItems = useCallback((item: NavDropdownItem) => item.items.filter((leaf) =>
-    leaf.href !== '/admin/rf-coins' || role === 'SUPER_ADMIN'), [role]);
+  const visibleItems = useCallback((item: NavDropdownItem) => item.items.filter((leaf) => canVisitPath(leaf.href, role, permissions)), [permissions, role]);
   const groupIsActive = (item: NavDropdownItem) => visibleItems(item).some((leaf) => isActive(leaf.href));
 
   useEffect(() => {
@@ -57,6 +86,7 @@ export default function AdminNavigation({ open, onClose, role }: AdminNavigation
         <div className="space-y-1">
           {PRIMARY_NAV.map((item) => {
             if (!('items' in item)) {
+              if (!canVisitPath(item.href, role, permissions)) return null
               const active = isActive(item.href);
               const Icon = item.icon;
               return (

@@ -1,0 +1,82 @@
+name: ADMIN-OPS-001 disposable acceptance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-ops-001-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  disposable-admin-acceptance:
+    if: github.event.pull_request.head.ref == 'feature/admin-ops-001'
+    name: ADMIN-OPS-001 PostgreSQL, Auth, and desktop/mobile acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      ADMIN_OPS_ACCEPTANCE: "1"
+      CATALOG_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      CATALOG_RUN_TAG: admin-ops-${{ github.run_id }}-${{ github.run_attempt }}
+      NEXT_TELEMETRY_DISABLED: "1"
+      PAYMENT_MODE: mock
+      PAYMENT_PROVIDER: mock
+
+    steps:
+      - name: Check out the exact PR head without persisting credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact candidate SHA and clean checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf 'ADMIN_OPS_CANDIDATE_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install pinned local Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.121.0
+
+      - name: Verify migration manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version | grep -Fx '2.121.0'
+          bash scripts/verify-deployable-migrations.sh --self-test
+          bash scripts/verify-deployable-migrations.sh
+
+      - name: Install Chromium for desktop and mobile projects
+        run: npx playwright install --with-deps chromium
+
+      - name: Run disposable PostgreSQL 17, Auth, workflow, and browser acceptance
+        run: bash scripts/admin-ops-001/run-local-acceptance.sh
+
+      - name: Upload sanitized synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-ops-001-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/catalog-001/test-output/
+          if-no-files-found: warn
+          retention-days: 7

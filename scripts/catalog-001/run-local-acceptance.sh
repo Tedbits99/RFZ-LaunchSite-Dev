@@ -93,4 +93,8 @@ else
   CATALOG_INTEGRATION_RUN=1 npm test -- --run tests/catalog-001/catalog-integration.test.ts --reporter=verbose
   CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts --reporter=list
 fi
+if [[ "${ADMIN_OPS_ACCEPTANCE:-0}" == 1 ]]; then
+  CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts e2e/catalog-001/admin-ops.acceptance.spec.ts --reporter=list
+  printf '%s\n' 'ADMIN_OPS_001_DISPOSABLE_BROWSER_ACCEPTANCE_PASS projects=desktop-chromium,mobile-chromium'
+fi
 printf 'CATALOG_LOCAL_ACCEPTANCE_PASS migration_files=%s browser_projects=2 supplier_release=off\n' "$RFZ_MIGRATION_FILE_COUNT"

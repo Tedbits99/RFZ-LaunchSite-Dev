@@ -3,12 +3,15 @@ import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { formatCurrency, formatNumber } from '@/lib/format'
 import { Scale, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
+import { hasAdminPagePermission } from '@/lib/adminGuard'
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied'
 
 export const dynamic = 'force-dynamic'
 
 type Order = { id: string; reference: string; total_cents: number; status: string; payment_method: string }
 
 export default async function AdminReconciliationPage() {
+  if (!await hasAdminPagePermission('payments.view')) return <AdminPermissionDenied feature="payment reconciliation" />
   let orders: Order[] = []
   let dbReady = false
   if (adminSupabase) {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'suppliers.view');
   if (!auth.ok) return auth.response;
   const db = adminSupabase || auth.client;
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });

@@ -1,21 +1,29 @@
-import { UserCog } from 'lucide-react';
+import { AdminPage } from '@/components/admin/AdminPage'
+import { adminSupabase } from '@/lib/supabaseAdmin'
+import { getAdminPermissionSet, getAdminSession } from '@/lib/adminGuard'
+import { StaffManager, type AdminStaffRecord } from './StaffManager'
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-dynamic'
 
-export default function AdminStaffPage() {
-  const staff = [
-    { name: 'Admin', email: 'admin@runfazone.com', role: 'SUPER_ADMIN', status: 'Active' },
-    { name: 'Demo Customer', email: 'demo@runfazone.com', role: 'CUSTOMER', status: 'Active' },
-  ];
-  return (
-    <main className="min-h-screen bg-[#030718] text-slate-100">
-      <header className="border-b border-[#14203a] bg-[#050a1b]/95"><div className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-4"><div className="flex items-center gap-3"><a href="/admin" className="text-xs text-slate-400">← Dashboard</a><span className="text-slate-600">/</span><span className="text-sm font-semibold">Staff</span></div><a href="/" className="text-xs text-slate-400">View Store</a></div></header>
-      <div className="mx-auto max-w-[1180px] px-5 py-8">
-        <div className="flex items-center justify-between"><div><h1 className="font-display text-2xl font-bold">Staff</h1><p className="text-xs text-slate-500">Manage team members</p></div><button className="rounded-lg bg-gradient-to-r from-blue-500 to-violet-600 px-4 py-2 text-sm font-semibold">+ Invite Staff</button></div>
-        <div className="mt-6 space-y-3">{staff.map((s) => (
-          <div key={s.email} className="flex items-center gap-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5"><UserCog className="text-cyan-300" size={18} /><div className="flex-1"><h3 className="font-display font-semibold">{s.name}</h3><p className="text-xs text-slate-400">{s.email}</p></div><span className="rounded bg-[#13243f] px-2 py-0.5 text-[10px] text-slate-400">{s.role}</span><span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-300">{s.status}</span></div>
-        ))}</div>
-      </div>
-    </main>
-  );
+export default async function AdminStaffPage() {
+  const session = await getAdminSession()
+  if (!session) return null
+  const permissions = await getAdminPermissionSet(session.role)
+  if (!permissions?.includes('*') && !permissions?.includes('staff.manage')) {
+    return <AdminPage title="Staff"><p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-5 text-sm text-rose-200">Your role cannot manage staff access.</p></AdminPage>
+  }
+  if (!adminSupabase) {
+    return <AdminPage title="Staff"><p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-200">Staff data is unavailable in this environment.</p></AdminPage>
+  }
+
+  const { data, error } = await adminSupabase
+    .from('admins')
+    .select('id,email,name,role,is_active,claimed_at')
+    .order('claimed_at', { ascending: true })
+
+  if (error) {
+    return <AdminPage title="Staff"><p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-5 text-sm text-rose-200">Staff data could not be loaded. Retry later.</p></AdminPage>
+  }
+
+  return <AdminPage title="Staff"><StaffManager staff={(data || []) as AdminStaffRecord[]} actorId={session.userId} actorRole={session.role} /></AdminPage>
 }
