@@ -17,21 +17,30 @@ VALUES (
 )
 ON CONFLICT (id) DO UPDATE SET is_active = true;
 
-INSERT INTO public.games (id, slug, name, short_name, description, region, currency, is_active, sort_order)
+INSERT INTO public.games AS existing_game (
+  id, slug, name, short_name, description, region, currency, is_active, sort_order, catalog_status, published_at
+)
 VALUES (
   '00000000-0000-0000-0000-000000000302',
   'completion-guard-game', 'Completion Guard Game', 'CG',
-  'Disposable fixture', 'Test', 'PHP', true, 2302
+  'Disposable fixture', 'Test', 'PHP', true, 2302, 'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  is_active = true, catalog_status = 'PUBLISHED',
+  published_at = COALESCE(existing_game.published_at, EXCLUDED.published_at);
 
-INSERT INTO public.packages (id, game_id, name, sku, amount, price_cents, sort_order)
+INSERT INTO public.packages AS existing_package (
+  id, game_id, name, sku, amount, price_cents, sort_order, is_active, catalog_status, published_at
+)
 VALUES (
   '00000000-0000-0000-0000-000000000303',
   '00000000-0000-0000-0000-000000000302',
-  'Completion Guard Package', 'COMPLETION-GUARD-PACKAGE', '1', 1, 2302
+  'Completion Guard Package', 'COMPLETION-GUARD-PACKAGE', '1', 1, 2302, true,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  is_active = true, catalog_status = 'PUBLISHED',
+  published_at = COALESCE(existing_package.published_at, EXCLUDED.published_at);
 
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,

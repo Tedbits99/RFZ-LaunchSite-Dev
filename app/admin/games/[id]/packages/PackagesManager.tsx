@@ -1,9 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Check, Loader2, Package, Save, Sparkles } from 'lucide-react'
-import type { SupabaseClient } from '@supabase/supabase-js'
-import { createAdminBrowserClient } from '@/lib/authSessionBrowserClients'
+import { useState } from 'react'
+import { Archive, Check, Loader2, Package, Plus, Save, RotateCcw } from 'lucide-react'
 
 type PackageRecord = {
   id: string
@@ -14,6 +12,8 @@ type PackageRecord = {
   original_price_cents: number | null
   bonus: string | null
   is_active: boolean
+  catalog_status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
+  supplier_review_required: boolean
   sort_order: number
   badge: string | null
   image_url: string | null
@@ -22,54 +22,32 @@ type PackageRecord = {
   supplier_cost_usd: string | null
 }
 
-type PackagesManagerProps = {
-  packages: PackageRecord[]
-  gameId: string
-  isMobileLegends: boolean
-}
+type PackageDraft = { name: string; sku: string; amount: string; price: string; originalPrice: string; bonus: string; sort: string; badge: string; imageUrl: string }
+const blankDraft = (): PackageDraft => ({ name: '', sku: '', amount: '', price: '', originalPrice: '', bonus: '', sort: '100', badge: '', imageUrl: '' })
 
-export default function PackagesManager({ packages: initialPackages, gameId, isMobileLegends }: PackagesManagerProps) {
+export default function PackagesManager({ packages: initialPackages, gameId, isMobileLegends }: { packages: PackageRecord[]; gameId: string; isMobileLegends: boolean }) {
   const [packages, setPackages] = useState(initialPackages)
-  const [loading, setLoading] = useState(isMobileLegends)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [draft, setDraft] = useState<{ price: string; sort: string; badge: string; imageUrl: string }>({ price: '', sort: '', badge: '', imageUrl: '' })
+  const [draft, setDraft] = useState<PackageDraft>(blankDraft())
+  const [creating, setCreating] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [savedId, setSavedId] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!isMobileLegends) return
-    let cancelled = false
-    const loadPackages = async () => {
-      let supabase: SupabaseClient
-      try { supabase = createAdminBrowserClient() } catch { setError('Admin database session is unavailable.'); setLoading(false); return }
-      const { data, error: loadError } = await supabase
-        .from('packages')
-        .select('id, name, sku, amount, price_cents, original_price_cents, bonus, is_active, sort_order, badge, image_url, supplier_offer_id, supplier_category_id, supplier_cost_usd')
-        .eq('game_id', gameId)
-        .eq('supplier_category_id', 'mobile_legends_philippines')
-        .not('supplier_offer_id', 'is', null)
-        .order('sort_order')
-      if (cancelled) return
-      if (loadError) {
-        setError(loadError.message)
-      } else {
-        setPackages((data || []) as PackageRecord[])
-      }
-      setLoading(false)
-    }
-    loadPackages()
-    return () => { cancelled = true }
-  }, [gameId, isMobileLegends])
-
-  function formatPHP(cents: number): string {
+  function formatPHP(cents: number) {
     return `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
   }
 
   function beginEdit(pkg: PackageRecord) {
     setEditingId(pkg.id)
     setDraft({
+      name: pkg.name,
+      sku: pkg.sku,
+      amount: pkg.amount,
       price: pkg.price_cents > 0 ? (pkg.price_cents / 100).toFixed(2) : '',
+      originalPrice: pkg.original_price_cents ? (pkg.original_price_cents / 100).toFixed(2) : '',
+      bonus: pkg.bonus || '',
       sort: String(pkg.sort_order),
       badge: pkg.badge || '',
       imageUrl: pkg.image_url || '',
@@ -77,39 +55,69 @@ export default function PackagesManager({ packages: initialPackages, gameId, isM
     setError(null)
   }
 
-  async function savePackage(pkg: PackageRecord) {
-    const price = draft.price === '' ? 0 : Number(draft.price)
-    const sort = draft.sort === '' ? pkg.sort_order : Number(draft.sort)
-    if (!Number.isFinite(price) || price < 0 || !Number.isFinite(sort)) {
-      setError('Enter a valid selling price and sort order.')
+  function cents(value: string) {
+    const amount = value.trim() ? Number(value) : 0
+    return Number.isFinite(amount) && amount >= 0 ? Math.round(amount * 100) : null
+  }
+
+  function replaceRow(row: PackageRecord) {
+    setPackages((current) => {
+      const exists = current.some((item) => item.id === row.id)
+      return (exists ? current.map((item) => item.id === row.id ? row : item) : [...current, row]).sort((a, b) => a.sort_order - b.sort_order)
+    })
+  }
+
+  async function createPackage() {
+    const priceCents = cents(draft.price)
+    const originalPriceCents = draft.originalPrice.trim() ? cents(draft.originalPrice) : null
+    if (!draft.name.trim() || !draft.sku.trim() || priceCents === null || (draft.originalPrice.trim() && originalPriceCents === null) || (originalPriceCents !== null && originalPriceCents < priceCents)) {
+      setError('Enter a name, unique SKU, valid non-negative price, and an original price no lower than the selling price.')
       return
     }
-
-    setSavingId(pkg.id)
+    setCreating(true)
     setError(null)
     try {
-      const response = await fetch('/api/admin/package-pricing', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch('/api/admin/catalog/packages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: pkg.id,
-          price_cents: Math.round(price * 100),
-          sort_order: Math.round(sort),
-          badge: draft.badge.trim() || null,
-          image_url: draft.imageUrl.trim() || null,
+          game_id: gameId, name: draft.name.trim(), sku: draft.sku.trim(), amount: draft.amount.trim() || draft.name.trim(),
+          price_cents: priceCents, original_price_cents: originalPriceCents, bonus: draft.bonus.trim() || null,
+          sort_order: Number(draft.sort) || 100, badge: draft.badge.trim() || null, image_url: draft.imageUrl.trim() || null,
         }),
       })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok || !result.success) throw new Error(result.error || 'Could not save package.')
-      if (!result.data || typeof result.data.price_cents !== 'number') throw new Error('The server did not return the updated package.')
+      if (!response.ok) throw new Error(result.error || 'Could not create package.')
+      replaceRow(result.data as PackageRecord)
+      setDraft(blankDraft())
+      setShowCreate(false)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not create package.')
+    } finally {
+      setCreating(false)
+    }
+  }
 
-      setPackages((current) => current.map((item) => item.id === pkg.id ? {
-        ...item,
-        price_cents: result.data.price_cents,
-        sort_order: result.data.sort_order,
-        badge: result.data.badge,
-        image_url: result.data.image_url,
-      } : item).sort((a, b) => a.sort_order - b.sort_order))
+  async function savePackage(pkg: PackageRecord) {
+    const priceCents = cents(draft.price)
+    const originalPriceCents = draft.originalPrice.trim() ? cents(draft.originalPrice) : null
+    if (!draft.name.trim() || !draft.amount.trim() || priceCents === null || (draft.originalPrice.trim() && originalPriceCents === null) || (originalPriceCents !== null && originalPriceCents < priceCents)) {
+      setError('Enter a valid name, amount, selling price, and original price.')
+      return
+    }
+    setSavingId(pkg.id)
+    setError(null)
+    try {
+      const response = await fetch(`/api/admin/catalog/packages/${pkg.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: draft.name.trim(), amount: draft.amount.trim(), price_cents: priceCents,
+          original_price_cents: originalPriceCents, bonus: draft.bonus.trim() || null,
+          sort_order: Number(draft.sort) || pkg.sort_order, badge: draft.badge.trim() || null, image_url: draft.imageUrl.trim() || null,
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.error || 'Could not save package.')
+      replaceRow(result.data as PackageRecord)
       setEditingId(null)
       setSavedId(pkg.id)
       window.setTimeout(() => setSavedId((current) => current === pkg.id ? null : current), 1800)
@@ -120,124 +128,84 @@ export default function PackagesManager({ packages: initialPackages, gameId, isM
     }
   }
 
-  async function togglePackage(pkg: PackageRecord) {
+  async function lifecycle(pkg: PackageRecord, action: 'publish' | 'hide' | 'archive' | 'restore') {
+    if (action === 'archive' && !window.confirm(`Archive ${pkg.name}? Existing order references will be retained.`)) return
     setSavingId(pkg.id)
     setError(null)
     try {
-      const response = await fetch('/api/admin/package-pricing', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pkg.id, is_active: !pkg.is_active }),
+      const response = await fetch(`/api/admin/catalog/packages/${pkg.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, acknowledge_supplier_review: pkg.supplier_review_required && action === 'publish' }),
       })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok || !result.success) throw new Error(result.error || 'Could not update package status.')
-      if (!result.data || typeof result.data.is_active !== 'boolean') throw new Error('The server did not return the updated package status.')
-      setPackages((current) => current.map((item) => item.id === pkg.id ? { ...item, is_active: result.data.is_active } : item))
-    } catch (toggleError) {
-      setError(toggleError instanceof Error ? toggleError.message : 'Could not update package status.')
+      if (!response.ok) throw new Error(result.error || `Could not ${action} package.`)
+      replaceRow(result.data as PackageRecord)
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : `Could not ${action} package.`)
     } finally {
       setSavingId(null)
     }
   }
 
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap gap-3 text-xs">
-        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5">
-          <span className="text-slate-500">Current offers</span>
-          <p className="text-lg font-bold text-slate-200">{packages.length}</p>
-        </div>
-        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5">
-          <span className="text-slate-500">Active for customers</span>
-          <p className="text-lg font-bold text-emerald-400">{packages.filter((pkg) => pkg.is_active && pkg.price_cents > 0).length}</p>
-        </div>
-        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5">
-          <span className="text-slate-500">Awaiting price</span>
-          <p className="text-lg font-bold text-amber-300">{packages.filter((pkg) => pkg.price_cents <= 0).length}</p>
-        </div>
+  const activeCount = packages.filter((pkg) => pkg.catalog_status === 'PUBLISHED' && pkg.is_active && pkg.price_cents > 0).length
+
+  return <div>
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap gap-3 text-xs">
+        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Packages</span><p className="text-lg font-bold text-slate-200">{packages.length}</p></div>
+        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Published and saleable</span><p className="text-lg font-bold text-emerald-400">{activeCount}</p></div>
+        <div className="rounded-lg border border-[#1b2a45] bg-[#0b1225] px-4 py-2.5"><span className="text-slate-500">Awaiting price/review</span><p className="text-lg font-bold text-amber-300">{packages.filter((pkg) => pkg.price_cents <= 0 || pkg.supplier_review_required).length}</p></div>
       </div>
-
-      {error && <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-300">{error}</div>}
-
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-[#1b2a45] bg-[#0b1225] py-16 text-sm text-slate-500"><Loader2 size={16} className="animate-spin" /> Loading current offers...</div>
-      ) : packages.length === 0 ? (
-        <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] py-16 text-center text-sm text-slate-500">No current packages are available.</div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {packages.map((pkg) => {
-            const editing = editingId === pkg.id
-            const saving = savingId === pkg.id
-            const supplierPackage = isMobileLegends && pkg.supplier_category_id === 'mobile_legends_philippines'
-            return (
-              <div key={pkg.id} className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
-                <div className="flex items-center justify-between">
-                  <Package className="text-cyan-300" size={18} />
-                  <button
-                    type="button"
-                    onClick={() => togglePackage(pkg)}
-                    disabled={saving}
-                    className={`rounded-full px-2 py-0.5 text-[10px] transition ${pkg.is_active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-500/20 text-slate-400'} disabled:cursor-not-allowed disabled:opacity-50`}
-                  >
-                    {pkg.is_active ? 'ACTIVE' : 'DISABLED'}
-                  </button>
-                </div>
-                <h3 className="font-display mt-3 font-semibold text-slate-100">{pkg.name}</h3>
-                <p className="text-xs text-slate-500">{pkg.sku} · {pkg.amount}</p>
-                {pkg.bonus && <p className="mt-1 text-[11px] text-emerald-300">{pkg.bonus}</p>}
-
-                {supplierPackage && (
-                  <div className="mt-3 space-y-1 rounded-lg border border-[#1b2a45] bg-[#080f20] p-3 text-[11px]">
-                    <p className="text-slate-500">FazerCards offer</p>
-                    <p className="break-all font-mono text-cyan-300">{pkg.supplier_offer_id}</p>
-                    <p className="pt-1 text-slate-500">Supplier cost</p>
-                    <p className="text-amber-300">${pkg.supplier_cost_usd || '0.00'}</p>
-                  </div>
-                )}
-
-                {editing ? (
-                  <div className="mt-3 space-y-2">
-                    <label className="block text-[11px] text-slate-500">Selling price (PHP)
-                      <input type="number" min="0" step="0.01" value={draft.price} onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))} className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-cyan-400" />
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="block text-[11px] text-slate-500">Sort
-                        <input type="number" value={draft.sort} onChange={(event) => setDraft((current) => ({ ...current, sort: event.target.value }))} className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-cyan-400" />
-                      </label>
-                      <label className="block text-[11px] text-slate-500">Badge
-                        <input value={draft.badge} onChange={(event) => setDraft((current) => ({ ...current, badge: event.target.value }))} className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-cyan-400" />
-                      </label>
-                    </div>
-                    <label className="block text-[11px] text-slate-500">Image URL (HTTPS)
-                      <input value={draft.imageUrl} onChange={(event) => setDraft((current) => ({ ...current, imageUrl: event.target.value }))} placeholder="https://res.cloudinary.com/..." className="mt-1 w-full rounded border border-[#253451] bg-[#080f20] px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-cyan-400" />
-                    </label>
-                    {draft.imageUrl.startsWith('https://') && (
-                      <div className="flex justify-center rounded-lg border border-[#253451] bg-[#080f20] p-2">
-                                                <img src={draft.imageUrl} alt="Package preview" className="h-16 w-16 object-contain" />
-                      </div>
-                    )}
-                    <div className="flex gap-2 pt-1">
-                      <button type="button" onClick={() => savePackage(pkg)} disabled={saving} className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-50"><Save size={13} /> Save</button>
-                      <button type="button" onClick={() => setEditingId(null)} className="rounded-lg border border-[#253451] px-3 py-2 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <div>
-                      <span className="font-display text-lg font-bold text-cyan-300">{formatPHP(pkg.price_cents)}</span>
-                      {pkg.price_cents <= 0 && <p className="text-[11px] text-amber-300">Awaiting selling price</p>}
-                    </div>
-                    <button type="button" onClick={() => beginEdit(pkg)} className="rounded-lg border border-[#22314d] px-3 py-1.5 text-xs text-cyan-300 hover:border-cyan-400/50 hover:bg-cyan-400/5">Edit</button>
-                  </div>
-                )}
-
-                {savedId === pkg.id && <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-emerald-300"><Check size={12} /> Saved</p>}
-                {supplierPackage && <p className="mt-3 inline-flex items-center gap-1 text-[10px] text-slate-500"><Sparkles size={11} /> Supplier fields are admin-only</p>}
-              </div>
-            )
-          })}
-        </div>
-      )}
+      <button type="button" onClick={() => { setShowCreate((shown) => !shown); setDraft(blankDraft()); setError(null) }} className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200"><Plus size={14} /> Add package</button>
     </div>
-  )
+
+    {showCreate && <section aria-label="Create package" className="mb-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-4">
+      <h2 className="mb-3 text-sm font-semibold text-slate-100">Create draft package</h2>
+      <PackageFields draft={draft} setDraft={setDraft} />
+      <div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setShowCreate(false)} className="rounded border border-[#253451] px-3 py-2 text-xs text-slate-300">Cancel</button><button type="button" disabled={creating} onClick={() => void createPackage()} className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs text-cyan-200 disabled:opacity-50">{creating ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Create draft</button></div>
+    </section>}
+
+    {error && <div role="alert" className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-300">{error}</div>}
+
+    {packages.length === 0 ? <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] py-16 text-center text-sm text-slate-500">No packages yet. Add a draft package or import a reviewed supplier snapshot.</div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {packages.map((pkg) => {
+        const editing = editingId === pkg.id
+        const saving = savingId === pkg.id
+        const supplierPackage = Boolean(pkg.supplier_offer_id || pkg.supplier_category_id)
+        return <article key={pkg.id} className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
+          <div className="flex items-center justify-between"><Package className="text-cyan-300" size={18} /><span className={`rounded-full px-2 py-0.5 text-[10px] ${pkg.catalog_status === 'PUBLISHED' ? 'bg-emerald-500/20 text-emerald-300' : pkg.catalog_status === 'ARCHIVED' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-500/20 text-slate-400'}`}>{pkg.catalog_status}</span></div>
+          <h3 className="mt-3 font-semibold text-slate-100">{pkg.name}</h3><p className="text-xs text-slate-500">{pkg.sku} · {pkg.amount}</p>
+          {pkg.bonus && <p className="mt-1 text-[11px] text-emerald-300">{pkg.bonus}</p>}
+          {supplierPackage && <div className="mt-3 space-y-1 rounded-lg border border-[#1b2a45] bg-[#080f20] p-3 text-[11px]"><p className="text-slate-500">Supplier offer</p><p className="break-all font-mono text-cyan-300">{pkg.supplier_offer_id || 'identity incomplete'}</p><p className="pt-1 text-slate-500">Supplier cost</p><p className="text-amber-300">${pkg.supplier_cost_usd || '—'}</p>{pkg.supplier_review_required && <p className="text-amber-300">Cost or pricing assumptions need review.</p>}</div>}
+          {editing ? <div className="mt-3 space-y-2"><PackageFields draft={draft} setDraft={setDraft} edit /><div className="flex gap-2"><button type="button" onClick={() => void savePackage(pkg)} disabled={saving} className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs text-cyan-200 disabled:opacity-50"><Save size={13} /> Save draft changes</button><button type="button" onClick={() => setEditingId(null)} className="rounded-lg border border-[#253451] px-3 py-2 text-xs text-slate-400">Cancel</button></div></div> : <>
+            <div className="mt-3 flex items-center justify-between gap-3"><div><span className="text-lg font-bold text-cyan-300">{formatPHP(pkg.price_cents)}</span>{pkg.price_cents <= 0 && <p className="text-[11px] text-amber-300">Awaiting selling price</p>}</div><button type="button" onClick={() => beginEdit(pkg)} className="rounded-lg border border-[#22314d] px-3 py-1.5 text-xs text-cyan-300">Edit</button></div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {pkg.catalog_status === 'ARCHIVED' ? <button type="button" disabled={saving} onClick={() => void lifecycle(pkg, 'restore')} className="inline-flex items-center gap-1 rounded border border-amber-400/30 px-2 py-1 text-[11px] text-amber-300"><RotateCcw size={12} /> Restore</button> : <>
+                {pkg.catalog_status === 'PUBLISHED' && pkg.is_active ? <button type="button" disabled={saving} onClick={() => void lifecycle(pkg, 'hide')} className="rounded border border-slate-400/30 px-2 py-1 text-[11px] text-slate-300">Hide</button> : <button type="button" disabled={saving || pkg.price_cents <= 0} onClick={() => void lifecycle(pkg, 'publish')} className="rounded border border-emerald-400/30 px-2 py-1 text-[11px] text-emerald-300 disabled:opacity-40">Publish</button>}
+                <button type="button" disabled={saving} onClick={() => void lifecycle(pkg, 'archive')} className="inline-flex items-center gap-1 rounded border border-rose-400/30 px-2 py-1 text-[11px] text-rose-300"><Archive size={12} /> Archive</button>
+              </>}
+              {savedId === pkg.id && <span role="status" className="inline-flex items-center gap-1 text-[11px] text-emerald-300"><Check size={12} /> Saved</span>}
+            </div>
+          </>}
+          {supplierPackage && <p className="mt-3 text-[10px] text-slate-500">Supplier fulfillment remains independently release-locked.</p>}
+          {isMobileLegends && !supplierPackage && <p className="mt-2 text-[10px] text-slate-500">Manual package; no supplier offer is configured.</p>}
+        </article>
+      })}
+    </div>}
+  </div>
+}
+
+function PackageFields({ draft, setDraft, edit = false }: { draft: PackageDraft; setDraft: (value: PackageDraft) => void; edit?: boolean }) {
+  const inputClass = 'mt-1 w-full rounded border border-[#253451] bg-[#080f20] px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-cyan-400'
+  return <div className="grid gap-2 sm:grid-cols-2">
+    <label className="text-[11px] text-slate-500">Name<input required maxLength={180} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className={inputClass} /></label>
+    {!edit && <label className="text-[11px] text-slate-500">SKU<input required maxLength={120} value={draft.sku} onChange={(event) => setDraft({ ...draft, sku: event.target.value })} className={inputClass} /></label>}
+    <label className="text-[11px] text-slate-500">Amount / description<input required value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} className={inputClass} /></label>
+    <label className="text-[11px] text-slate-500">Selling price (PHP)<input type="number" min="0" step="0.01" value={draft.price} onChange={(event) => setDraft({ ...draft, price: event.target.value })} className={inputClass} /></label>
+    <label className="text-[11px] text-slate-500">Original price (PHP, optional)<input type="number" min="0" step="0.01" value={draft.originalPrice} onChange={(event) => setDraft({ ...draft, originalPrice: event.target.value })} className={inputClass} /></label>
+    <label className="text-[11px] text-slate-500">Bonus<input value={draft.bonus} onChange={(event) => setDraft({ ...draft, bonus: event.target.value })} className={inputClass} /></label>
+    <label className="text-[11px] text-slate-500">Sort order<input type="number" value={draft.sort} onChange={(event) => setDraft({ ...draft, sort: event.target.value })} className={inputClass} /></label>
+    <label className="text-[11px] text-slate-500">Badge<input value={draft.badge} onChange={(event) => setDraft({ ...draft, badge: event.target.value })} className={inputClass} /></label>
+    <label className="text-[11px] text-slate-500 sm:col-span-2">Image URL (HTTPS)<input type="url" pattern="https://.*" value={draft.imageUrl} onChange={(event) => setDraft({ ...draft, imageUrl: event.target.value })} className={inputClass} /></label>
+  </div>
 }

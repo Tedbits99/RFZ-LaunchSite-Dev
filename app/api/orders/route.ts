@@ -73,46 +73,39 @@ export async function POST(req: NextRequest) {
 
     const { data: packageRecord, error: packageError } = await client
       .from('packages')
-      .select('id, game_id, price_cents, is_active, games!inner(slug)')
+      .select('id, game_id, price_cents, is_active, catalog_status, games!inner(slug, catalog_status)')
       .eq('id', packageId)
       .eq('game_id', gameId)
       .maybeSingle();
-    if (packageError || !packageRecord || !packageRecord.is_active || packageRecord.price_cents <= 0) {
+    if (packageError || !packageRecord || !packageRecord.is_active || (packageRecord.catalog_status !== undefined && packageRecord.catalog_status !== 'PUBLISHED') || packageRecord.price_cents <= 0) {
+      return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
+    }
+    const packageGame = Array.isArray(packageRecord.games) ? packageRecord.games[0] : packageRecord.games;
+    if (packageGame?.catalog_status !== undefined && packageGame.catalog_status !== 'PUBLISHED') {
       return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
     }
 
-    const packageGame = Array.isArray(packageRecord.games) ? packageRecord.games[0] : packageRecord.games;
     if (packageGame?.slug === 'mobile-legends' || packageGame?.slug === 'mlbb') {
-      if (!adminSupabase) {
-        return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });
-      }
-      const { data: supplierPackage, error: supplierPackageError } = await adminSupabase
-        .from('packages')
-        .select('supplier_offer_id, supplier_category_id')
+      if (!adminSupabase) return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });
+      const { data: supplierPackage, error: supplierPackageError } = await adminSupabase.from('packages')
+        .select('supplier_offer_id, supplier_category_id, supplier_cost_usd, supplier_review_required')
         .eq('id', packageRecord.id)
         .maybeSingle();
-      if (supplierPackageError) {
-        return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });
-      }
-      if (supplierPackage?.supplier_category_id !== 'mobile_legends_philippines' || !supplierPackage.supplier_offer_id) {
+      if (supplierPackageError) return NextResponse.json({ error: 'This checkout option is temporarily unavailable. Please try again later.' }, { status: 503 });
+      const supplierLinked = Boolean(supplierPackage?.supplier_offer_id || supplierPackage?.supplier_category_id);
+      if (supplierPackage?.supplier_review_required) {
         return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
       }
-      const { data: supplier } = await adminSupabase
-        .from('suppliers')
-        .select('id')
-        .eq('code', 'fazercards')
-        .eq('enabled', true)
-        .maybeSingle();
-      const { data: mapping } = supplier ? await adminSupabase
-        .from('supplier_package_mappings')
-        .select('id')
-        .eq('package_id', packageId)
-        .eq('supplier_id', supplier.id)
-        .eq('supplier_product_id', supplierPackage.supplier_offer_id)
-        .eq('enabled', true)
-        .maybeSingle() : { data: null };
-      if (!mapping) {
-        return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
+      if (supplierLinked) {
+        if (process.env.RUNFAZONE_SUPPLIER_FULFILLMENT_RELEASE !== 'enabled' || !supplierPackage?.supplier_offer_id || supplierPackage.supplier_category_id !== 'mobile_legends_philippines') {
+          return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
+        }
+        const { data: settings } = await adminSupabase.from('app_settings').select('supplier_fulfillment_release_enabled').eq('id', 1).maybeSingle();
+        if (settings?.supplier_fulfillment_release_enabled !== true) return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
+        const { data: supplier } = await adminSupabase.from('suppliers').select('id').eq('code', 'fazercards').eq('enabled', true).maybeSingle();
+        const { data: mapping } = supplier ? await adminSupabase.from('supplier_package_mappings').select('id,metadata').eq('package_id', packageId).eq('supplier_id', supplier.id).eq('supplier_product_id', supplierPackage.supplier_offer_id).eq('enabled', true).maybeSingle() : { data: null };
+        const metadata = mapping?.metadata as { category_id?: string } | null;
+        if (!mapping || metadata?.category_id !== supplierPackage.supplier_category_id) return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
       }
     }
 
@@ -158,6 +151,12 @@ export async function POST(req: NextRequest) {
       }
       if (error.message.includes('EMAIL_NOT_VERIFIED') || error.message.includes('ACCOUNT_RESTRICTED')) {
         return NextResponse.json({ error: 'Your account is not eligible for checkout.' }, { status: 403 });
+      }
+      if (error.message.includes('CATALOG_SUPPLIER_RELEASE_LOCKED')) {
+        return NextResponse.json({ error: 'Supplier-linked checkout is not enabled in this release.' }, { status: 503 });
+      }
+      if (error.message.includes('CATALOG_')) {
+        return NextResponse.json({ error: 'The selected package is no longer available.' }, { status: 400 });
       }
       return NextResponse.json({ error: 'Could not create your order. Please try again.' }, { status: 500 });
     }

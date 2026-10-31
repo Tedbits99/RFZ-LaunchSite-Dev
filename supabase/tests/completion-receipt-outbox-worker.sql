@@ -3,11 +3,22 @@
 -- Disposable PostgreSQL assertions for the completion-receipt worker boundary.
 -- The harness races the final fixture row from two independent psql sessions.
 
-INSERT INTO public.games (id, slug, name, short_name, description, region, currency, is_active, sort_order)
-VALUES ('00000000-0000-0000-0000-000000000602', 'outbox-worker-game', 'Outbox Worker Game', 'OWG', 'Disposable fixture', 'Test', 'PHP', true, 2602);
+INSERT INTO public.games (
+  id, slug, name, short_name, description, region, currency, is_active, sort_order, catalog_status, published_at
+)
+VALUES (
+  '00000000-0000-0000-0000-000000000602', 'outbox-worker-game', 'Outbox Worker Game', 'OWG', 'Disposable fixture', 'Test', 'PHP', true, 2602,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
+);
 
-INSERT INTO public.packages (id, game_id, name, sku, amount, price_cents, sort_order)
-VALUES ('00000000-0000-0000-0000-000000000603', '00000000-0000-0000-0000-000000000602', 'Outbox Worker Package', 'OUTBOX-WORKER', '1', 1, 2602);
+INSERT INTO public.packages (
+  id, game_id, name, sku, amount, price_cents, sort_order, is_active, catalog_status, published_at
+)
+VALUES (
+  '00000000-0000-0000-0000-000000000603', '00000000-0000-0000-0000-000000000602',
+  'Outbox Worker Package', 'OUTBOX-WORKER', '1', 1, 2602, true,
+  'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
+);
 
 INSERT INTO public.orders (
   id, reference, email, customer_name, game_id, package_id, player_inputs,

@@ -31,15 +31,25 @@ INSERT INTO reconciliation_test_ids VALUES (
   '00000000-0000-0000-0000-000000000110'
 );
 
-INSERT INTO public.games (id, slug, name, short_name, description, region, currency, is_active, sort_order)
-SELECT game_id, 'reconciliation-test-game', 'Reconciliation Test Game', 'RECON', 'Disposable fixture', 'Test', 'PHP', true, 2001
+INSERT INTO public.games AS existing_game (
+  id, slug, name, short_name, description, region, currency, is_active, sort_order, catalog_status, published_at
+)
+SELECT game_id, 'reconciliation-test-game', 'Reconciliation Test Game', 'RECON', 'Disposable fixture', 'Test', 'PHP', true, 2001,
+       'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 FROM reconciliation_test_ids
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  is_active = true, catalog_status = 'PUBLISHED',
+  published_at = COALESCE(existing_game.published_at, EXCLUDED.published_at);
 
-INSERT INTO public.packages (id, game_id, name, sku, amount, price_cents, sort_order)
-SELECT package_id, game_id, 'Reconciliation Test Package', 'RECON-TEST-PACKAGE', '1', 1, 2001
+INSERT INTO public.packages AS existing_package (
+  id, game_id, name, sku, amount, price_cents, sort_order, is_active, catalog_status, published_at
+)
+SELECT package_id, game_id, 'Reconciliation Test Package', 'RECON-TEST-PACKAGE', '1', 1, 2001, true,
+       'PUBLISHED', '2026-01-01T00:00:00Z'::timestamptz
 FROM reconciliation_test_ids
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  is_active = true, catalog_status = 'PUBLISHED',
+  published_at = COALESCE(existing_package.published_at, EXCLUDED.published_at);
 
 INSERT INTO public.suppliers (id, name, code, adapter, enabled, environment)
 SELECT supplier_id, 'FazerCards Security Test', 'fazercards', 'custom', true, 'sandbox'
