@@ -303,7 +303,7 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
           is_active, applies_to_game_id
         ) values (
           ${code}, 'Disposable legacy compatibility fixture', 'FIXED', 50, 0,
-          null, 10, 2, null, null, true, null
+          null, 10, 2, now() - interval '1 hour', null, true, null
         )
       `;
     } finally {
