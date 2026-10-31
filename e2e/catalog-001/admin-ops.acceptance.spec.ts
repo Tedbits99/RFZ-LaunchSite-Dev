@@ -49,7 +49,7 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
 
     taskForm = page.getByRole('form', { name: `Task: ${title}` })
     await taskForm.getByRole('button', { name: 'Archive' }).click()
-    await expect(page.getByText('Task archived.', { exact: true })).toBeVisible()
+    await expect(page.getByText('Task archived. Its history is retained.', { exact: true })).toBeVisible()
     const archived = await serviceDb().from('admin_tasks').select('archived_at').eq('id', saved.data!.id).single()
     expect(archived.data?.archived_at).not.toBeNull()
 
