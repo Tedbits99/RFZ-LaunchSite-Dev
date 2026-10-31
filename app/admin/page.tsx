@@ -6,6 +6,8 @@ import { ArrowDownRight, ArrowUpRight, Banknote, CheckCircle2, Clock, Gamepad2, 
 import { MetricCard, PageHeader, StatusBadge, Surface } from '@/components/admin/ui';
 import { adminMetricValue } from '@/lib/adminMetricValue';
 import { logPostgrestQueryFailure } from '@/lib/postgrestDiagnostics';
+import { hasAdminPagePermission } from '@/lib/adminGuard';
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +91,7 @@ async function getMetrics(): Promise<{
 
 const fmtP = (cents: number) => `₱${(cents / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 export default async function AdminDashboard() {
+  if (!await hasAdminPagePermission('orders.view')) return <AdminPermissionDenied feature="the admin overview" />;
   const data = await getMetrics();
   const { orders, games, packages, error, orderQueryFailed, gamesQueryFailed, packagesQueryFailed, customersQueryFailed } = data;
   const uniqueCustomers = new Set(data.customerEmails);

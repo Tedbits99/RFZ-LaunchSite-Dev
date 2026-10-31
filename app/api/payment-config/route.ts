@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 import { getPaymentAdapter, buildProviderConfig, listAvailableProviders } from '@/lib/paymentProviderAdapters';
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'payments.view');
   if (!auth.ok) return auth.response;
 
-  const db = adminSupabase || auth.client;
-  if (!db) {
+  if (!adminSupabase) {
     return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
   }
 
@@ -17,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   // Use the SECURITY DEFINER RPC so disabled methods are visible in admin too.
   // RLS on the table only allows anon to see enabled rows.
-  const { data, error } = await db.rpc('admin_get_all_payment_config');
+  const { data, error } = await adminSupabase.rpc('admin_get_all_payment_config');
 
   if (error) {
     return NextResponse.json({ error: 'Failed to load payment configuration.' }, { status: 500 });
@@ -30,17 +29,17 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'payments.manage');
   if (!auth.ok) {
     return auth.response;
   }
-  const db = adminSupabase || auth.client;
-  if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
+  if (!adminSupabase) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   try {
     const body = await req.json();
 
-    const { data, error } = await db.rpc('admin_upsert_payment_config', {
+    const { data, error } = await adminSupabase.rpc('admin_ops_upsert_payment_config', {
+      p_actor_id: auth.session.userId,
       p_id: null,
       p_method_key: String(body.method_key || '').toLowerCase().replace(/[^a-z0-9_]/g, '_'),
       p_display_name: String(body.display_name || ''),
@@ -65,6 +64,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (error) {
+      if (error.code === '42501') return NextResponse.json({ error: 'The current admin role cannot manage payment methods.' }, { status: 403 });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -80,12 +80,11 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'payments.manage');
   if (!auth.ok) {
     return auth.response;
   }
-  const db = adminSupabase || auth.client;
-  if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
+  if (!adminSupabase) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   try {
     const body = await req.json();
@@ -99,7 +98,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Payment method id is required.' }, { status: 400 });
     }
 
-    const { data, error } = await db.rpc('admin_upsert_payment_config', {
+    const { data, error } = await adminSupabase.rpc('admin_ops_upsert_payment_config', {
+      p_actor_id: auth.session.userId,
       p_id: id,
       p_method_key: body.method_key,
       p_display_name: body.display_name,
@@ -124,6 +124,7 @@ export async function PATCH(req: NextRequest) {
     });
 
     if (error) {
+      if (error.code === '42501') return NextResponse.json({ error: 'The current admin role cannot manage payment methods.' }, { status: 403 });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -139,20 +140,23 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'payments.manage');
   if (!auth.ok) {
     return auth.response;
   }
-  const db = adminSupabase || auth.client;
-  if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
+  if (!adminSupabase) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
-  const { data, error } = await db.rpc('admin_delete_payment_config', { p_id: id });
+  const { data, error } = await adminSupabase.rpc('admin_ops_delete_payment_config', {
+    p_actor_id: auth.session.userId,
+    p_id: id,
+  });
 
   if (error) {
+    if (error.code === '42501') return NextResponse.json({ error: 'The current admin role cannot manage payment methods.' }, { status: 403 });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

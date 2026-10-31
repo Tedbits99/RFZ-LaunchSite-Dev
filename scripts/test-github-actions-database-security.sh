@@ -687,7 +687,10 @@ if [ "$upgrade_mode" = true ]; then
     }
     cp "$source_migration" "$test_root/supabase/migrations/$migration_name"
   done
-  supabase_local migration up
+  # This rehearsal intentionally applies wallet migrations whose timestamps
+  # precede the already-applied AdminOps migration. Supabase CLI requires
+  # --include-all to apply this reviewed out-of-order fixture sequence.
+  supabase_local migration up --include-all
   echo "LEGACY_UPGRADE_PHASE=post-wallet-catalog-campaign-security-migrations"
   for post_wallet_migration in \
     20261030122423_supplier_catalog_multigame_import.sql \
@@ -699,7 +702,9 @@ if [ "$upgrade_mode" = true ]; then
       exit 13
     }
     cp "$source_migration" "$test_root/supabase/migrations/$post_wallet_migration"
-    supabase_local migration up
+    # These deferred catalog/campaign migrations also precede AdminOps in the
+    # migration ledger, so include-all is required for the synthetic upgrade.
+    supabase_local migration up --include-all
   done
   PGOPTIONS='-c statement_timeout=30000' psql "$db_url" --set ON_ERROR_STOP=1 \
     --set expected_migration_count="$manifest_count" \

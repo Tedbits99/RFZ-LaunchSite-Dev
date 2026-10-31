@@ -6,7 +6,7 @@ import AdminNavigation from '@/components/admin/AdminNavigation'
 import ThemeSelector from '@/components/ThemeSelector'
 import { RFZ_PUBLIC_ASSETS } from '@/lib/storefrontAssets'
 
-export default function AdminShell({ children, role }: { children: ReactNode; role: string }) {
+export default function AdminShell({ children, role, permissions }: { children: ReactNode; role: string; permissions: string[] }) {
   const [navigationOpen, setNavigationOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState<string | null>(null)
@@ -58,21 +58,21 @@ export default function AdminShell({ children, role }: { children: ReactNode; ro
               <ThemeSelector />
             </div>
             <div className="flex shrink-0 items-center gap-1 text-xs text-slate-400 sm:gap-3">
-              <a
+              {(role === 'SUPER_ADMIN' || permissions.includes('orders.view')) && <a
                 href="/admin/orders"
                 aria-label="Search and manage orders"
                 className="hidden items-center gap-2 rounded-lg border border-[#253451] px-3 py-2 transition hover:border-cyan-300 hover:text-cyan-200 md:flex"
               >
                 <Search size={13} /> <span>Orders</span>
-              </a>
-              <a
+              </a>}
+              {(role === 'SUPER_ADMIN' || permissions.includes('system.view')) && <a
                 href="/admin/notifications"
                 aria-label="Open admin notifications"
                 className="relative rounded-lg border border-[#253451] p-2 transition hover:border-cyan-300 hover:text-cyan-200"
               >
                 <Bell size={14} />
                 <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-cyan-300" aria-hidden="true" />
-              </a>
+              </a>}
               <a
                 href="/"
                 className="rounded-lg border border-[#253451] px-3 py-2 transition hover:border-cyan-300 hover:text-cyan-200"
@@ -96,7 +96,7 @@ export default function AdminShell({ children, role }: { children: ReactNode; ro
       </header>
 
       <div className="flex min-w-0">
-        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} role={role} />
+        <AdminNavigation open={navigationOpen} onClose={() => setNavigationOpen(false)} role={role} permissions={permissions} />
         <div className="min-w-0 flex-1">
           {logoutError && <p className="mx-4 mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200" role="alert">{logoutError}</p>}
           {children}

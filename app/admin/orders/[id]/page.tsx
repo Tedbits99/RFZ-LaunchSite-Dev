@@ -1,6 +1,8 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
 import { getAdminSession } from '@/lib/adminGuard';
+import { hasAdminPagePermission } from '@/lib/adminGuard';
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied';
 import AdminOrderDetailClient from './AdminOrderDetailClient';
 
 export const dynamic = 'force-dynamic';
@@ -77,6 +79,7 @@ type SupplierTransaction = {
 };
 
 export default async function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!await hasAdminPagePermission('orders.view')) return <AdminPermissionDenied feature="order details" />;
   const { id } = await params;
   const db = adminSupabase || supabase;
   if (!db) {

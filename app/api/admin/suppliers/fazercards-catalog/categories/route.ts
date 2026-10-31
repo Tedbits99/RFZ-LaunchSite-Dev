@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireCatalogAdmin } from '@/lib/catalogAdminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 import { CatalogSourceError, listFazerCardsCategories } from '@/lib/suppliers/fazercardsCatalog';
 import { resolveFazerCardsCatalogSource } from '@/lib/suppliers/fazercardsCatalogServer';
 
 export async function GET(req: NextRequest) {
-  const auth = await requireCatalogAdmin(req);
+  const auth = await requireAdminPermission(req, 'suppliers.view');
   if (!auth.ok) return auth.response;
   const source = await resolveFazerCardsCatalogSource(adminSupabase || auth.client);
   if (!source.mode) return NextResponse.json({ error: source.reason, status: 'locked' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });

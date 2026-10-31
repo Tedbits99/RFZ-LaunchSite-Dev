@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getAdapter } from '@/lib/suppliers/adapter';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 function getDb() {
   if (adminSupabase) return adminSupabase;
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function pollTestRun(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'suppliers.manage');
   if (!session.ok) return session.response;
 
   const db = getDb();

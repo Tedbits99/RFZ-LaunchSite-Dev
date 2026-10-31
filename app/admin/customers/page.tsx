@@ -1,9 +1,12 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { Users } from 'lucide-react';
+import { hasAdminPagePermission } from '@/lib/adminGuard';
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminCustomersPage() {
+  if (!await hasAdminPagePermission('customers.view')) return <AdminPermissionDenied feature="customer records" />;
   let customers: Array<{ email: string; order_count: number; total_spent: number; last_order: string }> = [];
   let dbReady = false;
   if (adminSupabase) {

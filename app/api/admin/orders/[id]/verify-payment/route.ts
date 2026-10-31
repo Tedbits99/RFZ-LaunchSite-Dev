@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 import { sendPaymentSuccessEmail } from '@/lib/transactionalEmail';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'payments.manage');
   if (!session.ok) return session.response;
 
   const client = adminSupabase || supabase;

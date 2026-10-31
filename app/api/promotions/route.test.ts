@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   adminFrom: vi.fn(),
   adminMaybeSingle: vi.fn(),
   adminEq: vi.fn(),
+  permissionMaybeSingle: vi.fn(),
   promotionSelect: vi.fn(),
   promotionOrder: vi.fn(),
   anonymousFrom: vi.fn(),
@@ -27,7 +28,7 @@ vi.mock('@/lib/supabase', () => ({
   supabase: { from: mocks.anonymousFrom },
 }));
 
-import { GET } from './route';
+import { GET, POST } from './route';
 
 const adminUser = { id: 'synthetic-admin-id', email: 'admin@example.invalid' };
 const adminRecord = { email: adminUser.email, name: 'Synthetic Admin', role: 'ADMIN', is_active: true };
@@ -55,6 +56,14 @@ function request(url = 'http://localhost/api/promotions', headers?: HeadersInit)
   return new NextRequest(url, { headers });
 }
 
+function postRequest(body: unknown) {
+  return new NextRequest('http://localhost/api/promotions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 function configureDatabase() {
   mocks.adminFrom.mockImplementation((table: string) => {
     if (table === 'admins') {
@@ -63,6 +72,13 @@ function configureDatabase() {
           eq: mocks.adminEq,
         })),
       };
+    }
+    if (table === 'admin_role_permissions') {
+      const query: Record<string, unknown> = {};
+      query.select = vi.fn(() => query);
+      query.eq = vi.fn(() => query);
+      query.maybeSingle = mocks.permissionMaybeSingle;
+      return query;
     }
     if (table === 'promotions') {
       return {
@@ -85,6 +101,7 @@ describe('GET /api/promotions admin security boundary', () => {
     configureDatabase();
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
     mocks.adminMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mocks.permissionMaybeSingle.mockResolvedValue({ data: { is_enabled: true }, error: null });
     mocks.promotionOrder.mockResolvedValue({ data: [promotionRow], error: null });
   });
 
@@ -194,5 +211,29 @@ describe('GET /api/promotions admin security boundary', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(body).not.toContain('synthetic internal exception');
     expect(mocks.anonymousFrom).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/promotions validation boundary', () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://synthetic.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'synthetic-anon-key';
+    vi.clearAllMocks();
+    configureDatabase();
+    mocks.getUser.mockResolvedValue({ data: { user: adminUser }, error: null });
+    mocks.adminMaybeSingle.mockResolvedValue({ data: adminRecord, error: null });
+    mocks.permissionMaybeSingle.mockResolvedValue({ data: { is_enabled: true }, error: null });
+  });
+
+  it('rejects an unknown target instead of silently treating it as a global promotion', async () => {
+    const response = await POST(postRequest({ title: 'Synthetic', body: 'Fixture', target_type: 'SOMETHING' }));
+    expect(response.status).toBe(400);
+    expect(mocks.adminFrom).not.toHaveBeenCalledWith('promotions');
+  });
+
+  it('rejects javascript CTA URLs before the database write', async () => {
+    const response = await POST(postRequest({ title: 'Synthetic', body: 'Fixture', cta_href: 'javascript:alert(1)' }));
+    expect(response.status).toBe(400);
+    expect(mocks.adminFrom).not.toHaveBeenCalledWith('promotions');
   });
 });

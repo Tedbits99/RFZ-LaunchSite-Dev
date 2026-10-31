@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 import { startFulfillment } from '@/lib/suppliers/fulfillment';
 import { sendFulfillmentFailedEmail } from '@/lib/transactionalEmail';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'suppliers.manage');
   if (!session.ok) return session.response;
 
   try {

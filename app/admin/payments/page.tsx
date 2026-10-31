@@ -1,10 +1,10 @@
-import { supabase } from '@/lib/supabase'
 import { adminSupabase } from '@/lib/supabaseAdmin'
 import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { formatCurrency } from '@/lib/format'
 import PaymentConfigEditor from './PaymentConfigEditor'
 import { CreditCard } from 'lucide-react'
+import { getAdminPermissionSet, getAdminSession } from '@/lib/adminGuard'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,20 +56,26 @@ type EditorConfig = {
 }
 
 export default async function AdminPaymentsPage() {
+  const session = await getAdminSession()
+  if (!session) return null
+  const permissionSet = await getAdminPermissionSet(session.role)
+  const canViewPayments = Boolean(permissionSet?.includes('*') || permissionSet?.includes('payments.view'))
+  const canManagePayments = Boolean(permissionSet?.includes('*') || permissionSet?.includes('payments.manage'))
+  const canViewOrders = Boolean(permissionSet?.includes('*') || permissionSet?.includes('orders.view'))
+  if (!canViewPayments) return <AdminPage title="Payments"><p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-5 text-sm text-rose-200">Your role cannot view payment configuration.</p></AdminPage>
   let orders: Order[] = []
   let configs: EditorConfig[] = []
   let dbReady = false
-  const db = adminSupabase || supabase
+  const db = adminSupabase
   if (db) {
     dbReady = true
     const [ordersRes, configsRes] = await Promise.all([
-      db
+      canViewOrders ? db
         .from('orders')
         .select('id, reference, email, total_cents, payment_method, status, created_at')
         .order('created_at', { ascending: false })
-        .limit(200),
-      db
-        .rpc('admin_get_all_payment_config'),
+        .limit(200) : Promise.resolve({ data: [], error: null }),
+      canViewPayments ? db.rpc('admin_get_all_payment_config') : Promise.resolve({ data: [], error: null }),
     ])
     orders = (ordersRes.data || []) as Order[]
     configs = (configsRes.data || []) as unknown as EditorConfig[]
@@ -86,8 +92,12 @@ export default async function AdminPaymentsPage() {
           <section>
             <h2 className="font-display text-sm font-semibold text-slate-200">Payment Methods</h2>
             <p className="mt-1 text-[10px] text-slate-500">Configure providers here. Update a method&apos;s provider fields when you connect its API.</p>
-            <div className="mt-4">
-              <PaymentConfigEditor initialConfigs={configs} />
+            <div className="mt-4">{canManagePayments
+              ? <PaymentConfigEditor initialConfigs={configs} />
+              : <div className="space-y-2 rounded-lg border border-[#1b2a45] p-4">
+                  <p className="text-sm text-slate-400">Read-only access. Payment method changes require the Manage payment methods permission.</p>
+                  {configs.map((config) => <p key={config.id} className="flex flex-wrap justify-between gap-2 text-xs text-slate-300"><span>{config.display_name} ({config.method_key})</span><span>{config.is_enabled ? 'Enabled' : 'Disabled'} · {config.is_test_mode ? 'Test mode' : 'Live mode selected'}</span></p>)}
+                </div>}
             </div>
           </section>
 

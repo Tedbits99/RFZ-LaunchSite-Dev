@@ -20,7 +20,10 @@ const adminClient = createClient(api, serviceKey, { auth: { autoRefreshToken: fa
 const anonKey = process.env.CATALOG_ANON_KEY || '';
 assert(anonKey, 'disposable anonymous key is missing');
 const definitions = [
-  { key: 'ADMIN', email: 'admin@example.invalid', name: 'Synthetic Catalog Admin', role: 'ADMIN' },
+  // The first disposable admin is the owner-equivalent test identity. Its
+  // subsequent staff membership is attributed to this identity so the
+  // production membership audit trigger is exercised rather than bypassed.
+  { key: 'ADMIN', email: 'admin@example.invalid', name: 'Synthetic Catalog Admin', role: 'SUPER_ADMIN' },
   { key: 'STAFF', email: 'staff@example.invalid', name: 'Synthetic Catalog Staff', role: 'STAFF' },
   { key: 'CUSTOMER', email: 'customer@example.invalid', name: 'Synthetic Catalog Customer', role: null },
 ];
@@ -54,8 +57,16 @@ for (const definition of definitions) {
 const adminRows = definitions.filter((definition) => definition.role).map((definition) => ({
   id: ids[definition.key], email: definition.email, name: definition.name,
   role: definition.role, is_active: true,
+  updated_by: definition.key === 'ADMIN' ? null : ids.ADMIN,
 }));
-const { error: adminError } = await adminClient.from('admins').upsert(adminRows, { onConflict: 'id' });
+const ownerFixture = adminRows.find((row) => row.role === 'SUPER_ADMIN');
+assert(ownerFixture, 'the synthetic owner fixture is required for audited staff setup');
+const { error: ownerError } = await adminClient.from('admins').upsert(ownerFixture, { onConflict: 'id' });
+if (ownerError) throw new Error('Could not provision synthetic catalog owner authorization.');
+const staffRows = adminRows.filter((row) => row.id !== ownerFixture.id);
+const { error: adminError } = staffRows.length
+  ? await adminClient.from('admins').upsert(staffRows, { onConflict: 'id' })
+  : { error: null };
 if (adminError) throw new Error('Could not provision synthetic catalog authorization roles.');
 
 const authenticatedCustomer = createClient(api, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });

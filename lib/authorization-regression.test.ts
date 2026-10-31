@@ -20,7 +20,7 @@ describe('privileged route authorization contracts', () => {
     it(`${route} requires the shared server-side admin guard`, () => {
       const code = source(route);
       expect(code).toContain("from '@/lib/adminGuard'");
-      expect(code).toMatch(/await requireAdmin\(req\)/);
+      expect(code).toMatch(/await requireAdminPermission\(req,/);
       expect(code).toContain('if (!auth.ok) return auth.response;');
     });
   }
@@ -29,7 +29,7 @@ describe('privileged route authorization contracts', () => {
     const code = source('app/api/announcement/route.ts');
     expect(code).toMatch(/export async function GET\(\)/);
     expect(code).toMatch(/export async function POST\(req: NextRequest\)/);
-    expect(code).toMatch(/POST[\s\S]*await requireAdmin\(req\)/);
+    expect(code).toMatch(/POST[\s\S]*await requireAdminPermission\(req, 'marketing\.manage'\)/);
   });
 });
 

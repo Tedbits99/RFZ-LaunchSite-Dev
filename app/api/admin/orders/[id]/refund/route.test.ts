@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/adminGuard', () => ({
   requireAdmin: mocks.requireAdmin,
+  requireAdminPermission: mocks.requireAdmin,
 }));
 
 // The refund route runs service-role-only RPCs (rf_coin_release_order_payment

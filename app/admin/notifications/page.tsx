@@ -3,6 +3,8 @@ import { AdminPage } from '@/components/admin/AdminPage'
 import { DbNotReady, EmptyState, PageHeader } from '@/components/admin/ui'
 import { Bell } from 'lucide-react'
 import FazerCardsWebhookFeed from '../suppliers/FazerCardsWebhookFeed'
+import { hasAdminPagePermission } from '@/lib/adminGuard'
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,6 +29,7 @@ const typeColor: Record<string, string> = {
 }
 
 export default async function AdminNotificationsPage() {
+  if (!await hasAdminPagePermission('system.view')) return <AdminPermissionDenied feature="system notifications" />
   let notifications: Notification[] = []
   let dbReady = false
   if (adminSupabase) {

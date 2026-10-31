@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { adminSupabase } from '@/lib/supabaseAdmin'
-import { requireAdmin } from '@/lib/adminGuard'
+import { requireAdminPermission } from '@/lib/adminGuard'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await requireAdmin(_req)
+  const session = await requireAdminPermission(_req, 'orders.view')
   if (!session.ok) return session.response
 
   const db = adminSupabase || supabase

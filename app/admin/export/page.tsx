@@ -1,12 +1,17 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { Download } from 'lucide-react';
+import { hasAdminPagePermission } from '@/lib/adminGuard';
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminExportPage() {
+  const canViewOrders = await hasAdminPagePermission('orders.view');
+  const canManageCatalog = await hasAdminPagePermission('games.manage');
+  if (!canViewOrders && !canManageCatalog) return <AdminPermissionDenied feature="data exports" />;
   let count = 0;
   let dbReady = false;
-  if (adminSupabase) { dbReady = true; const { count: c } = await adminSupabase.from('orders').select('*', { count: 'exact', head: true }); count = c || 0; }
+  if (adminSupabase && canViewOrders) { dbReady = true; const { count: c } = await adminSupabase.from('orders').select('*', { count: 'exact', head: true }); count = c || 0; }
   return (
     <main className="min-h-screen bg-[#030718] text-slate-100">
       <header className="border-b border-[#14203a] bg-[#050a1b]/95"><div className="mx-auto flex max-w-[1180px] items-center justify-between px-5 py-4"><div className="flex items-center gap-3"><a href="/admin" className="text-xs text-slate-400">← Dashboard</a><span className="text-slate-600">/</span><span className="text-sm font-semibold">Export</span></div><a href="/" className="text-xs text-slate-400">View Store</a></div></header>
@@ -14,8 +19,8 @@ export default async function AdminExportPage() {
         <h1 className="font-display text-2xl font-bold">Export Data</h1>
         <p className="text-xs text-slate-500">Download orders and catalog data as CSV</p>
         <div className="mt-6 space-y-3">
-          <a href="/api/export/orders" className="flex items-center gap-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5 transition hover:border-cyan-400"><Download className="text-cyan-300" size={18} /><div className="flex-1"><h3 className="font-display font-semibold">Orders CSV</h3><p className="text-xs text-slate-500">{dbReady ? `${count} orders available` : 'Database not configured'}</p></div></a>
-          <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
+          {canViewOrders && <a href="/api/export/orders" className="flex items-center gap-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5 transition hover:border-cyan-400"><Download className="text-cyan-300" size={18} /><div className="flex-1"><h3 className="font-display font-semibold">Orders CSV</h3><p className="text-xs text-slate-500">{dbReady ? `${count} orders available` : 'Database not configured'}</p></div></a>}
+          {canViewOrders && <div className="rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5">
             <div className="flex items-center gap-4">
               <Download className="text-emerald-300" size={18} />
               <div className="flex-1">
@@ -48,8 +53,8 @@ export default async function AdminExportPage() {
                 <Download size={14} /> Download Detailed CSV
               </button>
             </form>
-          </div>
-          <a href="/api/export/games" className="flex items-center gap-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5 transition hover:border-cyan-400"><Download className="text-violet-300" size={18} /><div className="flex-1"><h3 className="font-display font-semibold">Games & Packages CSV</h3><p className="text-xs text-slate-500">Full catalog export</p></div></a>
+          </div>}
+          {canManageCatalog && <a href="/api/export/games" className="flex items-center gap-4 rounded-xl border border-[#1b2a45] bg-[#0b1225] p-5 transition hover:border-cyan-400"><Download className="text-violet-300" size={18} /><div className="flex-1"><h3 className="font-display font-semibold">Games & Packages CSV</h3><p className="text-xs text-slate-500">Full catalog export</p></div></a>}
         </div>
       </div>
     </main>

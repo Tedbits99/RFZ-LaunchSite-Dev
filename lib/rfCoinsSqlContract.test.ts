@@ -228,7 +228,9 @@ describe('grants and schema', () => {
     const vouchersMigrationVersion = Number(vouchersMigrationName.match(/^([0-9]{14})_/)?.[1] || 0);
     const voucherSecurityName = '20261030211523_vouchers_001_rpc_abuse_boundary.sql';
     const voucherSecurityVersion = Number(voucherSecurityName.match(/^([0-9]{14})_/)?.[1] || 0);
-    const followOnVersions = [catalogImportVersion, vouchersMigrationVersion, voucherSecurityVersion];
+    const adminOpsName = '20261031052548_admin_ops_001_backoffice.sql';
+    const adminOpsVersion = Number(adminOpsName.match(/^([0-9]{14})_/)?.[1] || 0);
+    const followOnVersions = [catalogImportVersion, vouchersMigrationVersion, voucherSecurityVersion, adminOpsVersion];
     const nonWalletVersions = currentVersions.filter((version) => !walletVersions.includes(version) && !followOnVersions.includes(version));
     const latestNonWalletVersion = Math.max(...nonWalletVersions);
 
@@ -239,6 +241,8 @@ describe('grants and schema', () => {
     expect(vouchersMigrationVersion).toBeGreaterThan(catalogImportVersion);
     expect(currentVersions).toContain(voucherSecurityVersion);
     expect(voucherSecurityVersion).toBeGreaterThan(vouchersMigrationVersion);
+    expect(currentVersions).toContain(adminOpsVersion);
+    expect(adminOpsVersion).toBeGreaterThan(voucherSecurityVersion);
     expect(manifest).toContain(`| INCLUDE | \`${catalogImportName}\` |`);
     expect(manifest).toContain(`| INCLUDE | \`${vouchersMigrationName}\` |`);
     expect(manifest).toContain(`| INCLUDE | \`${voucherSecurityName}\` |`);

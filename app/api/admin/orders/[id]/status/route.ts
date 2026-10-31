@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { adminSupabase } from '@/lib/supabaseAdmin'
-import { requireAdmin } from '@/lib/adminGuard'
+import { requireAdminPermission } from '@/lib/adminGuard'
 
 // Only admin-controlled statuses are allowed via the manual Update Status dropdown.
 // System-controlled statuses (PENDING, WAITING_PAYMENT, PAID, PROCESSING, COMPLETED,
@@ -12,7 +12,7 @@ const ADMIN_STATUSES = [
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await requireAdmin(req)
+  const session = await requireAdminPermission(req, 'orders.edit')
   if (!session.ok) return session.response
 
   const client = adminSupabase || supabase
@@ -24,6 +24,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     if (!status || !ADMIN_STATUSES.includes(status)) {
       return NextResponse.json({ error: 'Invalid status.' }, { status: 400 })
+    }
+
+    if (status === 'PAYMENT_VERIFIED') {
+      const paymentAuth = await requireAdminPermission(req, 'payments.manage')
+      if (!paymentAuth.ok) return paymentAuth.response
+    }
+    if (status === 'REFUND_PENDING' || status === 'REFUNDED') {
+      const refundAuth = await requireAdminPermission(req, 'payments.refund')
+      if (!refundAuth.ok) return refundAuth.response
     }
 
     const noteText = (note || '').trim().slice(0, 500)

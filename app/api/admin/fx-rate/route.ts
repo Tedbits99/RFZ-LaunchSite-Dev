@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 /**
  * Fetch the live USD→PHP exchange rate from a free, no-key-required API.
@@ -8,7 +8,7 @@ import { requireAdmin } from '@/lib/adminGuard';
  * valid value.
  */
 export async function GET(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'pricing.manage');
   if (!session.ok) return session.response;
 
   try {

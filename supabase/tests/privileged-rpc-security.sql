@@ -26,6 +26,11 @@ SELECT admin_user, 'security-test-admin@example.invalid', 'Security Test Admin',
 FROM security_test_ids
 ON CONFLICT (id) DO UPDATE SET is_active = true;
 
+INSERT INTO public.admins (id, email, name, role, is_active, updated_by)
+VALUES ('00000000-0000-0000-0000-000000000008', 'security-test-staff@example.invalid', 'Security Test Staff', 'STAFF', true,
+        '00000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO public.games AS existing_game (
   id, slug, name, short_name, description, region, currency, is_active, sort_order,
   catalog_status, published_at
@@ -191,16 +196,15 @@ BEGIN
 END $$;
 
 -- Both overloads must exist with their intended signatures. The legacy
--- overload is retained only for compatibility investigation and must have no
--- effective EXECUTE privilege, including inherited PUBLIC access. The current
--- overload remains executable by authenticated/service roles but enforces the
--- database-side operator check.
+-- overloads are retained for server-side compatibility only and must be
+-- service-role-only. Browser clients use the audited server-side wrapper.
 DO $$
 DECLARE
   legacy_fn text := 'public.admin_upsert_payment_config(uuid,text,text,text,text,text,boolean,text,text,text,text,text,boolean,text,text[],integer,integer,integer,text,text)';
   current_fn text := 'public.admin_upsert_payment_config(uuid,text,text,text,text,text,boolean,text,text,text,text,text,boolean,text,text[],integer,integer,integer,text,text,text)';
   legacy_oid oid;
   current_oid oid;
+  audited_oid oid;
   legacy_owner text;
   current_owner text;
 BEGIN
@@ -210,6 +214,8 @@ BEGIN
 
   legacy_oid := to_regprocedure(legacy_fn)::oid;
   current_oid := to_regprocedure(current_fn)::oid;
+  audited_oid := to_regprocedure('public.admin_ops_upsert_payment_config(uuid,uuid,text,text,text,text,text,boolean,text,text,text,text,text,boolean,text,text[],integer,integer,integer,text,text,text)')::oid;
+  IF audited_oid IS NULL THEN RAISE EXCEPTION 'Audited payment-config wrapper is missing'; END IF;
 
   SELECT pg_get_userbyid(p.proowner)
   INTO legacy_owner
@@ -243,9 +249,15 @@ BEGIN
   END IF;
 
   IF has_function_privilege('anon', current_oid, 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', current_oid, 'EXECUTE')
+     OR has_function_privilege('authenticated', current_oid, 'EXECUTE')
      OR NOT has_function_privilege('service_role', current_oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'Hardened payment-config overload has unexpected EXECUTE privileges';
+  END IF;
+
+  IF has_function_privilege('anon', audited_oid, 'EXECUTE')
+     OR has_function_privilege('authenticated', audited_oid, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', audited_oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'Audited payment-config wrapper must be service-role-only';
   END IF;
 
   IF EXISTS (
@@ -257,6 +269,28 @@ BEGIN
       AND acl.privilege_type = 'EXECUTE'
   ) THEN
     RAISE EXCEPTION 'Hardened payment-config overload retains PUBLIC EXECUTE';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc p, LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+    WHERE p.oid = audited_oid AND a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
+    RAISE EXCEPTION 'Audited payment-config wrapper retains PUBLIC EXECUTE';
+  END IF;
+END $$;
+
+DO $$
+DECLARE fn text := 'public.admin_update_catalog_pricing_assumptions(numeric,integer,integer)';
+BEGIN
+  IF has_function_privilege('anon', fn, 'EXECUTE') OR has_function_privilege('authenticated', fn, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', fn, 'EXECUTE') THEN
+    RAISE EXCEPTION 'Legacy catalog pricing RPC must be service-role-only';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc p, LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+    WHERE p.oid = to_regprocedure(fn) AND a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
+    RAISE EXCEPTION 'Legacy catalog pricing RPC retains PUBLIC EXECUTE';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.admin_update_catalog_pricing_assumptions_audited(uuid,numeric,integer,integer)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.admin_update_catalog_pricing_assumptions_audited(uuid,numeric,integer,integer)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.admin_update_catalog_pricing_assumptions_audited(uuid,numeric,integer,integer)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'Audited catalog pricing RPC must be service-role-only';
   END IF;
 END $$;
 
@@ -305,8 +339,7 @@ BEGIN
 END $$;
 RESET ROLE;
 
--- An authenticated non-admin must have the SQL EXECUTE grant but fail the
--- database-side operator check.
+-- An authenticated user cannot bypass server routes through privileged RPCs.
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000099"}', true);
 DO $$
@@ -337,25 +370,46 @@ BEGIN
       p_logo_url => NULL::text
     );
     RAISE EXCEPTION 'non-admin hardened payment-config mutation unexpectedly executed';
-  EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM <> 'FORBIDDEN' THEN
-      RAISE;
-    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
   BEGIN
     PERFORM 1 FROM public.admin_delete_payment_config(
       '00000000-0000-0000-0000-000000000099'
     );
     RAISE EXCEPTION 'non-admin payment-config deletion unexpectedly executed';
-  EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM <> 'FORBIDDEN' THEN
-      RAISE;
-    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_update_catalog_pricing_assumptions(57, 250, 100);
+    RAISE EXCEPTION 'authenticated legacy pricing RPC unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_update_catalog_pricing_assumptions_audited(
+      '00000000-0000-0000-0000-000000000001', 57, 250, 100
+    );
+    RAISE EXCEPTION 'authenticated audited pricing RPC unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_ops_upsert_payment_config(
+      p_actor_id => '00000000-0000-0000-0000-000000000008',
+      p_method_key => 'staff-wrapper-test', p_display_name => 'Must be denied'
+    );
+    RAISE EXCEPTION 'payment-config wrapper accepted an actor without payments.manage';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_update_catalog_pricing_assumptions_audited(
+      '00000000-0000-0000-0000-000000000008', 57, 250, 100
+    );
+    RAISE EXCEPTION 'audited pricing RPC accepted an actor without pricing.manage';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
 END $$;
 RESET ROLE;
 
--- An authenticated admin retains the intended operator path.
+-- Authenticated admins use the server route; direct payment/pricing writes are denied.
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-0000-0000-000000000001"}', true);
 DO $$
@@ -374,10 +428,11 @@ BEGIN
     RAISE EXCEPTION 'authorized admin game-count read assertion failed';
   END IF;
 
-  SELECT count(*) INTO v_count FROM public.admin_get_all_payment_config();
-  IF v_count < 1 THEN
-    RAISE EXCEPTION 'authorized admin payment-config read assertion failed';
-  END IF;
+  BEGIN
+    PERFORM 1 FROM public.admin_get_all_payment_config();
+    RAISE EXCEPTION 'authenticated payment-config read unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
 
   SELECT id INTO v_id
   FROM public.admin_set_game_active(
@@ -387,21 +442,24 @@ BEGIN
     RAISE EXCEPTION 'authorized admin game mutation assertion failed';
   END IF;
 
-  SELECT out_id INTO v_id
-  FROM public.admin_upsert_payment_config(
-    p_method_key => 'security-test-method',
-    p_display_name => 'Security Test Method',
-    p_logo_url => NULL::text
-  );
-  IF v_id IS NULL THEN
-    RAISE EXCEPTION 'authorized admin payment-config mutation assertion failed';
-  END IF;
+  BEGIN
+    PERFORM 1 FROM public.admin_upsert_payment_config(
+      p_method_key => 'authenticated-direct-test', p_display_name => 'Must be denied', p_logo_url => NULL::text
+    );
+    RAISE EXCEPTION 'authenticated direct payment-config mutation unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_update_catalog_pricing_assumptions(57, 250, 100);
+    RAISE EXCEPTION 'authenticated direct legacy pricing mutation unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
 
-  SELECT out_success INTO v_success
-  FROM public.admin_delete_payment_config('00000000-0000-0000-0000-000000000099');
-  IF v_success IS NOT FALSE THEN
-    RAISE EXCEPTION 'authorized admin missing-delete assertion failed';
-  END IF;
+  BEGIN
+    PERFORM 1 FROM public.admin_delete_payment_config('00000000-0000-0000-0000-000000000099');
+    RAISE EXCEPTION 'authenticated payment-config delete unexpectedly executed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
 END $$;
 RESET ROLE;
 
@@ -432,6 +490,44 @@ BEGIN
   IF v_status <> 'WAITING_PAYMENT' THEN
     RAISE EXCEPTION 'service-role order status assertion failed';
   END IF;
+
+  BEGIN
+    PERFORM 1 FROM public.admin_ops_upsert_payment_config(
+      p_actor_id => '00000000-0000-0000-0000-000000000099',
+      p_method_key => 'unauthorized-wrapper-test', p_display_name => 'Must be denied'
+    );
+    RAISE EXCEPTION 'payment-config wrapper accepted an unknown actor';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  PERFORM out_id FROM public.admin_ops_upsert_payment_config(
+    p_actor_id => '00000000-0000-0000-0000-000000000001',
+    p_method_key => 'security-test-wrapper', p_display_name => 'Disposable wrapper test',
+    p_is_enabled => false, p_is_test_mode => true
+  );
+
+  BEGIN
+    PERFORM 1 FROM public.admin_update_catalog_pricing_assumptions_audited(
+      '00000000-0000-0000-0000-000000000099', 57, 250, 100
+    );
+    RAISE EXCEPTION 'audited pricing RPC accepted an unknown actor';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_ops_upsert_payment_config(
+      p_actor_id => '00000000-0000-0000-0000-000000000008',
+      p_method_key => 'staff-wrapper-test', p_display_name => 'Must be denied'
+    );
+    RAISE EXCEPTION 'payment-config wrapper accepted an actor without payments.manage';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM public.admin_update_catalog_pricing_assumptions_audited(
+      '00000000-0000-0000-0000-000000000008', 57, 250, 100
+    );
+    RAISE EXCEPTION 'audited pricing RPC accepted an actor without pricing.manage';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
 END $$;
 RESET ROLE;
 
@@ -460,6 +556,7 @@ BEGIN
 
   FOR r IN
     SELECT p.oid::regprocedure AS signature,
+           p.proname AS function_name,
            p.prosecdef AS security_definer,
            p.proconfig AS config
     FROM pg_proc p
@@ -468,24 +565,26 @@ BEGIN
       AND p.proname IN (
         'admin_get_all_games', 'admin_set_game_active',
         'admin_get_games_with_package_counts', 'admin_get_all_payment_config',
-        'admin_upsert_payment_config', 'admin_delete_payment_config'
+        'admin_upsert_payment_config', 'admin_delete_payment_config',
+        'admin_ops_upsert_payment_config', 'admin_ops_delete_payment_config',
+        'admin_update_catalog_pricing_assumptions_audited'
       )
   LOOP
     IF NOT r.security_definer THEN
       RAISE EXCEPTION '% is not SECURITY DEFINER', r.signature;
     END IF;
-    IF NOT EXISTS (
-         SELECT 1
-         FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
-         WHERE setting = 'search_path=public'
-       )
-       OR EXISTS (
-         SELECT 1
-         FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
-         WHERE setting LIKE 'search_path=%'
-           AND setting <> 'search_path=public'
-       ) THEN
-      RAISE EXCEPTION '% does not lock search_path to exactly public (proconfig=%)', r.signature, r.config;
+    IF (
+      SELECT array_agg(settings.setting ORDER BY settings.setting)
+      FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
+      WHERE settings.setting LIKE 'search_path=%'
+    ) IS DISTINCT FROM ARRAY[
+      CASE WHEN r.function_name IN (
+        'admin_update_catalog_pricing_assumptions_audited',
+        'admin_ops_upsert_payment_config', 'admin_ops_delete_payment_config'
+      )
+        THEN 'search_path=pg_catalog, public' ELSE 'search_path=public' END
+    ]::text[] THEN
+      RAISE EXCEPTION '% has an unexpected fixed search_path (proconfig=%)', r.signature, r.config;
     END IF;
     IF pg_get_userbyid((SELECT proowner FROM pg_proc WHERE oid = r.signature::regprocedure)) IN ('anon', 'authenticated') THEN
       RAISE EXCEPTION '% is owned by an untrusted API role', r.signature;

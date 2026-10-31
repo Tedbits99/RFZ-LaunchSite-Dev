@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 /** Campaign discounts are financial rules: only explicitly active ADMIN and
  * SUPER_ADMIN records may manage them. A missing/null role never defaults up. */
 export async function requireVoucherAdmin(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminPermission(req, 'marketing.manage');
   if (!auth.ok) return auth;
 
   const db = adminSupabase || auth.client;

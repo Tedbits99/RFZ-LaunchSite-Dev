@@ -3,6 +3,8 @@ import { createAdminServerClient } from '@/lib/authSessionClients'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import PackagesManager from './PackagesManager'
+import { hasAdminPagePermission } from '@/lib/adminGuard'
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +28,7 @@ type PackageRecord = {
 }
 
 export default async function AdminGamePackagesPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!await hasAdminPagePermission('games.manage')) return <AdminPermissionDenied feature="game packages" />
   const { id } = await params
   let db: Awaited<ReturnType<typeof createAdminServerClient>>
   try {

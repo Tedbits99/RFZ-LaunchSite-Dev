@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { adminSupabase } from '@/lib/supabaseAdmin';
-import { requireAdmin } from '@/lib/adminGuard';
+import { requireAdminPermission } from '@/lib/adminGuard';
 
 function getDb() {
   if (adminSupabase) return adminSupabase;
@@ -22,7 +22,7 @@ const ALLOWED_PATCH_FIELDS = new Set([
 ]);
 
 export async function GET(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'suppliers.view');
   if (!session.ok) return session.response;
 
   const db = getDb();
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'suppliers.manage');
   if (!session.ok) return session.response;
 
   const db = getDb();
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireAdmin(req);
+  const session = await requireAdminPermission(req, 'suppliers.manage');
   if (!session.ok) return session.response;
 
   const db = getDb();

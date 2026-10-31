@@ -1,9 +1,12 @@
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { RotateCcw } from 'lucide-react';
+import { hasAdminPagePermission } from '@/lib/adminGuard';
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminRefundsPage() {
+  if (!await hasAdminPagePermission(['payments.view', 'payments.refund'])) return <AdminPermissionDenied feature="refund records" />;
   let refunds: Array<{ id: string; reference: string; status: string; total_cents: number; email: string; created_at: string }> = [];
   let dbReady = false;
   if (adminSupabase) { dbReady = true; const { data } = await adminSupabase.from('orders').select('id, reference, status, total_cents, email, created_at').in('status', ['REFUND_REQUESTED','REFUNDED']).order('created_at', { ascending: false }); refunds = (data || []) as typeof refunds; }

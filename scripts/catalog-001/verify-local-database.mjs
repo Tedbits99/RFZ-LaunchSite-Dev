@@ -44,10 +44,28 @@ try {
     assert(Array.isArray(fn.proconfig) && fn.proconfig.includes('search_path=public'), `${name} must use fixed public search_path`);
     assert(fn.anon_exec === false && fn.public_exec === false, `${name} must not be executable by anon or PUBLIC`);
     if (name === 'guard_order_catalog_saleability') assert(fn.authenticated_exec === false && fn.service_exec === false, 'trigger guard must not be directly executable by API roles');
+    else if (name === 'admin_update_catalog_pricing_assumptions') assert(fn.authenticated_exec === false && fn.service_exec === true, 'legacy catalog pricing RPC must be service-role-only');
     else assert(fn.authenticated_exec === true && fn.service_exec === true, `${name} must preserve authenticated/service-role execution`);
     if (name === 'admin_get_games_with_package_counts') assert(fn.definition.includes('is_payment_operator'), 'catalog read RPC must preserve the database-side is_payment_operator guard');
     if (['admin_create_catalog_game', 'admin_update_catalog_game', 'admin_update_catalog_pricing_assumptions'].includes(name)) assert(fn.definition.includes('is_catalog_admin'), `${name} must enforce the catalog-specific admin guard`);
   }
+
+  const auditedPricingIdentity = 'public.admin_update_catalog_pricing_assumptions_audited(uuid,numeric,integer,integer)';
+  const [auditedPricing] = await sql`
+    select p.prosecdef, p.proconfig,
+      has_function_privilege('anon', p.oid, 'EXECUTE') as anon_exec,
+      has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_exec,
+      has_function_privilege('service_role', p.oid, 'EXECUTE') as service_exec,
+      exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_exec
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.oid = to_regprocedure(${auditedPricingIdentity})
+  `;
+  assert(auditedPricing, 'audited catalog pricing RPC is missing');
+  assert(auditedPricing.prosecdef === true, 'audited catalog pricing RPC must remain SECURITY DEFINER');
+  assert(Array.isArray(auditedPricing.proconfig) && auditedPricing.proconfig.includes('search_path=pg_catalog, public'), 'audited catalog pricing RPC must use fixed pg_catalog, public search_path');
+  assert(auditedPricing.anon_exec === false && auditedPricing.public_exec === false && auditedPricing.authenticated_exec === false && auditedPricing.service_exec === true,
+    'audited catalog pricing RPC must be service-role-only');
 
   const importIdentity = 'public.admin_import_supplier_catalog(uuid,uuid,text,jsonb,jsonb,text,text,boolean,uuid,text)';
   const importRows = await sql`

@@ -12,6 +12,7 @@ describe('admin mobile navigation state', () => {
       open: true,
       onClose: () => undefined,
       role: 'SUPER_ADMIN',
+      permissions: ['*'],
     }));
 
     expect(html).toContain('style="transform:translateX(0)"');
@@ -24,10 +25,23 @@ describe('admin mobile navigation state', () => {
       open: false,
       onClose: () => undefined,
       role: 'SUPER_ADMIN',
+      permissions: ['*'],
     }));
 
     expect(html).toContain('class="rfz-admin-nav');
     expect(html).toContain('-translate-x-full');
     expect(html).not.toContain('style="transform:translateX(0)"');
+  });
+
+  it('hides top-level routes when their persisted permission is absent', () => {
+    const html = renderToString(React.createElement(AdminNavigation, {
+      open: true,
+      onClose: () => undefined,
+      role: 'STAFF',
+      permissions: ['tasks.manage'],
+    }));
+
+    expect(html).not.toContain('href="/admin"');
+    expect(html).not.toContain('href="/admin/orders"');
   });
 });

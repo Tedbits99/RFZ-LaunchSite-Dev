@@ -2,6 +2,8 @@ import { adminSupabase } from '@/lib/supabaseAdmin';
 import { supabase } from '@/lib/supabase';
 import OrdersManager from './OrdersManager';
 import { getAdminSession } from '@/lib/adminGuard';
+import { hasAdminPagePermission } from '@/lib/adminGuard';
+import { AdminPermissionDenied } from '@/components/admin/AdminPermissionDenied';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +22,7 @@ type OrderRow = {
 };
 
 export default async function AdminOrdersPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; date?: string; archived?: string }> }) {
+  if (!await hasAdminPagePermission('orders.view')) return <AdminPermissionDenied feature="orders" />;
   const resolvedSearchParams = await searchParams;
   let orders: OrderRow[] = [];
   let dbReady = false;
