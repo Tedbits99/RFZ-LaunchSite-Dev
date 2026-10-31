@@ -578,7 +578,10 @@ BEGIN
       FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
       WHERE settings.setting LIKE 'search_path=%'
     ) IS DISTINCT FROM ARRAY[
-      CASE WHEN r.function_name = 'admin_update_catalog_pricing_assumptions_audited'
+      CASE WHEN r.function_name IN (
+        'admin_update_catalog_pricing_assumptions_audited',
+        'admin_ops_upsert_payment_config', 'admin_ops_delete_payment_config'
+      )
         THEN 'search_path=pg_catalog, public' ELSE 'search_path=public' END
     ]::text[] THEN
       RAISE EXCEPTION '% has an unexpected fixed search_path (proconfig=%)', r.signature, r.config;
