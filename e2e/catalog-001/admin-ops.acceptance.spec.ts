@@ -39,7 +39,8 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     await createForm.getByRole('button', { name: 'Create task' }).click()
     await expect(page.getByText('Task created and recorded in the admin audit log.', { exact: true })).toBeVisible()
 
-    let taskForm = page.getByRole('form', { name: `Task: ${title}` })
+    let taskForm = page.getByRole('form', { name: `Task: ${title}`, exact: true })
+    await expect(taskForm).toHaveCount(1)
     await taskForm.getByLabel('Status').selectOption('IN_PROGRESS')
     await taskForm.getByRole('button', { name: 'Save changes' }).click()
     await expect(page.getByText('Task saved and recorded in the admin audit log.', { exact: true })).toBeVisible()
@@ -47,14 +48,14 @@ test.describe('ADMIN-OPS-001 persisted admin operations', () => {
     expect(saved.error).toBeNull()
     expect(saved.data?.status).toBe('IN_PROGRESS')
 
-    taskForm = page.getByRole('form', { name: `Task: ${title}` })
+    taskForm = page.getByRole('form', { name: `Task: ${title}`, exact: true })
     await taskForm.getByRole('button', { name: 'Archive' }).click()
     await expect(page.getByText('Task archived. Its history is retained.', { exact: true })).toBeVisible()
     const archived = await serviceDb().from('admin_tasks').select('archived_at').eq('id', saved.data!.id).single()
     expect(archived.data?.archived_at).not.toBeNull()
 
     await page.getByLabel('Show archived tasks').check()
-    taskForm = page.getByRole('form', { name: `Task: ${title}` })
+    taskForm = page.getByRole('form', { name: `Task: ${title}`, exact: true })
     await taskForm.getByRole('button', { name: 'Restore' }).click()
     await expect(page.getByText('Task restored.', { exact: true })).toBeVisible()
     const restored = await serviceDb().from('admin_tasks').select('archived_at,status').eq('id', saved.data!.id).single()

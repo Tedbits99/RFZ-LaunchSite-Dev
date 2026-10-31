@@ -91,7 +91,13 @@ if [[ -f tests/catalog-contract/catalog-contract.test.ts ]]; then
   CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=e2e/catalog-acceptance/playwright.config.ts --reporter=list
 else
   CATALOG_INTEGRATION_RUN=1 npm test -- --run tests/catalog-001/catalog-integration.test.ts --reporter=verbose
-  CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts --reporter=list
+  if [[ "${ADMIN_OPS_ACCEPTANCE:-0}" == 1 ]]; then
+    CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts \
+      e2e/catalog-001/catalog-admin.acceptance.spec.ts \
+      e2e/catalog-001/storefront.acceptance.spec.ts --reporter=list
+  else
+    CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts --reporter=list
+  fi
 fi
 if [[ "${ADMIN_OPS_ACCEPTANCE:-0}" == 1 ]]; then
   CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts e2e/catalog-001/admin-ops.acceptance.spec.ts --reporter=list
