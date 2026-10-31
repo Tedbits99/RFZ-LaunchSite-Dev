@@ -285,6 +285,58 @@ integration('VOUCHERS-001 disposable PostgreSQL 17/Auth acceptance', () => {
     expect((await validateCode(expiring.payload.code as string)).response.status).toBe(400);
   }, 30_000);
 
+  it('preserves legacy voucher validation for the server during a database-first rollout only', async () => {
+    const code = `LEG-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const connection = new URL(requiredEnv('CATALOG_LOCAL_DB_URL'));
+    if (!['postgres:', 'postgresql:'].includes(connection.protocol)
+        || connection.hostname !== '127.0.0.1'
+        || connection.port !== process.env.E2E_LOCAL_DB_PORT) {
+      throw new Error('Legacy voucher compatibility fixture refuses a non-loopback database.');
+    }
+
+    const insertSql = postgres(connection.toString(), { max: 1, prepare: false, connect_timeout: 10 });
+    try {
+      await insertSql`
+        insert into public.vouchers (
+          code, description, discount_type, discount_value, min_order_cents,
+          max_discount_cents, usage_limit, per_user_limit, starts_at, ends_at,
+          is_active, applies_to_game_id
+        ) values (
+          ${code}, 'Disposable legacy compatibility fixture', 'FIXED', 50, 0,
+          null, 10, 2, null, null, true, null
+        )
+      `;
+    } finally {
+      await insertSql.end({ timeout: 5 });
+    }
+
+    const args = {
+      p_code: code,
+      p_subtotal_cents: 400,
+      p_game_id: gameId,
+      p_email: `legacy-${runTag}@example.invalid`,
+    };
+    try {
+      const serverValidation = await serviceDb().rpc('validate_voucher', args);
+      expect(serverValidation.error).toBeNull();
+      const row = responseData(Array.isArray(serverValidation.data) ? serverValidation.data[0] : serverValidation.data);
+      expect(row).toMatchObject({ out_valid: true, out_discount_cents: 50, out_total_cents: 350 });
+
+      const anonymousValidation = await anonDb().rpc('validate_voucher', args);
+      expect(anonymousValidation.error).not.toBeNull();
+      const customer = await identityDb(requiredEnv('CATALOG_CUSTOMER_EMAIL'), requiredEnv('CATALOG_CUSTOMER_PASSWORD'));
+      const customerValidation = await customer.rpc('validate_voucher', args);
+      expect(customerValidation.error).not.toBeNull();
+    } finally {
+      const cleanupSql = postgres(connection.toString(), { max: 1, prepare: false, connect_timeout: 10 });
+      try {
+        await cleanupSql`delete from public.vouchers where code = ${code}`;
+      } finally {
+        await cleanupSql.end({ timeout: 5 });
+      }
+    }
+  });
+
   it('requires verified account identity for first-purchase campaigns and rejects invalid rule payloads', async () => {
     const welcome = await createCampaign({
       campaign_type: 'WELCOME', eligibility_rules: { allow_guest: false, require_authenticated: true },

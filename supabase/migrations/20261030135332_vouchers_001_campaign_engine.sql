@@ -663,10 +663,16 @@ REVOKE ALL ON FUNCTION public.list_public_promotion_offers(uuid, text) FROM PUBL
 GRANT EXECUTE ON FUNCTION public.list_public_promotion_offers(uuid, text) TO anon, authenticated;
 
 -- The old RPC accepted a caller-supplied subtotal and returned the complete
--- voucher row. New callers use validate_campaign_voucher, which loads the
--- actual package price and returns only the preview fields needed at checkout.
+-- voucher row. Keep it available only to the trusted server role during a
+-- database-first rollout: the currently deployed application calls this RPC
+-- through its server admin client until the new validation route is deployed.
+-- Browser roles must not call it directly; new callers use
+-- validate_campaign_voucher, which loads the actual package price and returns
+-- only the preview fields needed at checkout.
 REVOKE ALL ON FUNCTION public.validate_voucher(text, integer, uuid, text)
-  FROM PUBLIC, anon, authenticated, service_role;
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.validate_voucher(text, integer, uuid, text)
+  TO service_role;
 
 CREATE OR REPLACE FUNCTION voucher_private.assert_campaign_admin(p_actor_id uuid)
 RETURNS void

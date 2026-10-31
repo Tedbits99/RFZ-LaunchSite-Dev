@@ -28,7 +28,7 @@ const functionPolicies = [
   ['public.consume_voucher_validation_rate_limit(text)', 'service-only'],
   ['public.create_order(uuid,uuid,text,text,jsonb,text,text,text)', 'checkout'],
   ['public.create_order_idempotent(uuid,uuid,text,text,jsonb,text,text,text,uuid)', 'checkout'],
-  ['public.validate_voucher(text,integer,uuid,text)', 'none'],
+  ['public.validate_voucher(text,integer,uuid,text)', 'service-only'],
   ['public.validate_and_reserve_voucher_usage()', 'none'],
   ['public.reconcile_voucher_usage_with_order()', 'none'],
   ['voucher_private.consume_checkout_rate_bucket(text,integer)', 'none'],
