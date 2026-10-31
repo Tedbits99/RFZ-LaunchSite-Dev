@@ -32,7 +32,7 @@ Development acceptance and production financial activation are separate decision
 
 ## Application/schema compatibility
 
-- The pre-VOUCHERS application with the current schema remains the currently deployed combination; its legacy `validate_voucher` RPC remains publicly executable until the VOUCHERS migrations are applied.
+- The mainline pre-VOUCHERS application is compatible with the current hosted schema; the deployed Worker SHA was not independently verified. The hosted schema still exposes the legacy `validate_voucher` RPC to public roles until the VOUCHERS migrations are applied.
 - During a database-first rollout, the migrations revoke `validate_voucher` from `PUBLIC`, `anon`, and `authenticated`, while retaining `service_role` execution for the existing server route until the new application is deployed. Do not remove that server-only grant without first retiring the old route.
 - The new application against the old schema is unsupported: campaign tables and rate-limit/server-validation RPCs do not exist yet, so voucher validation fails closed. Therefore deployment is blocked until the complete canonical migration sequence is authorized and verified on the target database.
 - Safe controlled sequence: verify backup/recovery and target migration history; apply the approved migrations; verify ACL/RLS and the old server validator compatibility; then deploy the exact application SHA and run smoke tests. Do not combine code merge with hosted migration or Worker deployment.
