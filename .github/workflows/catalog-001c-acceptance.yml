@@ -2,7 +2,7 @@ name: CATALOG-001C disposable acceptance
 
 on:
   pull_request:
-    branches: [codex/rfz-catalog-001-implementation]
+    branches: [codex/rfz-catalog-001-implementation, main]
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -16,7 +16,8 @@ jobs:
   catalog-001c-disposable-acceptance:
     if: >-
       github.event.pull_request.head.ref == 'codex/rfz-catalog-multigame-completion' &&
-      github.event.pull_request.base.ref == 'codex/rfz-catalog-001-implementation'
+      (github.event.pull_request.base.ref == 'codex/rfz-catalog-001-implementation' ||
+       github.event.pull_request.base.ref == 'main')
     name: Catalog PostgreSQL 17, Auth, supplier contracts, and browser acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -45,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$HEAD_BRANCH" == codex/rfz-catalog-multigame-completion ]]
-          [[ "$BASE_BRANCH" == codex/rfz-catalog-001-implementation ]]
+          [[ "$BASE_BRANCH" == codex/rfz-catalog-001-implementation || "$BASE_BRANCH" == main ]]
           [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
           printf 'CATALOG_CANDIDATE_SHA=%s\n' "$EXPECTED_SHA"
