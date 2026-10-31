@@ -1,6 +1,6 @@
 # ADMIN-OPS-001 implementation and acceptance matrix
 
-This change is based on `f7c0b48cd4e79bf6164124950357d1dbdbce5954`. It is code-level work only; it does not authorize a hosted database change, production configuration change, deployment, merge, payment, supplier action, or RF Coins activation.
+This change is based on `f7c0b48cd4e79bf6164124950357d1dbdbce5954`. It is code-level work only. The owner separately authorized a normal protected merge into `main` only after the exact final head passes all applicable acceptance, security, schema, CI, and conflict checks; this does not authorize bypassing branch protection or enabling auto-merge. No hosted database/configuration change, deployment, payment, supplier action, or RF Coins activation is authorized.
 
 ## Feature matrix
 
