@@ -77,6 +77,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: admin-ops-001-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/catalog-001/test-output/
+          path: |
+            artifacts/catalog-001/test-output/
+            artifacts/vouchers-001/test-output/
           if-no-files-found: warn
           retention-days: 7

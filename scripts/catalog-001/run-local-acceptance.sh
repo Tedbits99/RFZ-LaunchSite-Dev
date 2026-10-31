@@ -95,6 +95,10 @@ else
 fi
 if [[ "${ADMIN_OPS_ACCEPTANCE:-0}" == 1 ]]; then
   CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.catalog-001.config.ts e2e/catalog-001/admin-ops.acceptance.spec.ts --reporter=list
+  VOUCHERS_INTEGRATION_RUN=1 npm test -- --run tests/vouchers-001/vouchers-integration.test.ts \
+    --pool=threads --no-file-parallelism --maxWorkers=1 --reporter=verbose
+  CATALOG_USE_EXISTING_SERVER=1 npx playwright test --config=playwright.vouchers-001.config.ts --reporter=list
+  printf '%s\n' 'ADMIN_OPS_VOUCHERS_REGRESSION_PASS integration=11 browser_projects=desktop,mobile provider_requests=0'
   printf '%s\n' 'ADMIN_OPS_001_DISPOSABLE_BROWSER_ACCEPTANCE_PASS projects=desktop-chromium,mobile-chromium'
 fi
 printf 'CATALOG_LOCAL_ACCEPTANCE_PASS migration_files=%s browser_projects=2 supplier_release=off\n' "$RFZ_MIGRATION_FILE_COUNT"
