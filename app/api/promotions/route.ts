@@ -1,22 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 import { adminSupabase } from '@/lib/supabaseAdmin';
 import { requireAdmin } from '@/lib/adminGuard';
 
 const ALLOWED_FIELDS = new Set(['image_url', 'is_active', 'cta_text', 'cta_href', 'sort_order', 'title', 'body', 'target_type', 'starts_at', 'ends_at', 'placement', 'target_game_id']);
 const VALID_PLACEMENTS = new Set(['HOMEPAGE_HERO', 'GAME_CARD', 'GAME_DETAIL_HERO']);
+const PROMOTION_ADMIN_COLUMNS = [
+  'id',
+  'title',
+  'body',
+  'target_type',
+  'game_id',
+  'package_id',
+  'image_url',
+  'cta_text',
+  'cta_href',
+  'starts_at',
+  'ends_at',
+  'is_active',
+  'sort_order',
+  'placement',
+  'target_game_id',
+] as const;
+const PROMOTION_ADMIN_SELECT = PROMOTION_ADMIN_COLUMNS.join(', ');
+const PRIVATE_NO_STORE = { 'Cache-Control': 'private, no-store' };
 
-export async function GET() {
-  const db = adminSupabase || supabase;
-  if (!db) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 });
+type PromotionAdminColumn = typeof PROMOTION_ADMIN_COLUMNS[number];
 
-  const { data, error } = await db
-    .from('promotions')
-    .select('*')
-    .order('sort_order');
+function projectPromotionForAdmin(row: Record<string, unknown>): Record<PromotionAdminColumn, unknown> {
+  return Object.fromEntries(
+    PROMOTION_ADMIN_COLUMNS.map((column) => [column, row[column]]),
+  ) as Record<PromotionAdminColumn, unknown>;
+}
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data: data || [] });
+function privateNoStore(response: Response): Response {
+  response.headers.set('Cache-Control', 'private, no-store');
+  return response;
+}
+
+/** Admin management API only. Storefront promotion reads use separate public paths. */
+export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return privateNoStore(auth.response);
+
+  if (req.nextUrl.searchParams.toString()) {
+    return NextResponse.json({ error: 'Unsupported query parameters.' }, { status: 400, headers: PRIVATE_NO_STORE });
+  }
+
+  const db = adminSupabase || auth.client;
+  if (!db) {
+    return NextResponse.json({ error: 'Database not configured.' }, { status: 503, headers: PRIVATE_NO_STORE });
+  }
+
+  try {
+    const { data, error } = await db
+      .from('promotions')
+      .select(PROMOTION_ADMIN_SELECT)
+      .order('sort_order');
+
+    if (error) {
+      return NextResponse.json({ error: 'Promotions are temporarily unavailable.' }, { status: 500, headers: PRIVATE_NO_STORE });
+    }
+
+    const rows = (data || []) as unknown as Record<string, unknown>[];
+    return NextResponse.json({ data: rows.map(projectPromotionForAdmin) }, { headers: PRIVATE_NO_STORE });
+  } catch {
+    return NextResponse.json({ error: 'Promotions are temporarily unavailable.' }, { status: 500, headers: PRIVATE_NO_STORE });
+  }
 }
 
 export async function POST(req: NextRequest) {
