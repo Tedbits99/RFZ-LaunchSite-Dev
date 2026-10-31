@@ -2,7 +2,7 @@ name: VOUCHERS-001 disposable campaign acceptance
 
 on:
   pull_request:
-    branches: [codex/rfz-catalog-multigame-completion]
+    branches: [codex/rfz-catalog-multigame-completion, main]
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -16,7 +16,8 @@ jobs:
   vouchers-001-disposable-acceptance:
     if: >-
       github.event.pull_request.head.ref == 'codex/rfz-vouchers-001' &&
-      github.event.pull_request.base.ref == 'codex/rfz-catalog-multigame-completion'
+      (github.event.pull_request.base.ref == 'codex/rfz-catalog-multigame-completion' ||
+       github.event.pull_request.base.ref == 'main')
     name: VOUCHERS PostgreSQL 17, Auth, API and desktop/mobile acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -45,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$HEAD_BRANCH" == codex/rfz-vouchers-001 ]]
-          [[ "$BASE_BRANCH" == codex/rfz-catalog-multigame-completion ]]
+          [[ "$BASE_BRANCH" == codex/rfz-catalog-multigame-completion || "$BASE_BRANCH" == main ]]
           [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
           printf 'VOUCHERS_CANDIDATE_SHA=%s\n' "$EXPECTED_SHA"
