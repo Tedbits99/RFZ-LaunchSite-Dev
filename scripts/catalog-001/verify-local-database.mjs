@@ -63,7 +63,7 @@ try {
   `;
   assert(auditedPricing, 'audited catalog pricing RPC is missing');
   assert(auditedPricing.prosecdef === true, 'audited catalog pricing RPC must remain SECURITY DEFINER');
-  assert(Array.isArray(auditedPricing.proconfig) && auditedPricing.proconfig.includes('search_path=public'), 'audited catalog pricing RPC must use fixed public search_path');
+  assert(Array.isArray(auditedPricing.proconfig) && auditedPricing.proconfig.includes('search_path=pg_catalog, public'), 'audited catalog pricing RPC must use fixed pg_catalog, public search_path');
   assert(auditedPricing.anon_exec === false && auditedPricing.public_exec === false && auditedPricing.authenticated_exec === false && auditedPricing.service_exec === true,
     'audited catalog pricing RPC must be service-role-only');
 

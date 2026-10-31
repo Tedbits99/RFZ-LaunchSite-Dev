@@ -556,6 +556,7 @@ BEGIN
 
   FOR r IN
     SELECT p.oid::regprocedure AS signature,
+           p.proname AS function_name,
            p.prosecdef AS security_definer,
            p.proconfig AS config
     FROM pg_proc p
@@ -572,18 +573,15 @@ BEGIN
     IF NOT r.security_definer THEN
       RAISE EXCEPTION '% is not SECURITY DEFINER', r.signature;
     END IF;
-    IF NOT EXISTS (
-         SELECT 1
-         FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
-         WHERE setting = 'search_path=public'
-       )
-       OR EXISTS (
-         SELECT 1
-         FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
-         WHERE setting LIKE 'search_path=%'
-           AND setting <> 'search_path=public'
-       ) THEN
-      RAISE EXCEPTION '% does not lock search_path to exactly public (proconfig=%)', r.signature, r.config;
+    IF (
+      SELECT array_agg(settings.setting ORDER BY settings.setting)
+      FROM unnest(COALESCE(r.config, ARRAY[]::text[])) AS settings(setting)
+      WHERE settings.setting LIKE 'search_path=%'
+    ) IS DISTINCT FROM ARRAY[
+      CASE WHEN r.function_name = 'admin_update_catalog_pricing_assumptions_audited'
+        THEN 'search_path=pg_catalog, public' ELSE 'search_path=public' END
+    ]::text[] THEN
+      RAISE EXCEPTION '% has an unexpected fixed search_path (proconfig=%)', r.signature, r.config;
     END IF;
     IF pg_get_userbyid((SELECT proowner FROM pg_proc WHERE oid = r.signature::regprocedure)) IN ('anon', 'authenticated') THEN
       RAISE EXCEPTION '% is owned by an untrusted API role', r.signature;
